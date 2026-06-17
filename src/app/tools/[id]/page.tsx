@@ -6,6 +6,8 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { BackLink } from "@/components/ui/PageHeader";
 import { Card, CardBody } from "@/components/ui/Card";
 
+export const dynamic = "force-dynamic";
+
 export default async function ToolDetailPage({
   params,
 }: {

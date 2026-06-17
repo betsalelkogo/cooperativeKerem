@@ -4,6 +4,8 @@ import { PayboxPayoutPanel } from "@/components/admin/PayboxPayoutPanel";
 import { getPayboxSettings, getPotsOverview } from "@/lib/firestore/repository";
 import { formatNIS, splitPayment } from "@/lib/pots";
 
+export const dynamic = "force-dynamic";
+
 export default async function AdminPotsPage() {
   const { tools, devicePots, operationsPot, operationsPercent } = await getPotsOverview();
   const payboxSettings = await getPayboxSettings();

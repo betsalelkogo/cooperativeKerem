@@ -2,6 +2,8 @@ import { ToolCard } from "@/components/tools/ToolCard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { getAllTools } from "@/lib/firestore/repository";
 
+export const dynamic = "force-dynamic";
+
 export default async function ToolsPage() {
   const tools = await getAllTools();
   const available = tools.filter((t) => t.status === "available").length;
