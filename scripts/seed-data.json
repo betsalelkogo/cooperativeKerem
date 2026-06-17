@@ -1,0 +1,87 @@
+{
+  "tools": {
+    "tool-001": {
+      "name": "מסור עגול",
+      "description": "מסור עגול מקצועי לחיתוך עץ",
+      "category": "כלי עבודה חשמליים",
+      "qrCode": "KEREM-TOOL-001",
+      "status": "available",
+      "loanFeeMin": 20,
+      "loanFeeMax": 50,
+      "imageUrl": null,
+      "safetyRules": [
+        { "id": "sr-1", "text": "חובה לעטות משקפי מגן בכל עת" },
+        { "id": "sr-2", "text": "אין להפעיל את המכשיר ליד מקור מים" },
+        { "id": "sr-3", "text": "קראתי את הוראות השימוש" }
+      ]
+    },
+    "tool-002": {
+      "name": "מכונת שטיפה בלחץ",
+      "description": "מכונת שטיפה בלחץ לניקוי חוץ",
+      "category": "ניקוי",
+      "qrCode": "KEREM-TOOL-002",
+      "status": "available",
+      "loanFeeMin": 30,
+      "loanFeeMax": 50,
+      "imageUrl": null,
+      "safetyRules": [
+        { "id": "sr-4", "text": "אין לכוון את המכשיר לעבר אנשים או בעלי חיים" },
+        { "id": "sr-5", "text": "יש לעטות נעליים מונעות החלקה" },
+        { "id": "sr-6", "text": "קראתי את הוראות השימוש" }
+      ]
+    },
+    "tool-003": {
+      "name": "סולם (3 מ')",
+      "description": "סולם אלומיניום טלסקופי",
+      "category": "גישה",
+      "qrCode": "KEREM-TOOL-003",
+      "status": "available",
+      "loanFeeMin": 20,
+      "loanFeeMax": 30,
+      "imageUrl": null,
+      "safetyRules": [
+        { "id": "sr-7", "text": "יש לוודא שהסולם על קרקע יציבה ומישורית" },
+        { "id": "sr-8", "text": "אין לחרוג ממשקל העומס המרבי" },
+        { "id": "sr-9", "text": "קראתי את הוראות השימוש" }
+      ]
+    }
+  },
+  "device_pots": {
+    "tool-001": {
+      "toolId": "tool-001",
+      "balance": 0,
+      "totalEarned": 0,
+      "totalSpent": 0
+    },
+    "tool-002": {
+      "toolId": "tool-002",
+      "balance": 0,
+      "totalEarned": 0,
+      "totalSpent": 0
+    },
+    "tool-003": {
+      "toolId": "tool-003",
+      "balance": 0,
+      "totalEarned": 0,
+      "totalSpent": 0
+    }
+  },
+  "operations_pot": {
+    "main": {
+      "balance": 0,
+      "totalEarned": 0,
+      "totalSpent": 0
+    }
+  },
+  "settings": {
+    "config": {
+      "operationsPotPercent": 18
+    },
+    "paybox": {
+      "enabled": true,
+      "operationsGroupUrl": "https://links.payboxapp.com/jKK0xwoG23b",
+      "deviceGroupUrl": "https://links.payboxapp.com/jKK0xwoG23b",
+      "groupName": "קאופורטיב טסט"
+    }
+  }
+}

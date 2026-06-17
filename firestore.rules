@@ -1,0 +1,67 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /members/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    match /tools/{toolId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    match /reservations/{reservationId} {
+      allow read: if request.auth != null
+        && resource.data.memberId == request.auth.uid;
+      allow create: if request.auth != null
+        && request.resource.data.memberId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /loans/{loanId} {
+      allow read: if request.auth != null
+        && resource.data.memberId == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /transactions/{txnId} {
+      allow read: if false;
+      allow write: if false;
+    }
+
+    match /device_pots/{potId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    match /operations_pot/{docId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    match /maintenance_tickets/{ticketId} {
+      allow read: if request.auth != null
+        && resource.data.memberId == request.auth.uid;
+      allow create: if request.auth != null
+        && request.resource.data.memberId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /settings/{docId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    match /payments/{paymentId} {
+      allow read: if request.auth != null
+        && resource.data.memberId == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /paybox_payouts/{payoutId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+  }
+}
