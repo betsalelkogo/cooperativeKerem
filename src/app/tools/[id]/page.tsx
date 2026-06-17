@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { getToolById } from "@/lib/firestore/repository";
+import { getToolWithAvailability } from "@/lib/firestore/repository";
 import { formatNIS } from "@/lib/pots";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { BackLink } from "@/components/ui/PageHeader";
@@ -14,7 +14,7 @@ export default async function ToolDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const tool = await getToolById(id);
+  const tool = await getToolWithAvailability(id);
   if (!tool) notFound();
 
   return (
@@ -33,6 +33,16 @@ export default async function ToolDetailPage({
             </div>
             <StatusBadge status={tool.status} />
           </div>
+          {tool.availabilityLabel && tool.status !== "available" && (
+            <p className="mb-4 rounded-xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 ring-1 ring-amber-200">
+              {tool.availabilityLabel}
+              {tool.availableFrom && (
+                <span className="mr-2 text-amber-700">
+                  ({new Date(`${tool.availableFrom}T00:00:00`).toLocaleDateString("he-IL")})
+                </span>
+              )}
+            </p>
+          )}
           <p className="mb-6 leading-relaxed text-[var(--muted)]">{tool.description}</p>
 
           <div className="mb-6 rounded-xl bg-kerem-50 p-5 ring-1 ring-kerem-200">

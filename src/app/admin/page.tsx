@@ -7,7 +7,8 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Alert } from "@/components/ui/Alert";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { loanStatusLabels } from "@/lib/labels";
+import { loanStatusLabels, reservationStatusLabels } from "@/lib/labels";
+import { formatDateHe } from "@/lib/dates";
 import type { AdminDashboardData } from "@/lib/types";
 
 function StatCard({ label, value, accent }: { label: string; value: number; accent?: string }) {
@@ -21,14 +22,12 @@ function StatCard({ label, value, accent }: { label: string; value: number; acce
   );
 }
 
-function formatDate(iso?: string) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("he-IL", {
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+function formatDateTime(iso?: string) {
+  return formatDateHe(iso, true);
+}
+
+function formatDay(date?: string) {
+  return formatDateHe(date, false);
 }
 
 export default function AdminDashboardPage() {
@@ -79,7 +78,7 @@ export default function AdminDashboardPage() {
         <StatCard label="סה״כ כלים" value={data.stats.totalTools} />
         <StatCard label="זמינים" value={data.stats.available} accent="text-emerald-700" />
         <StatCard label="מושאלים" value={data.stats.onLoan} accent="text-amber-700" />
-        <StatCard label="שמורים" value={data.stats.reserved} accent="text-sky-700" />
+        <StatCard label="שמירות פעילות" value={data.stats.activeReservations} accent="text-sky-700" />
         <StatCard label="בתחזוקה" value={data.stats.maintenance} accent="text-orange-700" />
         <StatCard label="השאלות פעילות" value={data.stats.activeLoans} accent="text-violet-700" />
       </div>
@@ -93,14 +92,17 @@ export default function AdminDashboardPage() {
                 <th className="px-4 py-3 font-semibold text-stone-700">כלי</th>
                 <th className="px-4 py-3 font-semibold text-stone-700">קטגוריה</th>
                 <th className="px-4 py-3 font-semibold text-stone-700">סטטוס</th>
+                <th className="px-4 py-3 font-semibold text-stone-700">סוג</th>
                 <th className="px-4 py-3 font-semibold text-stone-700">משתמש</th>
-                <th className="px-4 py-3 font-semibold text-stone-700">מאז</th>
+                <th className="px-4 py-3 font-semibold text-stone-700">איסוף מתוכנן</th>
+                <th className="px-4 py-3 font-semibold text-stone-700">לקיחה בפועל</th>
+                <th className="px-4 py-3 font-semibold text-stone-700">החזרה מתוכננת</th>
               </tr>
             </thead>
             <tbody>
               {data.tools.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-[var(--muted)]">
+                  <td colSpan={8} className="px-4 py-8 text-center text-[var(--muted)]">
                     אין כלים במערכת
                   </td>
                 </tr>
@@ -111,6 +113,19 @@ export default function AdminDashboardPage() {
                     <td className="px-4 py-3 text-[var(--muted)]">{tool.category}</td>
                     <td className="px-4 py-3">
                       <StatusBadge status={tool.status} />
+                    </td>
+                    <td className="px-4 py-3">
+                      {tool.holderKind === "reservation" ? (
+                        <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-800 ring-1 ring-inset ring-amber-200">
+                          שמירה
+                        </span>
+                      ) : tool.holderKind === "loan" ? (
+                        <span className="rounded-full bg-sky-100 px-2.5 py-1 text-xs font-bold text-sky-800 ring-1 ring-inset ring-sky-200">
+                          השאלה
+                        </span>
+                      ) : (
+                        <span className="text-[var(--muted)]">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       {tool.borrowerName ? (
@@ -125,7 +140,13 @@ export default function AdminDashboardPage() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-[var(--muted)]">
-                      {formatDate(tool.sinceAt)}
+                      {formatDay(tool.pickupDate)}
+                    </td>
+                    <td className="px-4 py-3 text-[var(--muted)]">
+                      {formatDateTime(tool.checkedOutAt)}
+                    </td>
+                    <td className="px-4 py-3 text-[var(--muted)]">
+                      {formatDay(tool.returnDate)}
                     </td>
                   </tr>
                 ))
@@ -133,6 +154,41 @@ export default function AdminDashboardPage() {
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section className="mb-10">
+        <h2 className="mb-4 text-lg font-bold text-stone-900">שמירות פעילות</h2>
+        {data.activeReservations.length === 0 ? (
+          <Card>
+            <CardBody className="py-8 text-center text-[var(--muted)]">
+              אין שמירות פעילות כרגע
+            </CardBody>
+          </Card>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {data.activeReservations.map((reservation) => (
+              <Card key={reservation.id}>
+                <CardBody className="py-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-bold text-stone-900">{reservation.toolName}</p>
+                      <p className="mt-1 text-sm text-stone-700">{reservation.memberName}</p>
+                      <p className="text-xs text-[var(--muted)]">{reservation.memberEmail}</p>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-800 ring-1 ring-inset ring-amber-200">
+                      {reservationStatusLabels[reservation.status]}
+                    </span>
+                  </div>
+                  <p className="mt-3 space-y-1 text-xs text-[var(--muted)]">
+                    <span className="block">נשמר: {formatDateTime(reservation.createdAt)}</span>
+                    <span className="block">איסוף מתוכנן: {formatDay(reservation.pickupDate)}</span>
+                    <span className="block">החזרה מתוכננת: {formatDay(reservation.returnDate)}</span>
+                  </p>
+                </CardBody>
+              </Card>
+            ))}
+          </div>
+        )}
       </section>
 
       <section>
@@ -158,8 +214,9 @@ export default function AdminDashboardPage() {
                       {loanStatusLabels[loan.status]}
                     </span>
                   </div>
-                  <p className="mt-3 text-xs text-[var(--muted)]">
-                    לקיחה: {formatDate(loan.checkedOutAt)}
+                  <p className="mt-3 space-y-1 text-xs text-[var(--muted)]">
+                    <span className="block">לקיחה בפועל: {formatDateTime(loan.checkedOutAt)}</span>
+                    <span className="block">החזרה מתוכננת: {formatDay(loan.dueReturnDate)}</span>
                   </p>
                 </CardBody>
               </Card>

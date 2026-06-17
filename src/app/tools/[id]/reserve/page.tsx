@@ -17,7 +17,8 @@ export default function ReserveToolPage() {
   const { getIdToken } = useAuth();
   const [tool, setTool] = useState<Tool | null>(null);
   const [loadError, setLoadError] = useState("");
-  const [date, setDate] = useState("");
+  const [pickupDate, setPickupDate] = useState("");
+  const [returnDate, setReturnDate] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -43,7 +44,7 @@ export default function ReserveToolPage() {
         method: "POST",
         token,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ toolId: tool.id, date }),
+        body: JSON.stringify({ toolId: tool.id, pickupDate, returnDate }),
       });
 
       if (!res.ok) {
@@ -80,23 +81,46 @@ export default function ReserveToolPage() {
         <CardBody className="py-6">
           <h1 className="text-2xl font-bold text-stone-900">שריון {tool.name}</h1>
           <p className="mt-2 text-sm text-[var(--muted)]">
-            בחרו תאריך איסוף מהקרוואן הקהילתי.
+            בחרו מתי תאספו את הכלי ומתי תחזירו אותו.
           </p>
 
           <form onSubmit={handleSubmit} className="mt-6 space-y-5">
             <div>
-              <label htmlFor="date" className="mb-2 block text-sm font-semibold text-stone-800">
-                📅 תאריך איסוף
+              <label htmlFor="pickupDate" className="mb-2 block text-sm font-semibold text-stone-800">
+                📅 תאריך איסוף מתוכנן
               </label>
               <input
-                id="date"
+                id="pickupDate"
                 type="date"
                 min={today}
                 required
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
+                value={pickupDate}
+                onChange={(e) => {
+                  setPickupDate(e.target.value);
+                  if (returnDate && returnDate < e.target.value) {
+                    setReturnDate(e.target.value);
+                  }
+                }}
                 className="w-full rounded-xl border border-[var(--border)] bg-warm-50/50 px-4 py-3 text-sm transition focus:border-kerem-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-kerem-200"
               />
+            </div>
+
+            <div>
+              <label htmlFor="returnDate" className="mb-2 block text-sm font-semibold text-stone-800">
+                🔁 תאריך החזרה מתוכנן
+              </label>
+              <input
+                id="returnDate"
+                type="date"
+                min={pickupDate || today}
+                required
+                value={returnDate}
+                onChange={(e) => setReturnDate(e.target.value)}
+                className="w-full rounded-xl border border-[var(--border)] bg-warm-50/50 px-4 py-3 text-sm transition focus:border-kerem-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-kerem-200"
+              />
+              <p className="mt-2 text-xs text-[var(--muted)]">
+                הכלי יוצג לאחרים כלא זמין עד תאריך זה.
+              </p>
             </div>
 
             <div className="rounded-xl bg-kerem-50 p-4 ring-1 ring-kerem-200">
@@ -108,7 +132,12 @@ export default function ReserveToolPage() {
 
             {error && <Alert variant="error">{error}</Alert>}
 
-            <Button type="submit" disabled={loading || !date} className="w-full" size="lg">
+            <Button
+              type="submit"
+              disabled={loading || !pickupDate || !returnDate}
+              className="w-full"
+              size="lg"
+            >
               {loading ? "שומר…" : "אישור שריון"}
             </Button>
           </form>

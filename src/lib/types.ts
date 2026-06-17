@@ -18,6 +18,12 @@ export interface Tool {
   imageUrl?: string;
 }
 
+/** Tool plus catalog availability hint for list/detail views. */
+export interface ToolWithAvailability extends Tool {
+  availableFrom?: string;
+  availabilityLabel?: string;
+}
+
 export interface DevicePot {
   toolId: string;
   balance: number;
@@ -44,9 +50,13 @@ export interface Reservation {
   id: string;
   memberId: string;
   toolId: string;
-  date: string;
+  /** Planned pickup date (YYYY-MM-DD). */
+  pickupDate: string;
+  /** Expected return date (YYYY-MM-DD). */
+  returnDate: string;
   status: ReservationStatus;
   feeAmount: number;
+  /** When the reservation was created. */
   createdAt: string;
 }
 
@@ -61,7 +71,11 @@ export interface Loan {
   safetyAcknowledged: boolean;
   checkoutPhotoUrl?: string;
   returnPhotoUrl?: string;
+  /** When the tool was physically picked up. */
   checkedOutAt?: string;
+  /** Expected return date from reservation (YYYY-MM-DD). */
+  dueReturnDate?: string;
+  /** When the tool was actually returned. */
   returnedAt?: string;
 }
 
@@ -94,6 +108,20 @@ export interface AdminDashboardLoan {
   memberEmail: string;
   status: LoanStatus;
   checkedOutAt?: string;
+  dueReturnDate?: string;
+}
+
+export interface AdminDashboardReservation {
+  id: string;
+  toolId: string;
+  toolName: string;
+  memberId: string;
+  memberName: string;
+  memberEmail: string;
+  status: ReservationStatus;
+  pickupDate: string;
+  returnDate: string;
+  createdAt: string;
 }
 
 export interface AdminDashboardToolRow {
@@ -103,7 +131,11 @@ export interface AdminDashboardToolRow {
   status: ToolStatus;
   borrowerName?: string;
   borrowerEmail?: string;
-  sinceAt?: string;
+  holderKind?: "reservation" | "loan";
+  pickupDate?: string;
+  returnDate?: string;
+  checkedOutAt?: string;
+  reservedAt?: string;
 }
 
 export interface AdminDashboardData {
@@ -115,9 +147,11 @@ export interface AdminDashboardData {
     maintenance: number;
     disabled: number;
     activeLoans: number;
+    activeReservations: number;
   };
   tools: AdminDashboardToolRow[];
   activeLoans: AdminDashboardLoan[];
+  activeReservations: AdminDashboardReservation[];
 }
 
 export interface Transaction {

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { Tool } from "@/lib/types";
+import type { ToolWithAvailability } from "@/lib/types";
 import { formatNIS } from "@/lib/pots";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Card, CardBody, CardFooter } from "@/components/ui/Card";
@@ -13,7 +13,7 @@ const categoryMeta: Record<string, { icon: string; gradient: string }> = {
 
 const defaultMeta = { icon: "🔧", gradient: "from-kerem-400 to-kerem-600" };
 
-export function ToolCard({ tool }: { tool: Tool }) {
+export function ToolCard({ tool }: { tool: ToolWithAvailability }) {
   const meta = categoryMeta[tool.category] ?? defaultMeta;
 
   return (
@@ -56,7 +56,14 @@ export function ToolCard({ tool }: { tool: Tool }) {
             שריון
           </Link>
         ) : (
-          <span className="text-sm text-[var(--muted)]">לא זמין</span>
+          <div className="text-left">
+            <span className="block text-sm text-[var(--muted)]">לא זמין</span>
+            {tool.availabilityLabel && (
+              <span className="mt-0.5 block text-xs font-semibold text-amber-700">
+                {tool.availabilityLabel}
+              </span>
+            )}
+          </div>
         )}
       </CardFooter>
     </Card>

@@ -1,4 +1,4 @@
-import type { LoanStatus, ToolStatus } from "./types";
+import type { LoanStatus, ReservationStatus, ToolStatus } from "./types";
 
 export const toolStatusLabels: Record<ToolStatus, string> = {
   available: "זמין",
@@ -14,4 +14,11 @@ export const loanStatusLabels: Record<LoanStatus, string> = {
   return_pending: "ממתין להחזרה",
   returned: "הוחזר",
   disputed: "במחלוקת",
+};
+
+export const reservationStatusLabels: Record<ReservationStatus, string> = {
+  pending: "ממתין",
+  confirmed: "שמור — ממתין ללקיחה",
+  cancelled: "בוטל",
+  completed: "הושלם",
 };
