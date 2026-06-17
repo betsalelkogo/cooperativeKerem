@@ -9,6 +9,9 @@ import {
 export async function POST(request: Request) {
   try {
     const memberId = await getUidFromRequest(request);
+    if (!memberId) {
+      return NextResponse.json({ error: "נדרשת התחברות" }, { status: 401 });
+    }
 
     const formData = await request.formData();
     const reservationId = formData.get("reservationId") as string | null;
@@ -26,7 +29,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "השריון לא נמצא" }, { status: 404 });
     }
 
-    if (memberId && reservation.memberId !== memberId) {
+    if (reservation.memberId !== memberId) {
       return NextResponse.json({ error: "אין הרשאה" }, { status: 403 });
     }
 
@@ -43,10 +46,21 @@ export async function POST(request: Request) {
     return NextResponse.json(loan, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "שגיאת שרת";
-    const status = message.includes("Payment required") ? 402 : 500;
-    return NextResponse.json(
-      { error: status === 402 ? "נדרש תשלום לפני לקיחת הכלי" : "שגיאת שרת" },
-      { status }
-    );
+
+    if (message.includes("Payment required")) {
+      return NextResponse.json(
+        { error: "נדרש תשלום לפני לקיחת הכלי — אשרו תשלום PayBox קודם" },
+        { status: 402 }
+      );
+    }
+    if (message.includes("Firebase Admin not configured")) {
+      return NextResponse.json(
+        { error: "שרת לא מוגדר — חסרים Firebase Admin credentials" },
+        { status: 503 }
+      );
+    }
+
+    console.error("[api/loans/checkout]", message);
+    return NextResponse.json({ error: "שגיאת שרת" }, { status: 500 });
   }
 }

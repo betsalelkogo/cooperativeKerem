@@ -534,14 +534,25 @@ export async function createLoanFromCheckout(params: {
   batch.update(db.collection("tools").doc(params.reservation.toolId), {
     status: "on_loan",
   });
-  batch.update(db.collection("device_pots").doc(params.reservation.toolId), {
-    balance: FieldValue.increment(split.deviceAmount),
-    totalEarned: FieldValue.increment(split.deviceAmount),
-  });
-  batch.update(db.collection("operations_pot").doc("main"), {
-    balance: FieldValue.increment(split.operationsAmount),
-    totalEarned: FieldValue.increment(split.operationsAmount),
-  });
+  batch.set(
+    db.collection("device_pots").doc(params.reservation.toolId),
+    {
+      toolId: params.reservation.toolId,
+      balance: FieldValue.increment(split.deviceAmount),
+      totalEarned: FieldValue.increment(split.deviceAmount),
+      totalSpent: 0,
+    },
+    { merge: true }
+  );
+  batch.set(
+    db.collection("operations_pot").doc("main"),
+    {
+      balance: FieldValue.increment(split.operationsAmount),
+      totalEarned: FieldValue.increment(split.operationsAmount),
+      totalSpent: 0,
+    },
+    { merge: true }
+  );
 
   await batch.commit();
   return loan;
