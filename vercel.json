@@ -1,0 +1,4 @@
+{
+  "installCommand": "npm ci --registry=https://registry.npmjs.org/",
+  "framework": "nextjs"
+}

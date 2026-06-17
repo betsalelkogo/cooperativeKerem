@@ -2,6 +2,10 @@
   "name": "kerem-project",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "npm@10.9.2",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -10,8 +14,7 @@
     "seed": "node scripts/seed-firestore.mjs"
   },
   "dependencies": {
-    "@google-cloud/firestore": "^8.6.0",
-    "firebase": "^10.13.0", 
+    "firebase": "^11.0.0",
     "firebase-admin": "^13.10.0",
     "next": "^15.3.3",
     "react": "^19.1.0",
