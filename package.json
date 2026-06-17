@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@google-cloud/firestore": "^8.6.0",
-    "firebase": "^12.13.0",
+    "firebase": "^10.13.0", 
     "firebase-admin": "^13.10.0",
     "next": "^15.3.3",
     "react": "^19.1.0",
