@@ -53,6 +53,7 @@ export const mockMember: Member = {
   name: "חבר לדוגמה",
   email: "member@example.com",
   hasPaymentMethod: true,
+  role: "MEMBER",
 };
 
 export const mockReservations: Reservation[] = [];

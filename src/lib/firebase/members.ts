@@ -2,6 +2,7 @@ import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import type { User } from "firebase/auth";
 import { getFirebaseDb } from "./client";
 import type { Member } from "@/lib/types";
+import { roleFromMemberData, DEFAULT_MEMBER_ROLE } from "@/lib/admin";
 
 export async function upsertMemberFromUser(user: User): Promise<Member> {
   const db = getFirebaseDb();
@@ -11,6 +12,7 @@ export async function upsertMemberFromUser(user: User): Promise<Member> {
       name: user.displayName ?? user.email ?? "חבר",
       email: user.email ?? "",
       hasPaymentMethod: false,
+      role: DEFAULT_MEMBER_ROLE,
     };
   }
 
@@ -25,16 +27,21 @@ export async function upsertMemberFromUser(user: User): Promise<Member> {
       ? (existing.data().hasPaymentMethod as boolean)
       : false,
     updatedAt: serverTimestamp(),
-    ...(existing.exists() ? {} : { createdAt: serverTimestamp() }),
+    ...(existing.exists() ? {} : { createdAt: serverTimestamp(), role: DEFAULT_MEMBER_ROLE }),
   };
 
   await setDoc(ref, memberData, { merge: true });
+
+  const role = existing.exists()
+    ? roleFromMemberData(existing.data())
+    : DEFAULT_MEMBER_ROLE;
 
   return {
     id: user.uid,
     name: memberData.name,
     email: memberData.email,
     hasPaymentMethod: memberData.hasPaymentMethod,
+    role,
   };
 }
 
@@ -51,5 +58,6 @@ export async function getMember(uid: string): Promise<Member | null> {
     name: data.name as string,
     email: data.email as string,
     hasPaymentMethod: (data.hasPaymentMethod as boolean) ?? false,
+    role: roleFromMemberData(data),
   };
 }

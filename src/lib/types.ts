@@ -75,11 +75,49 @@ export interface MaintenanceTicket {
   createdAt: string;
 }
 
+export type MemberRole = "ADMIN" | "MEMBER";
+
 export interface Member {
   id: string;
   name: string;
   email: string;
   hasPaymentMethod: boolean;
+  role: MemberRole;
+}
+
+export interface AdminDashboardLoan {
+  id: string;
+  toolId: string;
+  toolName: string;
+  memberId: string;
+  memberName: string;
+  memberEmail: string;
+  status: LoanStatus;
+  checkedOutAt?: string;
+}
+
+export interface AdminDashboardToolRow {
+  id: string;
+  name: string;
+  category: string;
+  status: ToolStatus;
+  borrowerName?: string;
+  borrowerEmail?: string;
+  checkedOutAt?: string;
+}
+
+export interface AdminDashboardData {
+  stats: {
+    totalTools: number;
+    available: number;
+    onLoan: number;
+    reserved: number;
+    maintenance: number;
+    disabled: number;
+    activeLoans: number;
+  };
+  tools: AdminDashboardToolRow[];
+  activeLoans: AdminDashboardLoan[];
 }
 
 export interface Transaction {

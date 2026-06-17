@@ -1,16 +1,15 @@
 import { NextResponse } from "next/server";
-import { getUidFromRequest } from "@/lib/firebase/admin";
+import { requireAdmin } from "@/lib/firebase/admin-auth";
 import { completePayboxPayout } from "@/lib/firestore/repository";
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = await requireAdmin(request);
+  if (auth instanceof NextResponse) return auth;
+
   try {
-    const memberId = await getUidFromRequest(_request);
-    if (!memberId) {
-      return NextResponse.json({ error: "נדרשת התחברות" }, { status: 401 });
-    }
 
     const { id } = await params;
     const payout = await completePayboxPayout(id);

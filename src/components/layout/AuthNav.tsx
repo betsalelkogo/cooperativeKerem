@@ -3,11 +3,16 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthProvider";
+import { isAdminMember } from "@/lib/admin";
 import { cn } from "@/lib/cn";
 
-const navItems = [
+const baseNavItems = [
   { href: "/tools", label: "כלים" },
   { href: "/my-loans", label: "ההשאלות שלי" },
+];
+
+const adminNavItems = [
+  { href: "/admin", label: "ניהול" },
   { href: "/admin/pots", label: "קופות" },
 ];
 
@@ -15,6 +20,9 @@ export function AuthNav() {
   const { user, member, loading, configured, signOut } = useAuth();
   const pathname = usePathname();
   const isLoginPage = pathname.startsWith("/login");
+  const navItems = member && isAdminMember(member)
+    ? [...baseNavItems, ...adminNavItems]
+    : baseNavItems;
 
   if (isLoginPage) {
     return (

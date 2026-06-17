@@ -19,6 +19,8 @@ import {
 } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
+import { authFetch } from "@/lib/api-client";
+import { DEFAULT_MEMBER_ROLE } from "@/lib/admin";
 import { upsertMemberFromUser } from "@/lib/firebase/members";
 import type { Member } from "@/lib/types";
 
@@ -57,12 +59,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             try {
               const memberRecord = await upsertMemberFromUser(firebaseUser);
               setMember(memberRecord);
+
+              const token = await firebaseUser.getIdToken();
+              const res = await authFetch("/api/me", { token });
+              if (res.ok) {
+                const { member: synced } = await res.json();
+                setMember(synced);
+              }
             } catch {
               setMember({
                 id: firebaseUser.uid,
                 name: firebaseUser.displayName ?? "חבר",
                 email: firebaseUser.email ?? "",
                 hasPaymentMethod: false,
+                role: DEFAULT_MEMBER_ROLE,
               });
             }
           } else {

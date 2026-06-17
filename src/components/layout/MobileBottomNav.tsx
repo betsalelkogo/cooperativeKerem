@@ -2,23 +2,28 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useAuth } from "@/contexts/AuthProvider";
+import { isAdminMember } from "@/lib/admin";
 import { cn } from "@/lib/cn";
 
-const tabs = [
+const baseTabs = [
   { href: "/tools", label: "כלים", icon: "🔧", match: (p: string) => p.startsWith("/tools") },
   { href: "/my-loans", label: "השאלות", icon: "📋", match: (p: string) => p.startsWith("/my-loans") },
-  {
-    href: "/admin/pots",
-    label: "קופות",
-    icon: "💰",
-    match: (p: string) => p.startsWith("/admin"),
-  },
 ];
+
+const adminTab = {
+  href: "/admin",
+  label: "ניהול",
+  icon: "⚙️",
+  match: (p: string) => p.startsWith("/admin"),
+};
 
 const HIDDEN_PREFIXES = ["/login", "/checkout", "/return"];
 
 export function MobileBottomNav() {
+  const { member } = useAuth();
   const pathname = usePathname();
+  const tabs = member && isAdminMember(member) ? [...baseTabs, adminTab] : baseTabs;
 
   const hidden = HIDDEN_PREFIXES.some((p) => pathname.startsWith(p));
   if (hidden) return null;

@@ -1,8 +1,10 @@
 import { getFirestore, FieldValue, type Firestore, type DocumentData } from "firebase-admin/firestore";
 import { initializeApp, getApps, cert } from "firebase-admin/app";
 import type {
+  AdminDashboardData,
   Loan,
   MaintenanceTicket,
+  Member,
   MemberPayment,
   PayboxPayout,
   PayboxSettings,
@@ -14,6 +16,7 @@ import type {
 } from "@/lib/types";
 import { splitPayment, getOperationsPercent } from "@/lib/pots";
 import { getDefaultPayboxSettings } from "@/lib/paybox/config";
+import { roleFromMemberData, DEFAULT_MEMBER_ROLE } from "@/lib/admin";
 
 function getAdminDb(): Firestore {
   if (!getApps().length) {
@@ -128,6 +131,141 @@ export async function getLoansByMember(memberId: string): Promise<Loan[]> {
     .where("memberId", "==", memberId)
     .get();
   return snap.docs.map((d) => docWithId<Loan>(d.id, d.data())!).filter(Boolean);
+}
+
+export async function getAllLoans(): Promise<Loan[]> {
+  const snap = await getAdminDb().collection("loans").get();
+  return snap.docs
+    .map((d) => {
+      const loan = docWithId<Loan>(d.id, d.data());
+      if (loan && d.data()?.checkedOutAt) {
+        loan.checkedOutAt = tsToIso(d.data()!.checkedOutAt);
+      }
+      if (loan && d.data()?.returnedAt) {
+        loan.returnedAt = tsToIso(d.data()!.returnedAt);
+      }
+      return loan;
+    })
+    .filter(Boolean) as Loan[];
+}
+
+// ─── Members ───────────────────────────────────────────────────────────────
+
+function memberFromDoc(id: string, data: DocumentData): Member {
+  return {
+    id,
+    name: (data.name as string) ?? "חבר",
+    email: (data.email as string) ?? "",
+    hasPaymentMethod: (data.hasPaymentMethod as boolean) ?? false,
+    role: roleFromMemberData(data),
+  };
+}
+
+export async function getMemberById(uid: string): Promise<Member | null> {
+  const snap = await getAdminDb().collection("members").doc(uid).get();
+  if (!snap.exists) return null;
+  return memberFromDoc(snap.id, snap.data()!);
+}
+
+export async function syncMemberFromAuth(params: {
+  uid: string;
+  name: string;
+  email: string;
+  photoURL?: string | null;
+}): Promise<Member> {
+  const ref = getAdminDb().collection("members").doc(params.uid);
+  const existing = await ref.get();
+  const existingData = existing.exists ? existing.data() : undefined;
+  const role = existing.exists
+    ? roleFromMemberData(existingData ?? {})
+    : DEFAULT_MEMBER_ROLE;
+
+  await ref.set(
+    {
+      name: params.name,
+      email: params.email,
+      photoURL: params.photoURL ?? null,
+      hasPaymentMethod: existing.exists
+        ? ((existingData?.hasPaymentMethod as boolean) ?? false)
+        : false,
+      role,
+      updatedAt: FieldValue.serverTimestamp(),
+      ...(existing.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
+    },
+    { merge: true }
+  );
+
+  return {
+    id: params.uid,
+    name: params.name,
+    email: params.email,
+    hasPaymentMethod: existing.exists
+      ? ((existingData?.hasPaymentMethod as boolean) ?? false)
+      : false,
+    role,
+  };
+}
+
+export async function getAdminDashboard(): Promise<AdminDashboardData> {
+  const [tools, loans] = await Promise.all([getAllTools(), getAllLoans()]);
+
+  const activeLoans = loans.filter(
+    (l) => l.status === "active" || l.status === "checkout_pending" || l.status === "return_pending"
+  );
+
+  const memberIds = [...new Set(activeLoans.map((l) => l.memberId))];
+  const members = await Promise.all(memberIds.map((id) => getMemberById(id)));
+  const memberMap = new Map(
+    members.filter(Boolean).map((m) => [m!.id, m!])
+  );
+
+  const loanByTool = new Map<string, (typeof activeLoans)[0]>();
+  for (const loan of activeLoans) {
+    if (loan.status === "active") loanByTool.set(loan.toolId, loan);
+  }
+
+  const toolRows = tools.map((tool) => {
+    const loan = loanByTool.get(tool.id);
+    const member = loan ? memberMap.get(loan.memberId) : undefined;
+    return {
+      id: tool.id,
+      name: tool.name,
+      category: tool.category,
+      status: tool.status,
+      borrowerName: member?.name,
+      borrowerEmail: member?.email,
+      checkedOutAt: loan?.checkedOutAt,
+    };
+  });
+
+  const toolMap = new Map(tools.map((t) => [t.id, t]));
+
+  return {
+    stats: {
+      totalTools: tools.length,
+      available: tools.filter((t) => t.status === "available").length,
+      onLoan: tools.filter((t) => t.status === "on_loan").length,
+      reserved: tools.filter((t) => t.status === "reserved").length,
+      maintenance: tools.filter((t) => t.status === "maintenance").length,
+      disabled: tools.filter((t) => t.status === "disabled").length,
+      activeLoans: activeLoans.length,
+    },
+    tools: toolRows,
+    activeLoans: activeLoans.map((loan) => {
+      const member = memberMap.get(loan.memberId);
+      const tool = toolMap.get(loan.toolId);
+      return {
+        id: loan.id,
+        toolId: loan.toolId,
+        toolName: tool?.name ?? loan.toolId,
+        memberId: loan.memberId,
+        memberName: member?.name ?? "לא ידוע",
+        memberEmail: member?.email ?? "",
+        status: loan.status,
+        checkedOutAt: loan.checkedOutAt,
+      };
+    }),
+  };
 }
 
 export async function createLoanFromCheckout(params: {

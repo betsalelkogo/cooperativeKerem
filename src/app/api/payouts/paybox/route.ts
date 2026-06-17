@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getUidFromRequest } from "@/lib/firebase/admin";
+import { requireAdmin } from "@/lib/firebase/admin-auth";
 import {
   completePayboxPayout,
   createPayboxPayout,
@@ -8,7 +8,10 @@ import {
 } from "@/lib/firestore/repository";
 import { resolvePayboxGroupUrl } from "@/lib/paybox/config";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = await requireAdmin(request);
+  if (auth instanceof NextResponse) return auth;
+
   try {
     const payouts = await getPayboxPayouts();
     return NextResponse.json(payouts);
@@ -18,11 +21,11 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const auth = await requireAdmin(request);
+  if (auth instanceof NextResponse) return auth;
+
   try {
-    const memberId = await getUidFromRequest(request);
-    if (!memberId) {
-      return NextResponse.json({ error: "נדרשת התחברות" }, { status: 401 });
-    }
+    const memberId = auth.uid;
 
     const body = await request.json();
     const { potTarget, toolId, amount, note } = body as {
