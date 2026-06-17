@@ -14,15 +14,42 @@ import type {
   Transaction,
   DevicePot,
   OperationsPot,
+  Gemach,
+  ToolKindWithAvailability,
+  SafetyRule,
 } from "@/lib/types";
+import {
+  resolveKindId,
+  groupToolsByKind,
+  resolveKindUnits,
+  pickAvailableUnit,
+  buildToolKindWithAvailability,
+} from "@/lib/tool-kinds";
+import {
+  PLATFORM_GEMACH_ID,
+  normalizeGemachId,
+  formatToolPriceLabel,
+  isPartnerGemach,
+  resolveReservationFee,
+} from "@/lib/gemach";
 import { splitPayment, getOperationsPercent } from "@/lib/pots";
 import { getDefaultPayboxSettings } from "@/lib/paybox/config";
-import { roleFromMemberData, DEFAULT_MEMBER_ROLE } from "@/lib/admin";
+import {
+  roleFromMemberData,
+  DEFAULT_MEMBER_ROLE,
+  gemachAdminIdsFromData,
+} from "@/lib/admin";
 import {
   formatAvailableFromLabel,
   reservationPickupDate,
   reservationReturnDate,
 } from "@/lib/dates";
+import {
+  kindIdForTool,
+  qrCodeForUnit,
+  resolveToolFees,
+  DEFAULT_SAFETY_RULES,
+} from "@/lib/tools-admin";
 
 function getAdminDb(): Firestore {
   if (!getApps().length) {
@@ -152,37 +179,261 @@ function availabilityForTool(
   return { availableFrom, availabilityLabel };
 }
 
+function toolFromDoc(id: string, data: DocumentData): Tool {
+  const base = docWithId<Omit<Tool, "gemachId" | "kindId"> & { gemachId?: string; kindId?: string; unitLabel?: string }>(id, data)!;
+  return {
+    ...base,
+    gemachId: normalizeGemachId(data.gemachId),
+    kindId: resolveKindId(data, id),
+    unitLabel: typeof data.unitLabel === "string" ? data.unitLabel : undefined,
+  };
+}
+
+function gemachFromDoc(id: string, data: DocumentData): Gemach {
+  return {
+    id,
+    name: (data.name as string) ?? id,
+    slug: (data.slug as string) ?? id,
+    description: (data.description as string) || undefined,
+    pricingMode: (data.pricingMode as Gemach["pricingMode"]) ?? "loan_fee",
+    maintenanceFee: (data.maintenanceFee as number) || undefined,
+    isPlatform: (data.isPlatform as boolean) ?? false,
+    active: (data.active as boolean) ?? true,
+  };
+}
+
+function enrichToolsWithGemach(
+  tools: Tool[],
+  gemachMap: Map<string, Gemach>,
+  extra?: Partial<ToolWithAvailability>
+): ToolWithAvailability[] {
+  return tools.map((tool) => {
+    const gemach = gemachMap.get(tool.gemachId);
+    if (!gemach) {
+      return { ...tool, ...extra };
+    }
+    return {
+      ...tool,
+      ...extra,
+      gemachName: gemach.name,
+      gemachPricingMode: gemach.pricingMode,
+      priceLabel: formatToolPriceLabel(gemach, tool),
+      isPartnerGemach: isPartnerGemach(gemach),
+    };
+  });
+}
+
+// ─── Gemachim ────────────────────────────────────────────────────────────────
+
+export async function getAllGemachim(): Promise<Gemach[]> {
+  const snap = await getAdminDb().collection("gemachim").get();
+  if (snap.empty) {
+    return [
+      {
+        id: PLATFORM_GEMACH_ID,
+        name: "כרם",
+        slug: "kerem",
+        pricingMode: "loan_fee",
+        isPlatform: true,
+        active: true,
+      },
+    ];
+  }
+  return snap.docs.map((d) => gemachFromDoc(d.id, d.data())).filter((g) => g.active);
+}
+
+export async function getGemachById(id: string): Promise<Gemach | null> {
+  const snap = await getAdminDb().collection("gemachim").doc(id).get();
+  if (!snap.exists) {
+    if (id === PLATFORM_GEMACH_ID) {
+      return {
+        id: PLATFORM_GEMACH_ID,
+        name: "כרם",
+        slug: "kerem",
+        pricingMode: "loan_fee",
+        isPlatform: true,
+        active: true,
+      };
+    }
+    return null;
+  }
+  return gemachFromDoc(snap.id, snap.data()!);
+}
+
+export async function createGemachAndAssignAdmin(params: {
+  id: string;
+  name: string;
+  description?: string;
+  pricingMode: Gemach["pricingMode"];
+  maintenanceFee?: number;
+  createdBy: string;
+}): Promise<{ gemach: Gemach; member: Member }> {
+  const db = getAdminDb();
+  const gemachRef = db.collection("gemachim").doc(params.id);
+  const memberRef = db.collection("members").doc(params.createdBy);
+
+  const [existingGemach, memberSnap] = await Promise.all([
+    gemachRef.get(),
+    memberRef.get(),
+  ]);
+
+  if (existingGemach.exists) {
+    throw new Error("מזהה גמ״ח כבר קיים — נסו מזהה אחר");
+  }
+  if (!memberSnap.exists) {
+    throw new Error("משתמש לא נמצא");
+  }
+
+  const memberData = memberSnap.data()!;
+  const role = roleFromMemberData(memberData);
+  const gemachAdminIds = gemachAdminIdsFromData(memberData);
+
+  const batch = db.batch();
+  batch.set(gemachRef, {
+    name: params.name.trim(),
+    slug: params.id,
+    description: params.description?.trim() || null,
+    pricingMode: params.pricingMode,
+    ...(params.pricingMode === "maintenance_only" && params.maintenanceFee !== undefined
+      ? { maintenanceFee: params.maintenanceFee }
+      : {}),
+    isPlatform: false,
+    active: true,
+    createdBy: params.createdBy,
+    createdAt: FieldValue.serverTimestamp(),
+  });
+
+  const memberUpdates: Record<string, unknown> = {
+    gemachAdminIds: gemachAdminIds.includes(params.id)
+      ? gemachAdminIds
+      : [...gemachAdminIds, params.id],
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+  if (role === "MEMBER") {
+    memberUpdates.role = "GEMACH_ADMIN";
+  }
+  batch.update(memberRef, memberUpdates);
+
+  await batch.commit();
+
+  const gemach = gemachFromDoc(params.id, (await gemachRef.get()).data()!);
+  const member = memberFromDoc(params.createdBy, (await memberRef.get()).data()!);
+  return { gemach, member };
+}
+
+export { resolveReservationFee };
+
 // ─── Tools ───────────────────────────────────────────────────────────────────
 
 export async function getAllTools(): Promise<Tool[]> {
   const snap = await getAdminDb().collection("tools").get();
-  return snap.docs.map((d) => docWithId<Tool>(d.id, d.data())!).filter(Boolean);
+  return snap.docs.map((d) => toolFromDoc(d.id, d.data())).filter(Boolean);
 }
 
-export async function getToolsWithAvailability(): Promise<ToolWithAvailability[]> {
+export async function getToolKindsWithAvailability(): Promise<ToolKindWithAvailability[]> {
+  const [tools, loans, reservations, gemachim] = await Promise.all([
+    getAllTools(),
+    getAllLoans(),
+    getAllReservations(),
+    getAllGemachim(),
+  ]);
+
+  const gemachMap = new Map(gemachim.map((g) => [g.id, g]));
+  const { loanByTool, reservationByTool } = buildActiveHolders(loans, reservations);
+  const groups = groupToolsByKind(tools);
+
+  return [...groups.values()]
+    .map((units) => {
+      const gemach = gemachMap.get(units[0].gemachId);
+      return buildToolKindWithAvailability(units, loanByTool, reservationByTool, {
+        ...(gemach
+          ? {
+              gemachName: gemach.name,
+              gemachPricingMode: gemach.pricingMode,
+              priceLabel: formatToolPriceLabel(gemach, units[0]),
+              isPartnerGemach: isPartnerGemach(gemach),
+            }
+          : {}),
+      });
+    })
+    .filter((k): k is ToolKindWithAvailability => k !== null);
+}
+
+export async function getToolKindWithAvailability(
+  catalogKey: string
+): Promise<ToolKindWithAvailability | null> {
   const [tools, loans, reservations] = await Promise.all([
     getAllTools(),
     getAllLoans(),
     getAllReservations(),
   ]);
+  const units = resolveKindUnits(tools, catalogKey);
+  if (units.length === 0) return null;
 
+  const gemach = await getGemachById(units[0].gemachId);
   const { loanByTool, reservationByTool } = buildActiveHolders(loans, reservations);
 
-  return tools.map((tool) => ({
-    ...tool,
-    ...availabilityForTool(tool, loanByTool, reservationByTool),
-  }));
+  return buildToolKindWithAvailability(units, loanByTool, reservationByTool, {
+    ...(gemach
+      ? {
+          gemachName: gemach.name,
+          gemachPricingMode: gemach.pricingMode,
+          priceLabel: formatToolPriceLabel(gemach, units[0]),
+          isPartnerGemach: isPartnerGemach(gemach),
+        }
+      : {}),
+  });
+}
+
+export async function pickAvailableToolUnit(catalogKey: string): Promise<Tool | null> {
+  const tools = await getAllTools();
+  const units = resolveKindUnits(tools, catalogKey);
+  return pickAvailableUnit(units);
+}
+
+export async function getToolsWithAvailability(): Promise<ToolWithAvailability[]> {
+  const [tools, loans, reservations, gemachim] = await Promise.all([
+    getAllTools(),
+    getAllLoans(),
+    getAllReservations(),
+    getAllGemachim(),
+  ]);
+
+  const gemachMap = new Map(gemachim.map((g) => [g.id, g]));
+  const { loanByTool, reservationByTool } = buildActiveHolders(loans, reservations);
+
+  return tools.map((tool) => {
+    const gemach = gemachMap.get(tool.gemachId);
+    return {
+      ...tool,
+      ...availabilityForTool(tool, loanByTool, reservationByTool),
+      ...(gemach
+        ? {
+            gemachName: gemach.name,
+            gemachPricingMode: gemach.pricingMode,
+            priceLabel: formatToolPriceLabel(gemach, tool),
+            isPartnerGemach: isPartnerGemach(gemach),
+          }
+        : {}),
+    };
+  });
 }
 
 export async function getToolWithAvailability(id: string): Promise<ToolWithAvailability | null> {
   const tool = await getToolById(id);
   if (!tool) return null;
 
-  const [loans, reservations] = await Promise.all([getAllLoans(), getAllReservations()]);
+  const [loans, reservations, gemach] = await Promise.all([
+    getAllLoans(),
+    getAllReservations(),
+    getGemachById(tool.gemachId),
+  ]);
+  const gemachMap = new Map(gemach ? [[gemach.id, gemach]] : []);
   const { loanByTool, reservationByTool } = buildActiveHolders(loans, reservations);
 
+  const [enriched] = enrichToolsWithGemach([tool], gemachMap);
   return {
-    ...tool,
+    ...enriched,
     ...availabilityForTool(tool, loanByTool, reservationByTool),
   };
 }
@@ -190,7 +441,7 @@ export async function getToolWithAvailability(id: string): Promise<ToolWithAvail
 export async function getToolById(id: string): Promise<Tool | null> {
   const snap = await getAdminDb().collection("tools").doc(id).get();
   if (!snap.exists) return null;
-  return docWithId<Tool>(snap.id, snap.data());
+  return toolFromDoc(snap.id, snap.data()!);
 }
 
 export async function getToolByQrCode(qrCode: string): Promise<Tool | null> {
@@ -201,11 +452,92 @@ export async function getToolByQrCode(qrCode: string): Promise<Tool | null> {
     .get();
   if (snap.empty) return null;
   const d = snap.docs[0];
-  return docWithId<Tool>(d.id, d.data());
+  return toolFromDoc(d.id, d.data()!);
 }
 
 export async function updateToolStatus(id: string, status: Tool["status"]) {
   await getAdminDb().collection("tools").doc(id).update({ status });
+}
+
+export async function createToolsForGemach(params: {
+  gemachId: string;
+  name: string;
+  description: string;
+  category: string;
+  quantity: number;
+  loanFeeMin: number;
+  loanFeeMax: number;
+  kindId?: string;
+  safetyRules?: SafetyRule[];
+  createdBy: string;
+}): Promise<{ kindId: string; tools: Tool[] }> {
+  const gemach = await getGemachById(params.gemachId);
+  if (!gemach) {
+    throw new Error("גמ״ח לא נמצא");
+  }
+
+  const fees = resolveToolFees(gemach, params.loanFeeMin, params.loanFeeMax);
+  const kindId = kindIdForTool(params.gemachId, params.name, params.kindId);
+  const safetyRules = params.safetyRules?.length
+    ? params.safetyRules
+    : DEFAULT_SAFETY_RULES;
+
+  const db = getAdminDb();
+  const batch = db.batch();
+  const created: Tool[] = [];
+  const baseId = Date.now().toString(36);
+
+  for (let i = 0; i < params.quantity; i++) {
+    const toolId = `tool-${baseId}-${i + 1}`;
+    const unitLabel = params.quantity > 1 ? `יחידה ${i + 1}` : undefined;
+    const qrCode = `${qrCodeForUnit(params.gemachId, kindId, i)}-${baseId.toUpperCase()}`;
+
+    const toolData = {
+      name: params.name.trim(),
+      description: params.description.trim(),
+      category: params.category.trim(),
+      qrCode,
+      status: "available" as const,
+      loanFeeMin: fees.loanFeeMin,
+      loanFeeMax: fees.loanFeeMax,
+      gemachId: params.gemachId,
+      kindId,
+      ...(unitLabel ? { unitLabel } : {}),
+      safetyRules,
+      createdBy: params.createdBy,
+      createdAt: FieldValue.serverTimestamp(),
+    };
+
+    batch.set(db.collection("tools").doc(toolId), toolData);
+    batch.set(
+      db.collection("device_pots").doc(toolId),
+      {
+        toolId,
+        balance: 0,
+        totalEarned: 0,
+        totalSpent: 0,
+      },
+      { merge: true }
+    );
+
+    created.push({
+      id: toolId,
+      name: params.name.trim(),
+      description: params.description.trim(),
+      category: params.category.trim(),
+      qrCode,
+      status: "available",
+      loanFeeMin: fees.loanFeeMin,
+      loanFeeMax: fees.loanFeeMax,
+      gemachId: params.gemachId,
+      kindId,
+      ...(unitLabel ? { unitLabel } : {}),
+      safetyRules,
+    });
+  }
+
+  await batch.commit();
+  return { kindId, tools: created };
 }
 
 // ─── Reservations ──────────────────────────────────────────────────────────
@@ -343,6 +675,7 @@ function memberFromDoc(id: string, data: DocumentData): Member {
     email: (data.email as string) ?? "",
     hasPaymentMethod: (data.hasPaymentMethod as boolean) ?? false,
     role: roleFromMemberData(data),
+    gemachAdminIds: gemachAdminIdsFromData(data),
   };
 }
 
@@ -388,18 +721,34 @@ export async function syncMemberFromAuth(params: {
       ? ((existingData?.hasPaymentMethod as boolean) ?? false)
       : false,
     role,
+    gemachAdminIds: existing.exists ? gemachAdminIdsFromData(existingData ?? {}) : [],
   };
 }
 
-export async function getAdminDashboard(): Promise<AdminDashboardData> {
-  const [tools, loans, reservations] = await Promise.all([
+export async function getAdminDashboard(options?: {
+  gemachId?: string;
+  includeGemachim?: boolean;
+}): Promise<AdminDashboardData> {
+  const gemachId = options?.gemachId;
+  const [allTools, loans, reservations, gemachim, scopedGemach] = await Promise.all([
     getAllTools(),
     getAllLoans(),
     getAllReservations(),
+    options?.includeGemachim ? getAllGemachim() : Promise.resolve([]),
+    gemachId ? getGemachById(gemachId) : Promise.resolve(null),
   ]);
 
+  const tools = gemachId
+    ? allTools.filter((t) => t.gemachId === gemachId)
+    : allTools;
+  const toolIds = new Set(tools.map((t) => t.id));
+  const gemachMap = new Map(gemachim.map((g) => [g.id, g]));
+
   const { activeLoans, activeReservations, loanByTool, reservationByTool } =
-    buildActiveHolders(loans, reservations);
+    buildActiveHolders(
+      loans.filter((l) => toolIds.has(l.toolId)),
+      reservations.filter((r) => toolIds.has(r.toolId))
+    );
 
   const memberIds = [
     ...new Set([
@@ -430,6 +779,8 @@ export async function getAdminDashboard(): Promise<AdminDashboardData> {
       returnDate: loan?.dueReturnDate ?? reservation?.returnDate,
       checkedOutAt: loan?.checkedOutAt,
       reservedAt: reservation?.createdAt,
+      gemachName: gemachMap.get(tool.gemachId)?.name,
+      unitLabel: tool.unitLabel,
     };
   });
 
@@ -478,6 +829,22 @@ export async function getAdminDashboard(): Promise<AdminDashboardData> {
         dueReturnDate: loan.dueReturnDate,
       };
     }),
+    ...(scopedGemach ? { gemach: scopedGemach } : {}),
+    ...(options?.includeGemachim ? { gemachim } : {}),
+  };
+}
+
+export async function getPotsOverviewForGemach(gemachId: string) {
+  const { tools, devicePots, operationsPot, operationsPercent } =
+    await getPotsOverview();
+  const scopedTools = tools.filter((t) => t.gemachId === gemachId);
+  const toolIds = new Set(scopedTools.map((t) => t.id));
+  const scopedPots = devicePots.filter((p) => toolIds.has(p.toolId ?? p.id));
+  return {
+    tools: scopedTools,
+    devicePots: scopedPots,
+    operationsPot,
+    operationsPercent,
   };
 }
 
@@ -485,8 +852,11 @@ export async function createLoanFromCheckout(params: {
   reservation: Reservation;
   checkoutPhotoUrl: string;
 }): Promise<Loan> {
-  const payment = await getPaidPaymentForReservation(params.reservation.id);
-  if (!payment) {
+  const payment =
+    params.reservation.feeAmount > 0
+      ? await getPaidPaymentForReservation(params.reservation.id)
+      : null;
+  if (params.reservation.feeAmount > 0 && !payment) {
     throw new Error("Payment required before checkout");
   }
 

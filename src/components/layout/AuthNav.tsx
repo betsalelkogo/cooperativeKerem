@@ -3,26 +3,43 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthProvider";
-import { isAdminMember } from "@/lib/admin";
+import { isAdminMember, isGemachAdmin, isPlatformAdmin } from "@/lib/admin";
 import { cn } from "@/lib/cn";
+import type { Member } from "@/lib/types";
 
 const baseNavItems = [
   { href: "/tools", label: "כלים" },
   { href: "/my-loans", label: "ההשאלות שלי" },
 ];
 
-const adminNavItems = [
+const platformAdminNavItems = [
   { href: "/admin", label: "ניהול" },
   { href: "/admin/pots", label: "קופות" },
 ];
+
+const gemachAdminNavItems = [
+  { href: "/admin/gemach", label: "ניהול גמ״ח" },
+  { href: "/admin/gemach/pots", label: "קופות גמ״ח" },
+];
+
+const addGemachNavItem = { href: "/gemach/new", label: "הוסף גמ״ח" };
+
+function adminNavItemsForMember(member: Member) {
+  if (isPlatformAdmin(member)) return platformAdminNavItems;
+  if (isGemachAdmin(member)) return gemachAdminNavItems;
+  return [];
+}
 
 export function AuthNav() {
   const { user, member, loading, configured, signOut } = useAuth();
   const pathname = usePathname();
   const isLoginPage = pathname.startsWith("/login");
-  const navItems = member && isAdminMember(member)
-    ? [...baseNavItems, ...adminNavItems]
-    : baseNavItems;
+  const navItems =
+    member && isAdminMember(member)
+      ? [...baseNavItems, ...adminNavItemsForMember(member)]
+      : user
+        ? [...baseNavItems, addGemachNavItem]
+        : baseNavItems;
 
   if (isLoginPage) {
     return (

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getToolById } from "@/lib/firestore/repository";
+import { getToolKindWithAvailability } from "@/lib/firestore/repository";
 
 export async function GET(
   _request: Request,
@@ -7,11 +7,11 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const tool = await getToolById(id);
-    if (!tool) {
+    const kind = await getToolKindWithAvailability(id);
+    if (!kind) {
       return NextResponse.json({ error: "הכלי לא נמצא" }, { status: 404 });
     }
-    return NextResponse.json(tool);
+    return NextResponse.json(kind);
   } catch {
     return NextResponse.json({ error: "שגיאת שרת" }, { status: 500 });
   }

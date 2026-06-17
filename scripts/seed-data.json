@@ -1,4 +1,22 @@
 {
+  "gemachim": {
+    "kerem": {
+      "name": "כרם",
+      "slug": "kerem",
+      "description": "קואופרטיב הכלים הקהילתי",
+      "pricingMode": "loan_fee",
+      "isPlatform": true,
+      "active": true
+    },
+    "gemach-baby": {
+      "name": "גמ״ח תינוקות שכונתי",
+      "slug": "baby-neighborhood",
+      "description": "ציוד תינוקות וילדים — השאלה חינם",
+      "pricingMode": "free",
+      "isPlatform": false,
+      "active": true
+    }
+  },
   "tools": {
     "tool-001": {
       "name": "מסור עגול",
@@ -8,6 +26,45 @@
       "status": "available",
       "loanFeeMin": 20,
       "loanFeeMax": 50,
+      "gemachId": "kerem",
+      "kindId": "kind-saw",
+      "unitLabel": "יחידה 1",
+      "imageUrl": null,
+      "safetyRules": [
+        { "id": "sr-1", "text": "חובה לעטות משקפי מגן בכל עת" },
+        { "id": "sr-2", "text": "אין להפעיל את המכשיר ליד מקור מים" },
+        { "id": "sr-3", "text": "קראתי את הוראות השימוש" }
+      ]
+    },
+    "tool-001b": {
+      "name": "מסור עגול",
+      "description": "מסור עגול מקצועי לחיתוך עץ",
+      "category": "כלי עבודה חשמליים",
+      "qrCode": "KEREM-TOOL-001B",
+      "status": "available",
+      "loanFeeMin": 20,
+      "loanFeeMax": 50,
+      "gemachId": "kerem",
+      "kindId": "kind-saw",
+      "unitLabel": "יחידה 2",
+      "imageUrl": null,
+      "safetyRules": [
+        { "id": "sr-1", "text": "חובה לעטות משקפי מגן בכל עת" },
+        { "id": "sr-2", "text": "אין להפעיל את המכשיר ליד מקור מים" },
+        { "id": "sr-3", "text": "קראתי את הוראות השימוש" }
+      ]
+    },
+    "tool-001c": {
+      "name": "מסור עגול",
+      "description": "מסור עגול מקצועי לחיתוך עץ",
+      "category": "כלי עבודה חשמליים",
+      "qrCode": "KEREM-TOOL-001C",
+      "status": "available",
+      "loanFeeMin": 20,
+      "loanFeeMax": 50,
+      "gemachId": "kerem",
+      "kindId": "kind-saw",
+      "unitLabel": "יחידה 3",
       "imageUrl": null,
       "safetyRules": [
         { "id": "sr-1", "text": "חובה לעטות משקפי מגן בכל עת" },
@@ -23,6 +80,7 @@
       "status": "available",
       "loanFeeMin": 30,
       "loanFeeMax": 50,
+      "gemachId": "kerem",
       "imageUrl": null,
       "safetyRules": [
         { "id": "sr-4", "text": "אין לכוון את המכשיר לעבר אנשים או בעלי חיים" },
@@ -38,17 +96,45 @@
       "status": "available",
       "loanFeeMin": 20,
       "loanFeeMax": 30,
+      "gemachId": "kerem",
       "imageUrl": null,
       "safetyRules": [
         { "id": "sr-7", "text": "יש לוודא שהסולם על קרקע יציבה ומישורית" },
         { "id": "sr-8", "text": "אין לחרוג ממשקל העומס המרבי" },
         { "id": "sr-9", "text": "קראתי את הוראות השימוש" }
       ]
+    },
+    "tool-004": {
+      "name": "עגלת תינוק",
+      "description": "עגלת תינוק קלה ונוחה — מגמ״ח השכונתי",
+      "category": "תינוקות וילדים",
+      "qrCode": "BABY-TOOL-001",
+      "status": "available",
+      "loanFeeMin": 0,
+      "loanFeeMax": 0,
+      "gemachId": "gemach-baby",
+      "imageUrl": null,
+      "safetyRules": [
+        { "id": "sr-10", "text": "יש לבדוק את בלמי העגלה לפני השימוש" },
+        { "id": "sr-11", "text": "קראתי את הוראות השימוש" }
+      ]
     }
   },
   "device_pots": {
     "tool-001": {
       "toolId": "tool-001",
+      "balance": 0,
+      "totalEarned": 0,
+      "totalSpent": 0
+    },
+    "tool-001b": {
+      "toolId": "tool-001b",
+      "balance": 0,
+      "totalEarned": 0,
+      "totalSpent": 0
+    },
+    "tool-001c": {
+      "toolId": "tool-001c",
       "balance": 0,
       "totalEarned": 0,
       "totalSpent": 0
@@ -61,6 +147,12 @@
     },
     "tool-003": {
       "toolId": "tool-003",
+      "balance": 0,
+      "totalEarned": 0,
+      "totalSpent": 0
+    },
+    "tool-004": {
+      "toolId": "tool-004",
       "balance": 0,
       "totalEarned": 0,
       "totalSpent": 0

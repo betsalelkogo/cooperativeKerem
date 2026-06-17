@@ -2,20 +2,20 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { formatNIS } from "@/lib/pots";
 import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
+import { inventoryLabel } from "@/lib/tool-kinds";
 import { BackLink } from "@/components/ui/PageHeader";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
-import type { Tool } from "@/lib/types";
+import type { ToolKindWithAvailability } from "@/lib/types";
 
 export default function ReserveToolPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const { getIdToken } = useAuth();
-  const [tool, setTool] = useState<Tool | null>(null);
+  const [kind, setKind] = useState<ToolKindWithAvailability | null>(null);
   const [loadError, setLoadError] = useState("");
   const [pickupDate, setPickupDate] = useState("");
   const [returnDate, setReturnDate] = useState("");
@@ -28,13 +28,13 @@ export default function ReserveToolPage() {
         if (!res.ok) throw new Error("הכלי לא נמצא");
         return res.json();
       })
-      .then(setTool)
+      .then(setKind)
       .catch((err) => setLoadError(err.message));
   }, [params.id]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!tool) return;
+    if (!kind) return;
     setLoading(true);
     setError("");
 
@@ -44,7 +44,11 @@ export default function ReserveToolPage() {
         method: "POST",
         token,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ toolId: tool.id, pickupDate, returnDate }),
+        body: JSON.stringify({
+          kindId: kind.catalogId,
+          pickupDate,
+          returnDate,
+        }),
       });
 
       if (!res.ok) {
@@ -62,7 +66,7 @@ export default function ReserveToolPage() {
   }
 
   if (loadError) return <Alert variant="error">{loadError}</Alert>;
-  if (!tool) {
+  if (!kind) {
     return (
       <div className="flex justify-center py-20">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-kerem-200 border-t-kerem-700" />
@@ -71,18 +75,23 @@ export default function ReserveToolPage() {
   }
 
   const today = new Date().toISOString().split("T")[0];
+  const stockLabel = inventoryLabel(kind);
+  const priceText = kind.priceLabel ?? "—";
 
   return (
     <div className="mx-auto max-w-md">
-      <BackLink href={`/tools/${tool.id}`}>חזרה ל{tool.name}</BackLink>
+      <BackLink href={`/tools/${kind.catalogId}`}>חזרה ל{kind.name}</BackLink>
 
       <Card className="shadow-md">
         <div className="h-1.5 bg-gradient-to-l from-kerem-500 to-kerem-700" />
         <CardBody className="py-6">
-          <h1 className="text-2xl font-bold text-stone-900">שריון {tool.name}</h1>
+          <h1 className="text-2xl font-bold text-stone-900">שריון {kind.name}</h1>
           <p className="mt-2 text-sm text-[var(--muted)]">
             בחרו מתי תאספו את הכלי ומתי תחזירו אותו.
           </p>
+          {stockLabel && kind.availableUnits > 0 && (
+            <p className="mt-2 text-sm font-medium text-sky-700">{stockLabel}</p>
+          )}
 
           <form onSubmit={handleSubmit} className="mt-6 space-y-5">
             <div>
@@ -124,17 +133,17 @@ export default function ReserveToolPage() {
             </div>
 
             <div className="rounded-xl bg-kerem-50 p-4 ring-1 ring-kerem-200">
-              <p className="text-xs font-semibold text-kerem-700">דמי השאלה המשוערים</p>
-              <p className="mt-1 text-xl font-bold text-kerem-800">
-                {formatNIS(tool.loanFeeMin)}–{formatNIS(tool.loanFeeMax)}
+              <p className="text-xs font-semibold text-kerem-700">
+                {kind.gemachPricingMode === "free" ? "מחיר" : "דמי השאלה המשוערים"}
               </p>
+              <p className="mt-1 text-xl font-bold text-kerem-800">{priceText}</p>
             </div>
 
             {error && <Alert variant="error">{error}</Alert>}
 
             <Button
               type="submit"
-              disabled={loading || !pickupDate || !returnDate}
+              disabled={loading || !pickupDate || !returnDate || kind.availableUnits === 0}
               className="w-full"
               size="lg"
             >

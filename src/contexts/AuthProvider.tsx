@@ -32,6 +32,7 @@ interface AuthContextValue {
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
   getIdToken: () => Promise<string | null>;
+  refreshMember: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -105,6 +106,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return user.getIdToken();
   }, [user]);
 
+  const refreshMember = useCallback(async () => {
+    if (!user) return;
+    try {
+      const token = await user.getIdToken();
+      const res = await authFetch("/api/me", { token });
+      if (res.ok) {
+        const { member: synced } = await res.json();
+        setMember(synced);
+      }
+    } catch {
+      // ignore — caller can retry
+    }
+  }, [user]);
+
   const value = useMemo(
     () => ({
       user,
@@ -114,8 +129,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       signInWithGoogle,
       signOut,
       getIdToken,
+      refreshMember,
     }),
-    [user, member, loading, configured, signInWithGoogle, signOut, getIdToken]
+    [user, member, loading, configured, signInWithGoogle, signOut, getIdToken, refreshMember]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

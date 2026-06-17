@@ -2,7 +2,7 @@ import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import type { User } from "firebase/auth";
 import { getFirebaseDb } from "./client";
 import type { Member } from "@/lib/types";
-import { roleFromMemberData, DEFAULT_MEMBER_ROLE } from "@/lib/admin";
+import { roleFromMemberData, DEFAULT_MEMBER_ROLE, gemachAdminIdsFromData } from "@/lib/admin";
 
 export async function upsertMemberFromUser(user: User): Promise<Member> {
   const db = getFirebaseDb();
@@ -36,12 +36,17 @@ export async function upsertMemberFromUser(user: User): Promise<Member> {
     ? roleFromMemberData(existing.data())
     : DEFAULT_MEMBER_ROLE;
 
+  const gemachAdminIds = existing.exists()
+    ? gemachAdminIdsFromData(existing.data())
+    : [];
+
   return {
     id: user.uid,
     name: memberData.name,
     email: memberData.email,
     hasPaymentMethod: memberData.hasPaymentMethod,
     role,
+    gemachAdminIds,
   };
 }
 
@@ -59,5 +64,6 @@ export async function getMember(uid: string): Promise<Member | null> {
     email: data.email as string,
     hasPaymentMethod: (data.hasPaymentMethod as boolean) ?? false,
     role: roleFromMemberData(data),
+    gemachAdminIds: gemachAdminIdsFromData(data),
   };
 }

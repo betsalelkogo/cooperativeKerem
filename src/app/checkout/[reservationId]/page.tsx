@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { QrScanner } from "@/components/loan/QrScanner";
 import { SafetyChecklist } from "@/components/loan/SafetyChecklist";
 import { PhotoCapture } from "@/components/loan/PhotoCapture";
 import { PayboxPaymentStep } from "@/components/payment/PayboxPaymentStep";
+import { QrScanner } from "@/components/loan/QrScanner";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StepProgress } from "@/components/ui/StepProgress";
 import { Alert } from "@/components/ui/Alert";
@@ -13,9 +13,14 @@ import { Button } from "@/components/ui/Button";
 import { Card, CardBody } from "@/components/ui/Card";
 import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
+import { REQUIRE_QR_SCAN } from "@/lib/features";
 import type { Reservation, Tool } from "@/lib/types";
 
 type Step = "payment" | "qr" | "safety" | "photo" | "done";
+
+function stepAfterPayment(): Step {
+  return REQUIRE_QR_SCAN ? "qr" : "safety";
+}
 
 export default function CheckoutPage() {
   const params = useParams<{ reservationId: string }>();
@@ -51,9 +56,11 @@ export default function CheckoutPage() {
         setReservation(data.reservation);
         setTool(data.tool);
 
-        if (paymentRes.ok) {
+        if (data.reservation.feeAmount === 0) {
+          setStep(stepAfterPayment());
+        } else if (paymentRes.ok) {
           const paymentData = await paymentRes.json();
-          if (paymentData.paid) setStep("qr");
+          if (paymentData.paid) setStep(stepAfterPayment());
         }
       } catch (err) {
         setLoadError(err instanceof Error ? err.message : "שגיאה בטעינה");
@@ -113,13 +120,21 @@ export default function CheckoutPage() {
     );
   }
 
-  const steps = [
-    { key: "payment", label: "תשלום" },
-    { key: "qr", label: "סריקת QR" },
-    { key: "safety", label: "בטיחות" },
-    { key: "photo", label: "צילום" },
-    { key: "done", label: "סיום" },
-  ];
+  const steps =
+    reservation.feeAmount === 0
+      ? [
+          ...(REQUIRE_QR_SCAN ? [{ key: "qr", label: "סריקת QR" }] : []),
+          { key: "safety", label: "בטיחות" },
+          { key: "photo", label: "צילום" },
+          { key: "done", label: "סיום" },
+        ]
+      : [
+          { key: "payment", label: "תשלום" },
+          ...(REQUIRE_QR_SCAN ? [{ key: "qr", label: "סריקת QR" }] : []),
+          { key: "safety", label: "בטיחות" },
+          { key: "photo", label: "צילום" },
+          { key: "done", label: "סיום" },
+        ];
 
   const stepIndex = steps.findIndex((s) => s.key === step);
 
@@ -127,7 +142,11 @@ export default function CheckoutPage() {
     <div className="mx-auto max-w-lg px-0">
       <PageHeader
         title={`לקיחה: ${tool.name}`}
-        description="שלמו דמי השאלה, ואז השלימו את שלבי הלקיחה."
+        description={
+          reservation.feeAmount === 0
+            ? "השלימו את שלבי הלקיחה — ללא תשלום."
+            : "שלמו דמי השאלה, ואז השלימו את שלבי הלקיחה."
+        }
       />
 
       <StepProgress steps={steps} currentIndex={stepIndex} />
@@ -139,11 +158,11 @@ export default function CheckoutPage() {
           reservationId={reservation.id}
           amount={reservation.feeAmount}
           toolName={tool.name}
-          onPaid={() => setStep("qr")}
+          onPaid={() => setStep(stepAfterPayment())}
         />
       )}
 
-      {step === "qr" && <QrScanner onScan={handleQrScan} />}
+      {REQUIRE_QR_SCAN && step === "qr" && <QrScanner onScan={handleQrScan} />}
 
       {step === "safety" && (
         <SafetyChecklist rules={tool.safetyRules} onComplete={() => setStep("photo")} />

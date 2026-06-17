@@ -16,12 +16,48 @@ export interface Tool {
   loanFeeMax: number;
   safetyRules: SafetyRule[];
   imageUrl?: string;
+  /** Owning gemach — defaults to platform (kerem). */
+  gemachId: string;
+  /** Groups identical physical units in the catalog (defaults to tool id). */
+  kindId?: string;
+  /** Optional label for this unit in admin views, e.g. "יחידה 2". */
+  unitLabel?: string;
 }
 
 /** Tool plus catalog availability hint for list/detail views. */
 export interface ToolWithAvailability extends Tool {
   availableFrom?: string;
   availabilityLabel?: string;
+  gemachName?: string;
+  gemachPricingMode?: GemachPricingMode;
+  priceLabel?: string;
+  isPartnerGemach?: boolean;
+}
+
+/** Catalog row — one or more physical units of the same kind. */
+export interface ToolKindWithAvailability extends Omit<
+  ToolWithAvailability,
+  "id" | "qrCode" | "status"
+> {
+  catalogId: string;
+  kindId: string;
+  status: ToolStatus;
+  totalUnits: number;
+  availableUnits: number;
+  representativeToolId: string;
+}
+
+export type GemachPricingMode = "free" | "loan_fee" | "maintenance_only";
+
+export interface Gemach {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  pricingMode: GemachPricingMode;
+  maintenanceFee?: number;
+  isPlatform: boolean;
+  active: boolean;
 }
 
 export interface DevicePot {
@@ -89,7 +125,7 @@ export interface MaintenanceTicket {
   createdAt: string;
 }
 
-export type MemberRole = "ADMIN" | "MEMBER";
+export type MemberRole = "ADMIN" | "GEMACH_ADMIN" | "MEMBER";
 
 export interface Member {
   id: string;
@@ -97,6 +133,8 @@ export interface Member {
   email: string;
   hasPaymentMethod: boolean;
   role: MemberRole;
+  /** Gemach IDs this member can admin (when role is GEMACH_ADMIN). */
+  gemachAdminIds?: string[];
 }
 
 export interface AdminDashboardLoan {
@@ -136,6 +174,8 @@ export interface AdminDashboardToolRow {
   returnDate?: string;
   checkedOutAt?: string;
   reservedAt?: string;
+  gemachName?: string;
+  unitLabel?: string;
 }
 
 export interface AdminDashboardData {
@@ -152,6 +192,8 @@ export interface AdminDashboardData {
   tools: AdminDashboardToolRow[];
   activeLoans: AdminDashboardLoan[];
   activeReservations: AdminDashboardReservation[];
+  gemach?: Gemach;
+  gemachim?: Gemach[];
 }
 
 export interface Transaction {

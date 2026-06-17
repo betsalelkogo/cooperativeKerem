@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { QrScanner } from "@/components/loan/QrScanner";
 import { PhotoCapture } from "@/components/loan/PhotoCapture";
+import { QrScanner } from "@/components/loan/QrScanner";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StepProgress } from "@/components/ui/StepProgress";
 import { Alert } from "@/components/ui/Alert";
@@ -11,9 +11,14 @@ import { Button } from "@/components/ui/Button";
 import { Card, CardBody } from "@/components/ui/Card";
 import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
+import { REQUIRE_QR_SCAN } from "@/lib/features";
 import type { Loan, Tool } from "@/lib/types";
 
 type Step = "qr" | "photo" | "done";
+
+function initialReturnStep(): Step {
+  return REQUIRE_QR_SCAN ? "qr" : "photo";
+}
 
 export default function ReturnPage() {
   const params = useParams<{ loanId: string }>();
@@ -23,7 +28,7 @@ export default function ReturnPage() {
   const [loan, setLoan] = useState<Loan | null>(null);
   const [tool, setTool] = useState<Tool | null>(null);
   const [loadError, setLoadError] = useState("");
-  const [step, setStep] = useState<Step>("qr");
+  const [step, setStep] = useState<Step>(initialReturnStep);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [showFaultForm, setShowFaultForm] = useState(false);
@@ -135,7 +140,7 @@ export default function ReturnPage() {
   }
 
   const steps = [
-    { key: "qr", label: "סריקת QR" },
+    ...(REQUIRE_QR_SCAN ? [{ key: "qr", label: "סריקת QR" }] : []),
     { key: "photo", label: "צילום" },
     { key: "done", label: "סיום" },
   ];
@@ -146,7 +151,7 @@ export default function ReturnPage() {
     <div className="mx-auto max-w-lg">
       <PageHeader
         title={`החזרה: ${tool.name}`}
-        description="החזירו את הכלי למקומו, סרקו QR, וצלמו אותו נקי ובמקום."
+        description="החזירו את הכלי למקומו וצלמו אותו נקי ובמקום."
       />
 
       <StepProgress steps={steps} currentIndex={stepIndex} />
@@ -158,7 +163,7 @@ export default function ReturnPage() {
         </Alert>
       )}
 
-      {step === "qr" && <QrScanner onScan={handleQrScan} />}
+      {REQUIRE_QR_SCAN && step === "qr" && <QrScanner onScan={handleQrScan} />}
 
       {step === "photo" && (
         <div className="space-y-4">

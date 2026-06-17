@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthProvider";
-import { isAdminMember } from "@/lib/admin";
+import { canAccessAdminPath, isGemachAdmin, isPlatformAdmin } from "@/lib/admin";
 import { Alert } from "@/components/ui/Alert";
 
 export function AdminGate({ children }: { children: React.ReactNode }) {
@@ -17,8 +17,14 @@ export function AdminGate({ children }: { children: React.ReactNode }) {
       router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
       return;
     }
-    if (member && !isAdminMember(member)) {
-      router.replace("/tools");
+    if (!member) return;
+
+    if (!canAccessAdminPath(member, pathname)) {
+      if (isGemachAdmin(member) && !isPlatformAdmin(member)) {
+        router.replace("/admin/gemach");
+      } else {
+        router.replace("/tools");
+      }
     }
   }, [loading, user, member, pathname, router]);
 
@@ -30,7 +36,7 @@ export function AdminGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!user || (member && !isAdminMember(member))) {
+  if (!user || !member || !canAccessAdminPath(member, pathname)) {
     return (
       <div className="mx-auto max-w-md py-16">
         <Alert variant="warning">גישה למנהלים בלבד</Alert>

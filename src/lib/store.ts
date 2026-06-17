@@ -1,5 +1,7 @@
 import type { Loan, MaintenanceTicket, Member, Reservation, Tool, Transaction } from "./types";
 
+import { PLATFORM_GEMACH_ID } from "./gemach";
+
 export const mockTools: Tool[] = [
   {
     id: "tool-001",
@@ -10,6 +12,7 @@ export const mockTools: Tool[] = [
     status: "available",
     loanFeeMin: 20,
     loanFeeMax: 50,
+    gemachId: PLATFORM_GEMACH_ID,
     safetyRules: [
       { id: "sr-1", text: "חובה לעטות משקפי מגן בכל עת" },
       { id: "sr-2", text: "אין להפעיל את המכשיר ליד מקור מים" },
@@ -25,6 +28,7 @@ export const mockTools: Tool[] = [
     status: "available",
     loanFeeMin: 30,
     loanFeeMax: 50,
+    gemachId: PLATFORM_GEMACH_ID,
     safetyRules: [
       { id: "sr-4", text: "אין לכוון את המכשיר לעבר אנשים או בעלי חיים" },
       { id: "sr-5", text: "יש לעטות נעליים מונעות החלקה" },
@@ -40,6 +44,7 @@ export const mockTools: Tool[] = [
     status: "available",
     loanFeeMin: 20,
     loanFeeMax: 30,
+    gemachId: PLATFORM_GEMACH_ID,
     safetyRules: [
       { id: "sr-7", text: "יש לוודא שהסולם על קרקע יציבה ומישורית" },
       { id: "sr-8", text: "אין לחרוג ממשקל העומס המרבי" },
