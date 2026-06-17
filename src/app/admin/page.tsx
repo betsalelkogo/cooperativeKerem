@@ -125,7 +125,7 @@ export default function AdminDashboardPage() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-[var(--muted)]">
-                      {formatDate(tool.checkedOutAt)}
+                      {formatDate(tool.sinceAt)}
                     </td>
                   </tr>
                 ))

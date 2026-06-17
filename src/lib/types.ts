@@ -103,7 +103,7 @@ export interface AdminDashboardToolRow {
   status: ToolStatus;
   borrowerName?: string;
   borrowerEmail?: string;
-  checkedOutAt?: string;
+  sinceAt?: string;
 }
 
 export interface AdminDashboardData {

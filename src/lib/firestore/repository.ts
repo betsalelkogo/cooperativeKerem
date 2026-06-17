@@ -117,6 +117,19 @@ export async function updateReservationStatus(id: string, status: Reservation["s
   await getAdminDb().collection("reservations").doc(id).update({ status });
 }
 
+export async function getAllReservations(): Promise<Reservation[]> {
+  const snap = await getAdminDb().collection("reservations").get();
+  return snap.docs
+    .map((d) => {
+      const reservation = docWithId<Reservation>(d.id, d.data());
+      if (reservation && d.data()?.createdAt) {
+        reservation.createdAt = tsToIso(d.data()!.createdAt);
+      }
+      return reservation;
+    })
+    .filter(Boolean) as Reservation[];
+}
+
 // ─── Loans ─────────────────────────────────────────────────────────────────
 
 export async function getLoanById(id: string): Promise<Loan | null> {
@@ -207,34 +220,75 @@ export async function syncMemberFromAuth(params: {
 }
 
 export async function getAdminDashboard(): Promise<AdminDashboardData> {
-  const [tools, loans] = await Promise.all([getAllTools(), getAllLoans()]);
+  const [tools, loans, reservations] = await Promise.all([
+    getAllTools(),
+    getAllLoans(),
+    getAllReservations(),
+  ]);
 
   const activeLoans = loans.filter(
-    (l) => l.status === "active" || l.status === "checkout_pending" || l.status === "return_pending"
+    (l) =>
+      l.status === "active" ||
+      l.status === "checkout_pending" ||
+      l.status === "return_pending"
   );
 
-  const memberIds = [...new Set(activeLoans.map((l) => l.memberId))];
+  const activeReservations = reservations.filter(
+    (r) => r.status === "pending" || r.status === "confirmed"
+  );
+
+  const loanPriority: Record<Loan["status"], number> = {
+    active: 3,
+    checkout_pending: 2,
+    return_pending: 1,
+    returned: 0,
+    disputed: 0,
+  };
+
+  const loanByTool = new Map<string, (typeof activeLoans)[0]>();
+  for (const loan of activeLoans) {
+    const existing = loanByTool.get(loan.toolId);
+    if (
+      !existing ||
+      loanPriority[loan.status] > loanPriority[existing.status]
+    ) {
+      loanByTool.set(loan.toolId, loan);
+    }
+  }
+
+  const reservationByTool = new Map<string, (typeof activeReservations)[0]>();
+  for (const reservation of activeReservations) {
+    const existing = reservationByTool.get(reservation.toolId);
+    if (!existing || reservation.createdAt > existing.createdAt) {
+      reservationByTool.set(reservation.toolId, reservation);
+    }
+  }
+
+  const memberIds = [
+    ...new Set([
+      ...activeLoans.map((l) => l.memberId),
+      ...activeReservations.map((r) => r.memberId),
+    ]),
+  ];
   const members = await Promise.all(memberIds.map((id) => getMemberById(id)));
   const memberMap = new Map(
     members.filter(Boolean).map((m) => [m!.id, m!])
   );
 
-  const loanByTool = new Map<string, (typeof activeLoans)[0]>();
-  for (const loan of activeLoans) {
-    if (loan.status === "active") loanByTool.set(loan.toolId, loan);
-  }
-
   const toolRows = tools.map((tool) => {
     const loan = loanByTool.get(tool.id);
-    const member = loan ? memberMap.get(loan.memberId) : undefined;
+    const reservation = loan ? undefined : reservationByTool.get(tool.id);
+    const holderId = loan?.memberId ?? reservation?.memberId;
+    const member = holderId ? memberMap.get(holderId) : undefined;
+
     return {
       id: tool.id,
       name: tool.name,
       category: tool.category,
       status: tool.status,
-      borrowerName: member?.name,
+      borrowerName: member?.name ?? (holderId ? "לא ידוע" : undefined),
       borrowerEmail: member?.email,
-      checkedOutAt: loan?.checkedOutAt,
+      sinceAt: loan?.checkedOutAt ?? reservation?.createdAt,
     };
   });
 
