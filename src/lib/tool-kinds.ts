@@ -104,3 +104,11 @@ export function inventoryLabel(kind: Pick<ToolKindWithAvailability, "totalUnits"
   }
   return `${kind.totalUnits} יחידות — אין זמינות כרגע`;
 }
+
+export function aggregateKindStatus(units: Pick<Tool, "status">[]): ToolStatus {
+  if (units.some((u) => u.status === "available")) return "available";
+  if (units.some((u) => u.status === "reserved")) return "reserved";
+  if (units.some((u) => u.status === "on_loan")) return "on_loan";
+  if (units.some((u) => u.status === "maintenance")) return "maintenance";
+  return units[0]?.status ?? "disabled";
+}

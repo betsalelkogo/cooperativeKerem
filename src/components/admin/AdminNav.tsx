@@ -8,6 +8,7 @@ import { cn } from "@/lib/cn";
 
 const platformTabs = [
   { href: "/admin", label: "לוח בקרה", match: (p: string) => p === "/admin" },
+  { href: "/admin/members", label: "חברים", match: (p: string) => p.startsWith("/admin/members") },
   { href: "/admin/pots", label: "קופות", match: (p: string) => p.startsWith("/admin/pots") },
 ];
 

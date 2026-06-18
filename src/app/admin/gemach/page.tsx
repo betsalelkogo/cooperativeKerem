@@ -38,27 +38,30 @@ export default function GemachAdminDashboardPage() {
       setLoading(false);
       return;
     }
-
-    async function load() {
-      try {
-        const token = await getIdToken();
-        const res = await authFetch(
-          `/api/admin/gemach/dashboard?gemachId=${encodeURIComponent(gemachId!)}`,
-          { token }
-        );
-        if (!res.ok) {
-          const body = await res.json();
-          throw new Error(body.error ?? "טעינה נכשלה");
-        }
-        setData(await res.json());
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "שגיאה");
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
+    loadDashboard();
   }, [gemachId, getIdToken]);
+
+  async function loadDashboard() {
+    if (!gemachId) return;
+    setLoading(true);
+    try {
+      const token = await getIdToken();
+      const res = await authFetch(
+        `/api/admin/gemach/dashboard?gemachId=${encodeURIComponent(gemachId)}`,
+        { token }
+      );
+      if (!res.ok) {
+        const body = await res.json();
+        throw new Error(body.error ?? "טעינה נכשלה");
+      }
+      setData(await res.json());
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "שגיאה");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   if (!gemachId && !loading) {
     return (
@@ -119,6 +122,10 @@ export default function GemachAdminDashboardPage() {
         data={data}
         title="לוח בקרה — גמ״ח"
         description="סקירה של הכלים, השאלות והשמירות של הגמ״ח שלך."
+        editableTools
+        gemachId={gemachId}
+        getToken={getIdToken}
+        onToolsUpdated={loadDashboard}
       />
     </div>
   );

@@ -3,10 +3,10 @@
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Alert } from "@/components/ui/Alert";
-import { StatusBadge } from "@/components/ui/StatusBadge";
 import { loanStatusLabels, reservationStatusLabels } from "@/lib/labels";
 import { formatDateHe } from "@/lib/dates";
 import { gemachPricingModeLabels } from "@/lib/gemach";
+import { AdminToolKindsTable } from "@/components/admin/AdminToolKindsTable";
 import type { AdminDashboardData } from "@/lib/types";
 
 function StatCard({ label, value, accent }: { label: string; value: number; accent?: string }) {
@@ -34,6 +34,10 @@ interface AdminDashboardViewProps {
   description: string;
   showGemachColumn?: boolean;
   showGemachimList?: boolean;
+  editableTools?: boolean;
+  gemachId?: string;
+  getToken?: () => Promise<string | null>;
+  onToolsUpdated?: () => void;
 }
 
 export function AdminDashboardView({
@@ -42,6 +46,10 @@ export function AdminDashboardView({
   description,
   showGemachColumn = false,
   showGemachimList = false,
+  editableTools = false,
+  gemachId,
+  getToken,
+  onToolsUpdated,
 }: AdminDashboardViewProps) {
   return (
     <div>
@@ -99,94 +107,14 @@ export function AdminDashboardView({
         </section>
       )}
 
-      <section className="mb-10">
-        <h2 className="mb-4 text-lg font-bold text-stone-900">כלים — מצב נוכחי</h2>
-        <div className="overflow-x-auto rounded-xl border border-[var(--border)] bg-white shadow-sm">
-          <table className="w-full min-w-[640px] text-sm">
-            <thead>
-              <tr className="border-b border-[var(--border)] bg-warm-50 text-right">
-                <th className="px-4 py-3 font-semibold text-stone-700">כלי</th>
-                {showGemachColumn && (
-                  <th className="px-4 py-3 font-semibold text-stone-700">גמ״ח</th>
-                )}
-                <th className="px-4 py-3 font-semibold text-stone-700">קטגוריה</th>
-                <th className="px-4 py-3 font-semibold text-stone-700">סטטוס</th>
-                <th className="px-4 py-3 font-semibold text-stone-700">סוג</th>
-                <th className="px-4 py-3 font-semibold text-stone-700">משתמש</th>
-                <th className="px-4 py-3 font-semibold text-stone-700">איסוף מתוכנן</th>
-                <th className="px-4 py-3 font-semibold text-stone-700">לקיחה בפועל</th>
-                <th className="px-4 py-3 font-semibold text-stone-700">החזרה מתוכננת</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.tools.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={showGemachColumn ? 9 : 8}
-                    className="px-4 py-8 text-center text-[var(--muted)]"
-                  >
-                    אין כלים במערכת
-                  </td>
-                </tr>
-              ) : (
-                data.tools.map((tool) => (
-                  <tr key={tool.id} className="border-b border-[var(--border)] last:border-0">
-                    <td className="px-4 py-3 font-medium text-stone-900">
-                      {tool.name}
-                      {tool.unitLabel && (
-                        <span className="mr-2 text-xs font-normal text-[var(--muted)]">
-                          ({tool.unitLabel})
-                        </span>
-                      )}
-                    </td>
-                    {showGemachColumn && (
-                      <td className="px-4 py-3 text-[var(--muted)]">{tool.gemachName ?? "—"}</td>
-                    )}
-                    <td className="px-4 py-3 text-[var(--muted)]">{tool.category}</td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={tool.status} />
-                    </td>
-                    <td className="px-4 py-3">
-                      {tool.holderKind === "reservation" ? (
-                        <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-800 ring-1 ring-inset ring-amber-200">
-                          שמירה
-                        </span>
-                      ) : tool.holderKind === "loan" ? (
-                        <span className="rounded-full bg-sky-100 px-2.5 py-1 text-xs font-bold text-sky-800 ring-1 ring-inset ring-sky-200">
-                          השאלה
-                        </span>
-                      ) : (
-                        <span className="text-[var(--muted)]">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {tool.borrowerName ? (
-                        <div>
-                          <p className="font-medium text-stone-800">{tool.borrowerName}</p>
-                          {tool.borrowerEmail && (
-                            <p className="text-xs text-[var(--muted)]">{tool.borrowerEmail}</p>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="text-[var(--muted)]">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-[var(--muted)]">
-                      {formatDay(tool.pickupDate)}
-                    </td>
-                    <td className="px-4 py-3 text-[var(--muted)]">
-                      {formatDateTime(tool.checkedOutAt)}
-                    </td>
-                    <td className="px-4 py-3 text-[var(--muted)]">
-                      {formatDay(tool.returnDate)}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <AdminToolKindsTable
+        tools={data.tools}
+        showGemachColumn={showGemachColumn}
+        editable={editableTools}
+        gemachId={gemachId}
+        getToken={getToken ?? (async () => null)}
+        onUpdated={onToolsUpdated}
+      />
 
       <section className="mb-10">
         <h2 className="mb-4 text-lg font-bold text-stone-900">שמירות פעילות</h2>

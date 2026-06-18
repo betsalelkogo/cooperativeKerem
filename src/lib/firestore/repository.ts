@@ -2,6 +2,8 @@ import { getFirestore, FieldValue, type Firestore, type DocumentData } from "fir
 import { initializeApp, getApps, cert } from "firebase-admin/app";
 import type {
   AdminDashboardData,
+  AdminMemberHistory,
+  AdminMemberSummary,
   Loan,
   MaintenanceTicket,
   Member,
@@ -24,6 +26,7 @@ import {
   resolveKindUnits,
   pickAvailableUnit,
   buildToolKindWithAvailability,
+  aggregateKindStatus,
 } from "@/lib/tool-kinds";
 import {
   PLATFORM_GEMACH_ID,
@@ -459,6 +462,68 @@ export async function updateToolStatus(id: string, status: Tool["status"]) {
   await getAdminDb().collection("tools").doc(id).update({ status });
 }
 
+/** Bulk status change for all idle units of a tool kind. */
+export async function updateToolKindStatus(params: {
+  gemachId: string;
+  kindId: string;
+  status: "available" | "disabled" | "maintenance";
+}): Promise<{ updated: number }> {
+  const tools = await getAllTools();
+  const units = tools.filter(
+    (t) => t.gemachId === params.gemachId && (t.kindId ?? t.id) === params.kindId
+  );
+  if (units.length === 0) {
+    throw new Error("הכלי לא נמצא");
+  }
+
+  const batch = getAdminDb().batch();
+  let updated = 0;
+
+  for (const tool of units) {
+    let nextStatus: Tool["status"] | null = null;
+    if (params.status === "available") {
+      if (tool.status === "disabled" || tool.status === "maintenance") {
+        nextStatus = "available";
+      }
+    } else if (params.status === "disabled" && tool.status === "available") {
+      nextStatus = "disabled";
+    } else if (params.status === "maintenance" && tool.status === "available") {
+      nextStatus = "maintenance";
+    }
+
+    if (nextStatus) {
+      batch.update(getAdminDb().collection("tools").doc(tool.id), { status: nextStatus });
+      updated++;
+    }
+  }
+
+  if (updated === 0) {
+    throw new Error("אין יחידות שניתן לעדכן במצב הנוכחי");
+  }
+
+  await batch.commit();
+  return { updated };
+}
+
+export async function updateToolStatusScoped(params: {
+  toolId: string;
+  status: Tool["status"];
+  gemachId: string;
+}): Promise<void> {
+  const tool = await getToolById(params.toolId);
+  if (!tool || tool.gemachId !== params.gemachId) {
+    throw new Error("הכלי לא נמצא");
+  }
+  if (tool.status === "on_loan" || tool.status === "reserved") {
+    throw new Error("לא ניתן לשנות סטטוס ליחידה מושאלת או שמורה");
+  }
+  if (params.status === "available" || params.status === "disabled" || params.status === "maintenance") {
+    await updateToolStatus(params.toolId, params.status);
+    return;
+  }
+  throw new Error("סטטוס לא נתמך");
+}
+
 export async function createToolsForGemach(params: {
   gemachId: string;
   name: string;
@@ -761,26 +826,39 @@ export async function getAdminDashboard(options?: {
     members.filter(Boolean).map((m) => [m!.id, m!])
   );
 
-  const toolRows = tools.map((tool) => {
-    const loan = loanByTool.get(tool.id);
-    const reservation = loan ? undefined : reservationByTool.get(tool.id);
-    const holderId = loan?.memberId ?? reservation?.memberId;
-    const member = holderId ? memberMap.get(holderId) : undefined;
+  const toolRows = [...groupToolsByKind(tools).entries()].map(([, units]) => {
+    const representative = units[0];
+    const kindId = representative.kindId ?? representative.id;
+
+    const unitRows = units.map((tool) => {
+      const loan = loanByTool.get(tool.id);
+      const reservation = loan ? undefined : reservationByTool.get(tool.id);
+      const holderId = loan?.memberId ?? reservation?.memberId;
+      const member = holderId ? memberMap.get(holderId) : undefined;
+      return {
+        id: tool.id,
+        unitLabel: tool.unitLabel,
+        status: tool.status,
+        borrowerName: member?.name ?? (holderId ? "לא ידוע" : undefined),
+        borrowerEmail: member?.email,
+        holderKind: loan ? ("loan" as const) : reservation ? ("reservation" as const) : undefined,
+      };
+    });
 
     return {
-      id: tool.id,
-      name: tool.name,
-      category: tool.category,
-      status: tool.status,
-      borrowerName: member?.name ?? (holderId ? "לא ידוע" : undefined),
-      borrowerEmail: member?.email,
-      holderKind: loan ? ("loan" as const) : reservation ? ("reservation" as const) : undefined,
-      pickupDate: loan ? undefined : reservation?.pickupDate,
-      returnDate: loan?.dueReturnDate ?? reservation?.returnDate,
-      checkedOutAt: loan?.checkedOutAt,
-      reservedAt: reservation?.createdAt,
-      gemachName: gemachMap.get(tool.gemachId)?.name,
-      unitLabel: tool.unitLabel,
+      kindId,
+      name: representative.name,
+      category: representative.category,
+      gemachId: representative.gemachId,
+      gemachName: gemachMap.get(representative.gemachId)?.name,
+      status: aggregateKindStatus(units),
+      totalUnits: units.length,
+      availableUnits: units.filter((t) => t.status === "available").length,
+      onLoanUnits: units.filter((t) => t.status === "on_loan").length,
+      reservedUnits: units.filter((t) => t.status === "reserved").length,
+      disabledUnits: units.filter((t) => t.status === "disabled").length,
+      maintenanceUnits: units.filter((t) => t.status === "maintenance").length,
+      units: unitRows,
     };
   });
 
@@ -797,7 +875,7 @@ export async function getAdminDashboard(options?: {
       activeLoans: activeLoans.length,
       activeReservations: activeReservations.length,
     },
-    tools: toolRows,
+    tools: toolRows.sort((a, b) => a.name.localeCompare(b.name, "he")),
     activeReservations: activeReservations.map((reservation) => {
       const member = memberMap.get(reservation.memberId);
       const tool = toolMap.get(reservation.toolId);
@@ -831,6 +909,110 @@ export async function getAdminDashboard(options?: {
     }),
     ...(scopedGemach ? { gemach: scopedGemach } : {}),
     ...(options?.includeGemachim ? { gemachim } : {}),
+  };
+}
+
+export async function listMembers(query?: string): Promise<AdminMemberSummary[]> {
+  const snap = await getAdminDb().collection("members").get();
+  const normalized = query?.trim().toLowerCase() ?? "";
+
+  return snap.docs
+    .map((d) => memberFromDoc(d.id, d.data()))
+    .filter((m) => {
+      if (!normalized) return true;
+      return (
+        m.email.toLowerCase().includes(normalized) ||
+        m.name.toLowerCase().includes(normalized)
+      );
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, "he"))
+    .map((m) => ({
+      id: m.id,
+      name: m.name,
+      email: m.email,
+      role: m.role,
+      gemachAdminIds: m.gemachAdminIds,
+    }));
+}
+
+/** @deprecated use listMembers */
+export async function searchMembersByEmail(query: string): Promise<AdminMemberSummary[]> {
+  return listMembers(query);
+}
+
+export async function getMemberHistory(memberId: string): Promise<AdminMemberHistory | null> {
+  const member = await getMemberById(memberId);
+  if (!member) return null;
+
+  const [loans, reservations, allTools] = await Promise.all([
+    getLoansByMember(memberId),
+    getReservationsByMember(memberId),
+    getAllTools(),
+  ]);
+  const toolMap = new Map(allTools.map((t) => [t.id, t]));
+
+  const sortedLoans = [...loans].sort(
+    (a, b) => (b.checkedOutAt ?? "").localeCompare(a.checkedOutAt ?? "")
+  );
+  const sortedReservations = [...reservations].sort(
+    (a, b) => b.createdAt.localeCompare(a.createdAt)
+  );
+
+  return {
+    member: {
+      id: member.id,
+      name: member.name,
+      email: member.email,
+      role: member.role,
+      gemachAdminIds: member.gemachAdminIds,
+    },
+    loans: sortedLoans.map((loan) => ({
+      id: loan.id,
+      toolId: loan.toolId,
+      toolName: toolMap.get(loan.toolId)?.name ?? loan.toolId,
+      status: loan.status,
+      checkedOutAt: loan.checkedOutAt,
+      dueReturnDate: loan.dueReturnDate,
+      returnedAt: loan.returnedAt,
+    })),
+    reservations: sortedReservations.map((reservation) => ({
+      id: reservation.id,
+      toolId: reservation.toolId,
+      toolName: toolMap.get(reservation.toolId)?.name ?? reservation.toolId,
+      status: reservation.status,
+      pickupDate: reservation.pickupDate,
+      returnDate: reservation.returnDate,
+      createdAt: reservation.createdAt,
+    })),
+  };
+}
+
+export async function updateMemberRole(
+  memberId: string,
+  role: Member["role"]
+): Promise<AdminMemberSummary> {
+  if (role !== "ADMIN" && role !== "MEMBER" && role !== "GEMACH_ADMIN") {
+    throw new Error("תפקיד לא נתמך");
+  }
+
+  const ref = getAdminDb().collection("members").doc(memberId);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    throw new Error("משתמש לא נמצא");
+  }
+
+  await ref.update({
+    role,
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  const member = memberFromDoc(memberId, (await ref.get()).data()!);
+  return {
+    id: member.id,
+    name: member.name,
+    email: member.email,
+    role: member.role,
+    gemachAdminIds: member.gemachAdminIds,
   };
 }
 

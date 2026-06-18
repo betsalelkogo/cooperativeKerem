@@ -162,6 +162,32 @@ export interface AdminDashboardReservation {
   createdAt: string;
 }
 
+export interface AdminDashboardToolUnitRow {
+  id: string;
+  unitLabel?: string;
+  status: ToolStatus;
+  borrowerName?: string;
+  borrowerEmail?: string;
+  holderKind?: "reservation" | "loan";
+}
+
+/** One catalog row in admin — may represent multiple physical units. */
+export interface AdminDashboardToolKindRow {
+  kindId: string;
+  name: string;
+  category: string;
+  gemachId: string;
+  gemachName?: string;
+  status: ToolStatus;
+  totalUnits: number;
+  availableUnits: number;
+  onLoanUnits: number;
+  reservedUnits: number;
+  disabledUnits: number;
+  maintenanceUnits: number;
+  units: AdminDashboardToolUnitRow[];
+}
+
 export interface AdminDashboardToolRow {
   id: string;
   name: string;
@@ -189,11 +215,41 @@ export interface AdminDashboardData {
     activeLoans: number;
     activeReservations: number;
   };
-  tools: AdminDashboardToolRow[];
+  tools: AdminDashboardToolKindRow[];
   activeLoans: AdminDashboardLoan[];
   activeReservations: AdminDashboardReservation[];
   gemach?: Gemach;
   gemachim?: Gemach[];
+}
+
+export interface AdminMemberSummary {
+  id: string;
+  name: string;
+  email: string;
+  role: MemberRole;
+  gemachAdminIds?: string[];
+}
+
+export interface AdminMemberHistory {
+  member: AdminMemberSummary;
+  loans: Array<{
+    id: string;
+    toolId: string;
+    toolName: string;
+    status: LoanStatus;
+    checkedOutAt?: string;
+    dueReturnDate?: string;
+    returnedAt?: string;
+  }>;
+  reservations: Array<{
+    id: string;
+    toolId: string;
+    toolName: string;
+    status: ReservationStatus;
+    pickupDate: string;
+    returnDate: string;
+    createdAt: string;
+  }>;
 }
 
 export interface Transaction {

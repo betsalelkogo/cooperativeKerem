@@ -14,6 +14,7 @@ const baseNavItems = [
 
 const platformAdminNavItems = [
   { href: "/admin", label: "ניהול" },
+  { href: "/admin/members", label: "חברים" },
   { href: "/admin/pots", label: "קופות" },
 ];
 
