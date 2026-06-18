@@ -11,7 +11,7 @@ export const toolStatusLabels: Record<ToolStatus, string> = {
 export const loanStatusLabels: Record<LoanStatus, string> = {
   checkout_pending: "ממתין ללקיחה",
   active: "פעיל",
-  return_pending: "ממתין להחזרה",
+  return_pending: "ממתין לסגירת טופס",
   returned: "הוחזר",
   disputed: "במחלוקת",
 };

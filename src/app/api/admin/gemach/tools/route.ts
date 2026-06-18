@@ -21,6 +21,8 @@ export async function POST(request: Request) {
       loanFeeMin,
       loanFeeMax,
       kindId,
+      defaultLoanHours,
+      maxLoanHours,
     } = body as {
       gemachId?: string;
       name?: string;
@@ -30,6 +32,8 @@ export async function POST(request: Request) {
       loanFeeMin?: number;
       loanFeeMax?: number;
       kindId?: string;
+      defaultLoanHours?: number;
+      maxLoanHours?: number;
     };
 
     const gemachId = resolveGemachAdminScope(auth.member, requestedGemachId ?? null);
@@ -57,6 +61,9 @@ export async function POST(request: Request) {
       loanFeeMin: Number(loanFeeMin ?? 0),
       loanFeeMax: Number(loanFeeMax ?? loanFeeMin ?? 0),
       kindId,
+      defaultLoanHours:
+        defaultLoanHours !== undefined ? Number(defaultLoanHours) : undefined,
+      maxLoanHours: maxLoanHours !== undefined ? Number(maxLoanHours) : undefined,
       createdBy: auth.uid,
     });
 

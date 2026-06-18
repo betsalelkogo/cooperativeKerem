@@ -11,7 +11,8 @@
     "start": "next start",
     "lint": "next lint",
     "seed": "node scripts/seed-firestore.mjs",
-    "migrate:reset": "node scripts/reset-firestore.mjs"
+    "migrate:reset": "node scripts/reset-firestore.mjs",
+    "db:fresh": "node scripts/reset-firestore.mjs --reseed"
   },
   "dependencies": {
     "firebase": "^11.0.0",

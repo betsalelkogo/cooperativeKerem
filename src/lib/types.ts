@@ -5,6 +5,11 @@ export interface SafetyRule {
   text: string;
 }
 
+export interface IncludedItem {
+  id: string;
+  label: string;
+}
+
 export interface Tool {
   id: string;
   name: string;
@@ -15,6 +20,8 @@ export interface Tool {
   loanFeeMin: number;
   loanFeeMax: number;
   safetyRules: SafetyRule[];
+  /** Accessories / parts that ship with the tool — checked at pickup and return. */
+  includedItems?: IncludedItem[];
   imageUrl?: string;
   /** Owning gemach — defaults to platform (kerem). */
   gemachId: string;
@@ -22,6 +29,10 @@ export interface Tool {
   kindId?: string;
   /** Optional label for this unit in admin views, e.g. "יחידה 2". */
   unitLabel?: string;
+  /** Override gemach default loan length (fixed_hours mode, hours). */
+  defaultLoanHours?: number;
+  /** Override gemach max loan length borrowers may select (fixed_hours). */
+  maxLoanHours?: number;
 }
 
 /** Tool plus catalog availability hint for list/detail views. */
@@ -30,6 +41,9 @@ export interface ToolWithAvailability extends Tool {
   availabilityLabel?: string;
   gemachName?: string;
   gemachPricingMode?: GemachPricingMode;
+  gemachReservationMode?: GemachReservationMode;
+  gemachDefaultLoanHours?: number;
+  gemachMaxLoanHours?: number;
   priceLabel?: string;
   isPartnerGemach?: boolean;
 }
@@ -49,6 +63,9 @@ export interface ToolKindWithAvailability extends Omit<
 
 export type GemachPricingMode = "free" | "loan_fee" | "maintenance_only";
 
+/** How borrowers schedule reservations for this gemach. */
+export type GemachReservationMode = "fixed_hours" | "date_range";
+
 export interface Gemach {
   id: string;
   name: string;
@@ -60,6 +77,12 @@ export interface Gemach {
   payboxGroupUrl?: string;
   isPlatform: boolean;
   active: boolean;
+  /** fixed_hours = start time + duration; date_range = separate pickup/return windows. */
+  reservationMode?: GemachReservationMode;
+  /** Default loan length for fixed_hours mode (hours). */
+  defaultLoanHours?: number;
+  /** Maximum loan length borrowers may select (fixed_hours). */
+  maxLoanHours?: number;
   /** Set when the gemach is permanently closed. */
   closedAt?: string;
 }
@@ -92,10 +115,16 @@ export interface Reservation {
   toolId: string;
   /** Planned pickup date (YYYY-MM-DD). */
   pickupDate: string;
+  pickupTimeStart?: string;
+  pickupTimeEnd?: string;
   /** Expected return date (YYYY-MM-DD). */
   returnDate: string;
+  returnTimeStart?: string;
+  returnTimeEnd?: string;
   status: ReservationStatus;
   feeAmount: number;
+  /** Loan length in hours (fixed_hours mode). */
+  loanDurationHours?: number;
   /** When the reservation was created. */
   createdAt: string;
 }
@@ -111,12 +140,61 @@ export interface Loan {
   safetyAcknowledged: boolean;
   checkoutPhotoUrl?: string;
   returnPhotoUrl?: string;
+  /** Free-text tool condition at pickup. */
+  checkoutConditionNotes?: string;
+  /** Free-text tool condition at return / closure. */
+  returnConditionNotes?: string;
+  /** IDs of included items verified at pickup. */
+  checkoutItemsChecked?: string[];
+  /** IDs of included items verified at return. */
+  returnItemsChecked?: string[];
+  /** Optional follow-up photos during active loan. */
+  additionalPhotoUrls?: string[];
   /** When the tool was physically picked up. */
   checkedOutAt?: string;
   /** Expected return date from reservation (YYYY-MM-DD). */
   dueReturnDate?: string;
+  /** Expected return time end (HH:MM). */
+  dueReturnTimeEnd?: string;
   /** When the tool was actually returned. */
   returnedAt?: string;
+}
+
+export interface LateReturnFee {
+  id: string;
+  loanId: string;
+  reservationId: string;
+  memberId: string;
+  toolId: string;
+  gemachId: string;
+  dueAt: string;
+  returnedAt: string;
+  lateMinutes: number;
+  amount: number;
+  paid: boolean;
+  paidAt?: string;
+  markedPaidBy?: string;
+  createdAt: string;
+}
+
+export interface AdminLateReturnRow {
+  id: string;
+  loanId: string;
+  memberId: string;
+  memberName: string;
+  memberEmail: string;
+  toolId: string;
+  toolName: string;
+  gemachId: string;
+  gemachName?: string;
+  dueAt: string;
+  returnedAt: string;
+  lateMinutes: number;
+  lateDurationLabel: string;
+  amount: number;
+  paid: boolean;
+  paidAt?: string;
+  createdAt: string;
 }
 
 export interface MaintenanceTicket {
@@ -163,6 +241,21 @@ export interface AdminDashboardReservation {
   status: ReservationStatus;
   pickupDate: string;
   returnDate: string;
+  createdAt: string;
+}
+
+export interface AdminMaintenanceReport {
+  id: string;
+  toolId: string;
+  toolName: string;
+  gemachId: string;
+  gemachName?: string;
+  memberId: string;
+  memberName: string;
+  memberEmail: string;
+  loanId?: string;
+  description: string;
+  status: MaintenanceTicket["status"];
   createdAt: string;
 }
 
@@ -218,10 +311,14 @@ export interface AdminDashboardData {
     disabled: number;
     activeLoans: number;
     activeReservations: number;
+    openProblemReports: number;
+    unpaidLateFees: number;
   };
   tools: AdminDashboardToolKindRow[];
   activeLoans: AdminDashboardLoan[];
   activeReservations: AdminDashboardReservation[];
+  problemReports: AdminMaintenanceReport[];
+  lateReturnFees: AdminLateReturnRow[];
   gemach?: Gemach;
   gemachim?: Gemach[];
 }
@@ -236,6 +333,13 @@ export interface AdminToolKindEdit {
   loanFeeMax: number;
   totalUnits: number;
   pricingMode: GemachPricingMode;
+  reservationMode: GemachReservationMode;
+  /** Stored per-tool override; undefined = inherit from gemach. */
+  defaultLoanHours?: number;
+  maxLoanHours?: number;
+  /** Resolved values for UI hints. */
+  gemachDefaultLoanHours: number;
+  gemachMaxLoanHours: number;
 }
 
 export interface AdminMemberSummary {

@@ -45,3 +45,37 @@ export function formatDateHe(iso?: string, withTime = false) {
       : {}),
   });
 }
+
+export function formatReservationSchedule(reservation: {
+  pickupDate: string;
+  pickupTimeStart?: string;
+  pickupTimeEnd?: string;
+  returnDate: string;
+  returnTimeStart?: string;
+  returnTimeEnd?: string;
+  loanDurationHours?: number;
+}): { pickup: string; return: string; duration?: string } {
+  const { pickupTimeStart: start, returnTimeEnd: end } = reservation;
+  const sameDay = reservation.pickupDate === reservation.returnDate;
+  const timeSpan = start && end ? `${start}–${end}` : start ?? "";
+  const duration = reservation.loanDurationHours
+    ? formatLoanDurationLabel(reservation.loanDurationHours)
+    : undefined;
+
+  return {
+    pickup:
+      timeSpan && sameDay
+        ? `${formatDateHe(reservation.pickupDate)} · ${timeSpan}`
+        : start
+          ? `${formatDateHe(reservation.pickupDate)} · ${start}`
+          : formatDateHe(reservation.pickupDate),
+    return: end
+      ? `${formatDateHe(reservation.returnDate)} · ${end}`
+      : formatDateHe(reservation.returnDate),
+    duration,
+  };
+}
+
+function formatLoanDurationLabel(hours: number): string {
+  return hours === 1 ? "שעה אחת" : `${hours} שעות`;
+}

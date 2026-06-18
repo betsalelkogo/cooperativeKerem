@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
-import { gemachPricingModeLabels } from "@/lib/gemach";
+import { gemachPricingModeLabels, MAX_LOAN_HOURS_CAP } from "@/lib/gemach";
 import { TOOL_CATEGORIES } from "@/lib/tools-admin";
 import { BackLink, PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardBody } from "@/components/ui/Card";
@@ -26,6 +26,8 @@ export default function EditGemachToolPage() {
   const [category, setCategory] = useState<string>(TOOL_CATEGORIES[0]);
   const [loanFeeMin, setLoanFeeMin] = useState("0");
   const [loanFeeMax, setLoanFeeMax] = useState("0");
+  const [defaultLoanHours, setDefaultLoanHours] = useState("");
+  const [maxLoanHours, setMaxLoanHours] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -54,6 +56,10 @@ export default function EditGemachToolPage() {
         setCategory(data.category);
         setLoanFeeMin(String(data.loanFeeMin));
         setLoanFeeMax(String(data.loanFeeMax));
+        setDefaultLoanHours(
+          data.defaultLoanHours !== undefined ? String(data.defaultLoanHours) : ""
+        );
+        setMaxLoanHours(data.maxLoanHours !== undefined ? String(data.maxLoanHours) : "");
       } catch (err) {
         setError(err instanceof Error ? err.message : "שגיאה");
       } finally {
@@ -84,6 +90,8 @@ export default function EditGemachToolPage() {
             category,
             loanFeeMin: Number(loanFeeMin),
             loanFeeMax: Number(loanFeeMax),
+            defaultLoanHours: defaultLoanHours.trim() === "" ? null : Number(defaultLoanHours),
+            maxLoanHours: maxLoanHours.trim() === "" ? null : Number(maxLoanHours),
           }),
         }
       );
@@ -117,6 +125,7 @@ export default function EditGemachToolPage() {
   if (!kind) return <Alert variant="error">הכלי לא נמצא</Alert>;
 
   const showFees = kind.pricingMode === "loan_fee";
+  const showLoanHours = kind.reservationMode === "fixed_hours";
 
   return (
     <div className="mx-auto max-w-lg">
@@ -224,6 +233,54 @@ export default function EditGemachToolPage() {
                   />
                 </div>
               </div>
+            )}
+
+            {showLoanHours && (
+              <fieldset className="space-y-3 rounded-xl border border-sky-200 bg-sky-50/40 p-4">
+                <legend className="px-1 text-sm font-bold text-stone-900">⏱ משך השאלה</legend>
+                <p className="text-xs text-[var(--muted)]">
+                  הגדרה לכלי זה בלבד. השאר ריק כדי ליירש מהגמ״ח (
+                  {kind.gemachDefaultLoanHours}–{kind.gemachMaxLoanHours} שעות).
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label
+                      htmlFor="defaultLoanHours"
+                      className="mb-1.5 block text-sm font-semibold text-stone-800"
+                    >
+                      ברירת מחדל (שעות)
+                    </label>
+                    <input
+                      id="defaultLoanHours"
+                      type="number"
+                      min={1}
+                      max={MAX_LOAN_HOURS_CAP}
+                      value={defaultLoanHours}
+                      onChange={(e) => setDefaultLoanHours(e.target.value)}
+                      placeholder={String(kind.gemachDefaultLoanHours)}
+                      className="w-full rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="maxLoanHours"
+                      className="mb-1.5 block text-sm font-semibold text-stone-800"
+                    >
+                      מקסימום (שעות)
+                    </label>
+                    <input
+                      id="maxLoanHours"
+                      type="number"
+                      min={1}
+                      max={MAX_LOAN_HOURS_CAP}
+                      value={maxLoanHours}
+                      onChange={(e) => setMaxLoanHours(e.target.value)}
+                      placeholder={String(kind.gemachMaxLoanHours)}
+                      className="w-full rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm"
+                    />
+                  </div>
+                </div>
+              </fieldset>
             )}
 
             <Button type="submit" size="lg" disabled={saving} className="w-full">

@@ -1,11 +1,15 @@
 "use client";
 
+import { useState } from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Alert } from "@/components/ui/Alert";
+import { Button } from "@/components/ui/Button";
+import { authFetch } from "@/lib/api-client";
 import { loanStatusLabels, reservationStatusLabels } from "@/lib/labels";
 import { formatDateHe } from "@/lib/dates";
 import { gemachPricingModeLabels } from "@/lib/gemach";
+import { formatNIS } from "@/lib/pots";
 import { AdminToolKindsTable } from "@/components/admin/AdminToolKindsTable";
 import type { AdminDashboardData } from "@/lib/types";
 
@@ -35,9 +39,12 @@ interface AdminDashboardViewProps {
   showGemachColumn?: boolean;
   showGemachimList?: boolean;
   editableTools?: boolean;
+  cooperativeOnly?: boolean;
+  showLateFees?: boolean;
   gemachId?: string;
   getToken?: () => Promise<string | null>;
   onToolsUpdated?: () => void;
+  onRefresh?: () => void;
 }
 
 export function AdminDashboardView({
@@ -47,10 +54,36 @@ export function AdminDashboardView({
   showGemachColumn = false,
   showGemachimList = false,
   editableTools = false,
+  cooperativeOnly = false,
+  showLateFees = false,
   gemachId,
   getToken,
   onToolsUpdated,
+  onRefresh,
 }: AdminDashboardViewProps) {
+  const [markingPaidId, setMarkingPaidId] = useState<string | null>(null);
+  const [lateFeeError, setLateFeeError] = useState("");
+
+  async function markLateFeePaid(feeId: string) {
+    if (!getToken) return;
+    setMarkingPaidId(feeId);
+    setLateFeeError("");
+    try {
+      const token = await getToken();
+      const res = await authFetch(`/api/admin/late-fees/${encodeURIComponent(feeId)}`, {
+        method: "PATCH",
+        token,
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "עדכון נכשל");
+      onRefresh?.();
+    } catch (err) {
+      setLateFeeError(err instanceof Error ? err.message : "שגיאה");
+    } finally {
+      setMarkingPaidId(null);
+    }
+  }
+
   return (
     <div>
       <PageHeader title={title} description={description} />
@@ -76,14 +109,116 @@ export function AdminDashboardView({
         </Card>
       )}
 
-      <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-8">
         <StatCard label="סה״כ כלים" value={data.stats.totalTools} />
         <StatCard label="זמינים" value={data.stats.available} accent="text-emerald-700" />
         <StatCard label="מושאלים" value={data.stats.onLoan} accent="text-amber-700" />
         <StatCard label="שמירות פעילות" value={data.stats.activeReservations} accent="text-sky-700" />
         <StatCard label="בתחזוקה" value={data.stats.maintenance} accent="text-orange-700" />
         <StatCard label="השאלות פעילות" value={data.stats.activeLoans} accent="text-violet-700" />
+        <StatCard
+          label="דיווחי בעיות"
+          value={data.stats.openProblemReports}
+          accent={data.stats.openProblemReports > 0 ? "text-red-700" : undefined}
+        />
+        <StatCard
+          label="קנסות שלא שולמו"
+          value={data.stats.unpaidLateFees}
+          accent={data.stats.unpaidLateFees > 0 ? "text-red-700" : undefined}
+        />
       </div>
+
+      {showLateFees && data.lateReturnFees.length > 0 && (
+        <section className="mb-10">
+          <h2 className="mb-4 text-lg font-bold text-stone-900">⏱ איחורים — קנסות ממתינים לתשלום</h2>
+          {lateFeeError && (
+            <Alert variant="error" className="mb-4">
+              {lateFeeError}
+            </Alert>
+          )}
+          <div className="overflow-x-auto rounded-xl border border-[var(--border)] bg-white shadow-sm">
+            <table className="w-full min-w-[720px] text-sm">
+              <thead>
+                <tr className="border-b border-[var(--border)] bg-warm-50 text-right">
+                  <th className="px-4 py-3 font-semibold text-stone-700">משתמש</th>
+                  <th className="px-4 py-3 font-semibold text-stone-700">כלי</th>
+                  <th className="px-4 py-3 font-semibold text-stone-700">איחור</th>
+                  <th className="px-4 py-3 font-semibold text-stone-700">קנס</th>
+                  <th className="px-4 py-3 font-semibold text-stone-700">הוחזר</th>
+                  <th className="px-4 py-3 font-semibold text-stone-700">סטטוס</th>
+                  <th className="px-4 py-3 font-semibold text-stone-700">פעולה</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.lateReturnFees.map((fee) => (
+                  <tr key={fee.id} className="border-b border-[var(--border)]">
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-stone-900">{fee.memberName}</p>
+                      <p className="text-xs text-[var(--muted)]">{fee.memberEmail}</p>
+                    </td>
+                    <td className="px-4 py-3 font-medium text-stone-900">{fee.toolName}</td>
+                    <td className="px-4 py-3 text-red-700">{fee.lateDurationLabel}</td>
+                    <td className="px-4 py-3 font-semibold">{formatNIS(fee.amount)}</td>
+                    <td className="px-4 py-3 text-[var(--muted)]">
+                      {formatDateTime(fee.returnedAt)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-800">
+                        לא שולם
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        disabled={markingPaidId === fee.id}
+                        onClick={() => markLateFeePaid(fee.id)}
+                      >
+                        {markingPaidId === fee.id ? "שומר…" : "סומן כשולם"}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {data.problemReports.length > 0 && (
+        <section className="mb-10">
+          <h2 className="mb-4 text-lg font-bold text-stone-900">⚠️ דיווחים על בעיות</h2>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {data.problemReports.map((report) => (
+              <Card key={report.id} className="border-orange-300 bg-orange-50/50">
+                <CardBody className="py-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-bold text-stone-900">{report.toolName}</p>
+                      {showGemachColumn && report.gemachName && (
+                        <p className="mt-0.5 text-xs text-[var(--muted)]">{report.gemachName}</p>
+                      )}
+                      <p className="mt-2 text-sm text-stone-700">{report.memberName}</p>
+                      <p className="text-xs text-[var(--muted)]">{report.memberEmail}</p>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-orange-200 px-2.5 py-1 text-xs font-bold text-orange-900 ring-1 ring-inset ring-orange-300">
+                      פתוח
+                    </span>
+                  </div>
+                  <p className="mt-3 rounded-lg bg-white/80 px-3 py-2 text-sm text-stone-800">
+                    {report.description}
+                  </p>
+                  <p className="mt-3 text-xs text-[var(--muted)]">
+                    דווח: {formatDateTime(report.createdAt)}
+                    {report.loanId ? ` · השאלה ${report.loanId}` : ""}
+                  </p>
+                </CardBody>
+              </Card>
+            ))}
+          </div>
+        </section>
+      )}
 
       {showGemachimList && data.gemachim && data.gemachim.length > 0 && (
         <section className="mb-10">
@@ -124,9 +259,10 @@ export function AdminDashboardView({
         tools={data.tools}
         showGemachColumn={showGemachColumn}
         editable={editableTools}
+        cooperativeOnly={cooperativeOnly}
         gemachId={gemachId}
         getToken={getToken ?? (async () => null)}
-        onUpdated={onToolsUpdated}
+        onUpdated={onToolsUpdated ?? onRefresh}
       />
 
       <section className="mb-10">

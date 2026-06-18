@@ -9,6 +9,8 @@ import {
   updateToolKindDetails,
   getGemachById,
 } from "@/lib/firestore/repository";
+import { isPlatformAdmin } from "@/lib/admin";
+import { isPlatformGemach } from "@/lib/gemach";
 
 export async function GET(
   request: Request,
@@ -57,6 +59,8 @@ export async function PATCH(
       category,
       loanFeeMin,
       loanFeeMax,
+      defaultLoanHours,
+      maxLoanHours,
     } = body as {
       gemachId?: string;
       name?: string;
@@ -64,6 +68,8 @@ export async function PATCH(
       category?: string;
       loanFeeMin?: number;
       loanFeeMax?: number;
+      defaultLoanHours?: number | null;
+      maxLoanHours?: number | null;
     };
 
     const gemachId = resolveGemachAdminScope(adminAuth.member, requestedGemachId ?? null);
@@ -80,6 +86,17 @@ export async function PATCH(
       return NextResponse.json({ error: "הגמ״ח סגור" }, { status: 403 });
     }
 
+    if (
+      isPlatformAdmin(adminAuth.member) &&
+      !isPlatformGemach(gemach) &&
+      !adminAuth.member.gemachAdminIds?.includes(gemachId)
+    ) {
+      return NextResponse.json(
+        { error: "מנהל פלטפורמה יכול לערוך רק כלי קואופרטיב" },
+        { status: 403 }
+      );
+    }
+
     const result = await updateToolKindDetails({
       gemachId,
       kindId,
@@ -88,6 +105,18 @@ export async function PATCH(
       category: category ?? "",
       loanFeeMin: gemach.pricingMode === "loan_fee" ? Number(loanFeeMin) : undefined,
       loanFeeMax: gemach.pricingMode === "loan_fee" ? Number(loanFeeMax) : undefined,
+      defaultLoanHours:
+        defaultLoanHours === null
+          ? null
+          : defaultLoanHours !== undefined
+            ? Number(defaultLoanHours)
+            : undefined,
+      maxLoanHours:
+        maxLoanHours === null
+          ? null
+          : maxLoanHours !== undefined
+            ? Number(maxLoanHours)
+            : undefined,
     });
 
     return NextResponse.json(result);

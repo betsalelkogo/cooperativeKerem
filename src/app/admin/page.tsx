@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
 import { hasOwnedGemachim } from "@/lib/admin";
+import { PLATFORM_GEMACH_ID } from "@/lib/gemach";
 import {
   AdminDashboardView,
   AdminDashboardLoading,
@@ -18,24 +19,26 @@ export default function AdminDashboardPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const token = await getIdToken();
-        const res = await authFetch("/api/admin/dashboard", { token });
-        if (!res.ok) {
-          const body = await res.json();
-          throw new Error(body.error ?? "טעינה נכשלה");
-        }
-        setData(await res.json());
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "שגיאה");
-      } finally {
-        setLoading(false);
+  const loadDashboard = useCallback(async () => {
+    try {
+      const token = await getIdToken();
+      const res = await authFetch("/api/admin/dashboard", { token });
+      if (!res.ok) {
+        const body = await res.json();
+        throw new Error(body.error ?? "טעינה נכשלה");
       }
+      setData(await res.json());
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "שגיאה");
+    } finally {
+      setLoading(false);
     }
-    load();
   }, [getIdToken]);
+
+  useEffect(() => {
+    loadDashboard();
+  }, [loadDashboard]);
 
   if (loading) return <AdminDashboardLoading />;
   if (error || !data) return <AdminDashboardError message={error} />;
@@ -66,6 +69,12 @@ export default function AdminDashboardPage() {
         description={`סקירה של כל הכלים, ה${"\u05d2\u05de\u05f4\u05d7\u05d9\u05dd"}, השאלות פעילות והמשתמשים.`}
         showGemachColumn
         showGemachimList
+        editableTools
+        cooperativeOnly
+        showLateFees
+        gemachId={PLATFORM_GEMACH_ID}
+        getToken={getIdToken}
+        onRefresh={loadDashboard}
       />
     </div>
   );

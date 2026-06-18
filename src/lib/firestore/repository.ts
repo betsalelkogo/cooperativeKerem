@@ -5,6 +5,7 @@ import type {
   AdminMemberHistory,
   AdminMemberSummary,
   Loan,
+  LateReturnFee,
   MaintenanceTicket,
   Member,
   MemberPayment,
@@ -22,6 +23,11 @@ import type {
   AdminToolKindEdit,
 } from "@/lib/types";
 import {
+  calculateLateFeeAmount,
+  computeLateness,
+  formatLateDuration,
+} from "@/lib/late-fees";
+import {
   resolveKindId,
   groupToolsByKind,
   resolveKindUnits,
@@ -35,8 +41,19 @@ import {
   normalizeGemachId,
   formatToolPriceLabel,
   isPartnerGemach,
+  isPlatformGemach,
   resolveReservationFee,
   displayGemachName,
+  resolveGemachReservationMode,
+  resolveGemachDefaultLoanHours,
+  resolveGemachMaxLoanHours,
+  resolveToolDefaultLoanHours,
+  resolveToolMaxLoanHours,
+  validateToolLoanHours,
+  PLATFORM_DEFAULT_LOAN_HOURS,
+  PLATFORM_MAX_LOAN_HOURS,
+  PARTNER_DEFAULT_LOAN_HOURS,
+  PARTNER_MAX_LOAN_HOURS,
 } from "@/lib/gemach";
 import { splitPayment, getOperationsPercent } from "@/lib/pots";
 import { getDefaultPayboxSettings } from "@/lib/paybox/config";
@@ -109,9 +126,15 @@ function reservationFromDoc(id: string, data: DocumentData): Reservation {
     memberId: (data.memberId as string) ?? "",
     toolId: (data.toolId as string) ?? "",
     pickupDate: reservationPickupDate(data),
+    pickupTimeStart: typeof data.pickupTimeStart === "string" ? data.pickupTimeStart : undefined,
+    pickupTimeEnd: typeof data.pickupTimeEnd === "string" ? data.pickupTimeEnd : undefined,
     returnDate: reservationReturnDate(data),
+    returnTimeStart: typeof data.returnTimeStart === "string" ? data.returnTimeStart : undefined,
+    returnTimeEnd: typeof data.returnTimeEnd === "string" ? data.returnTimeEnd : undefined,
     status: (data.status as Reservation["status"]) ?? "pending",
     feeAmount: (data.feeAmount as number) ?? 0,
+    loanDurationHours:
+      typeof data.loanDurationHours === "number" ? data.loanDurationHours : undefined,
     createdAt: data.createdAt ? tsToIso(data.createdAt) : new Date().toISOString(),
   };
 }
@@ -121,6 +144,7 @@ function loanFromDoc(id: string, data: DocumentData): Loan {
   if (data.checkedOutAt) loan.checkedOutAt = tsToIso(data.checkedOutAt);
   if (data.returnedAt) loan.returnedAt = tsToIso(data.returnedAt);
   if (typeof data.dueReturnDate === "string") loan.dueReturnDate = data.dueReturnDate;
+  if (typeof data.dueReturnTimeEnd === "string") loan.dueReturnTimeEnd = data.dueReturnTimeEnd;
   return loan;
 }
 
@@ -193,10 +217,14 @@ function toolFromDoc(id: string, data: DocumentData): Tool {
     gemachId: normalizeGemachId(data.gemachId),
     kindId: resolveKindId(data, id),
     unitLabel: typeof data.unitLabel === "string" ? data.unitLabel : undefined,
+    defaultLoanHours:
+      typeof data.defaultLoanHours === "number" ? data.defaultLoanHours : undefined,
+    maxLoanHours: typeof data.maxLoanHours === "number" ? data.maxLoanHours : undefined,
   };
 }
 
 function gemachFromDoc(id: string, data: DocumentData): Gemach {
+  const isPlatform = (data.isPlatform as boolean) ?? false;
   return {
     id,
     name: (data.name as string) ?? id,
@@ -208,9 +236,29 @@ function gemachFromDoc(id: string, data: DocumentData): Gemach {
       typeof data.payboxGroupUrl === "string" && data.payboxGroupUrl
         ? data.payboxGroupUrl
         : undefined,
-    isPlatform: (data.isPlatform as boolean) ?? false,
+    isPlatform,
     active: (data.active as boolean) ?? true,
+    reservationMode: (data.reservationMode as Gemach["reservationMode"]) ?? undefined,
+    defaultLoanHours:
+      typeof data.defaultLoanHours === "number" ? data.defaultLoanHours : undefined,
+    maxLoanHours: typeof data.maxLoanHours === "number" ? data.maxLoanHours : undefined,
     closedAt: data.closedAt ? tsToIso(data.closedAt) : undefined,
+  };
+}
+
+function gemachCatalogFields(gemach: Gemach, tool?: Tool) {
+  return {
+    gemachName: displayGemachName(gemach),
+    gemachPricingMode: gemach.pricingMode,
+    ...(tool ? { priceLabel: formatToolPriceLabel(gemach, tool) } : {}),
+    isPartnerGemach: isPartnerGemach(gemach),
+    gemachReservationMode: resolveGemachReservationMode(gemach),
+    gemachDefaultLoanHours: tool
+      ? resolveToolDefaultLoanHours(tool, gemach)
+      : resolveGemachDefaultLoanHours(gemach),
+    gemachMaxLoanHours: tool
+      ? resolveToolMaxLoanHours(tool, gemach)
+      : resolveGemachMaxLoanHours(gemach),
   };
 }
 
@@ -227,10 +275,7 @@ function enrichToolsWithGemach(
     return {
       ...tool,
       ...extra,
-      gemachName: displayGemachName(gemach),
-      gemachPricingMode: gemach.pricingMode,
-      priceLabel: formatToolPriceLabel(gemach, tool),
-      isPartnerGemach: isPartnerGemach(gemach),
+      ...gemachCatalogFields(gemach, tool),
     };
   });
 }
@@ -250,6 +295,9 @@ export async function getAllGemachim(options?: {
         pricingMode: "loan_fee",
         isPlatform: true,
         active: true,
+        reservationMode: "fixed_hours",
+        defaultLoanHours: PLATFORM_DEFAULT_LOAN_HOURS,
+        maxLoanHours: PLATFORM_MAX_LOAN_HOURS,
       },
     ];
   }
@@ -280,6 +328,7 @@ export async function createGemachAndAssignAdmin(params: {
   name: string;
   description?: string;
   pricingMode: Gemach["pricingMode"];
+  reservationMode?: Gemach["reservationMode"];
   maintenanceFee?: number;
   payboxGroupUrl?: string;
   createdBy: string;
@@ -304,12 +353,21 @@ export async function createGemachAndAssignAdmin(params: {
   const role = roleFromMemberData(memberData);
   const gemachAdminIds = gemachAdminIdsFromData(memberData);
 
+  const reservationMode = params.reservationMode ?? "date_range";
+
   const batch = db.batch();
   batch.set(gemachRef, {
     name: params.name.trim(),
     slug: params.id,
     description: params.description?.trim() || null,
     pricingMode: params.pricingMode,
+    reservationMode,
+    ...(reservationMode === "fixed_hours"
+      ? {
+          defaultLoanHours: PARTNER_DEFAULT_LOAN_HOURS,
+          maxLoanHours: PARTNER_MAX_LOAN_HOURS,
+        }
+      : {}),
     ...(params.pricingMode === "maintenance_only" && params.maintenanceFee !== undefined
       ? { maintenanceFee: params.maintenanceFee }
       : {}),
@@ -473,6 +531,11 @@ export async function getToolKindForAdmin(
     loanFeeMax: representative.loanFeeMax,
     totalUnits: units.length,
     pricingMode: gemach.pricingMode,
+    reservationMode: resolveGemachReservationMode(gemach),
+    defaultLoanHours: representative.defaultLoanHours,
+    maxLoanHours: representative.maxLoanHours,
+    gemachDefaultLoanHours: resolveGemachDefaultLoanHours(gemach),
+    gemachMaxLoanHours: resolveGemachMaxLoanHours(gemach),
   };
 }
 
@@ -484,10 +547,21 @@ export async function updateToolKindDetails(params: {
   category: string;
   loanFeeMin?: number;
   loanFeeMax?: number;
+  defaultLoanHours?: number | null;
+  maxLoanHours?: number | null;
 }): Promise<{ updated: number }> {
   const gemach = await getGemachById(params.gemachId);
   if (!gemach) {
     throw new Error("גמ״ח לא נמצא");
+  }
+
+  const loanHoursError = validateToolLoanHours(
+    params.defaultLoanHours === null ? undefined : params.defaultLoanHours,
+    params.maxLoanHours === null ? undefined : params.maxLoanHours,
+    gemach
+  );
+  if (loanHoursError) {
+    throw new Error(loanHoursError);
   }
 
   const validationError = validateToolInput({
@@ -516,14 +590,28 @@ export async function updateToolKindDetails(params: {
 
   const batch = getAdminDb().batch();
   for (const tool of units) {
-    batch.update(getAdminDb().collection("tools").doc(tool.id), {
+    const update: Record<string, unknown> = {
       name: params.name.trim(),
       description: params.description.trim(),
       category: params.category.trim(),
       loanFeeMin: fees.loanFeeMin,
       loanFeeMax: fees.loanFeeMax,
       updatedAt: FieldValue.serverTimestamp(),
-    });
+    };
+
+    if (params.defaultLoanHours === null) {
+      update.defaultLoanHours = FieldValue.delete();
+    } else if (params.defaultLoanHours !== undefined) {
+      update.defaultLoanHours = params.defaultLoanHours;
+    }
+
+    if (params.maxLoanHours === null) {
+      update.maxLoanHours = FieldValue.delete();
+    } else if (params.maxLoanHours !== undefined) {
+      update.maxLoanHours = params.maxLoanHours;
+    }
+
+    batch.update(getAdminDb().collection("tools").doc(tool.id), update);
   }
   await batch.commit();
   return { updated: units.length };
@@ -555,14 +643,7 @@ export async function getToolKindsWithAvailability(): Promise<ToolKindWithAvaila
     .map((units) => {
       const gemach = gemachMap.get(units[0].gemachId);
       return buildToolKindWithAvailability(units, loanByTool, reservationByTool, {
-        ...(gemach
-          ? {
-              gemachName: displayGemachName(gemach),
-              gemachPricingMode: gemach.pricingMode,
-              priceLabel: formatToolPriceLabel(gemach, units[0]),
-              isPartnerGemach: isPartnerGemach(gemach),
-            }
-          : {}),
+        ...(gemach ? gemachCatalogFields(gemach, units[0]) : {}),
       });
     })
     .filter((k): k is ToolKindWithAvailability => k !== null);
@@ -584,14 +665,7 @@ export async function getToolKindWithAvailability(
   const { loanByTool, reservationByTool } = buildActiveHolders(loans, reservations);
 
   return buildToolKindWithAvailability(units, loanByTool, reservationByTool, {
-    ...(gemach
-      ? {
-          gemachName: displayGemachName(gemach),
-          gemachPricingMode: gemach.pricingMode,
-          priceLabel: formatToolPriceLabel(gemach, units[0]),
-          isPartnerGemach: isPartnerGemach(gemach),
-        }
-      : {}),
+    ...(gemach ? gemachCatalogFields(gemach, units[0]) : {}),
   });
 }
 
@@ -743,11 +817,22 @@ export async function createToolsForGemach(params: {
   loanFeeMax: number;
   kindId?: string;
   safetyRules?: SafetyRule[];
+  defaultLoanHours?: number;
+  maxLoanHours?: number;
   createdBy: string;
 }): Promise<{ kindId: string; tools: Tool[] }> {
   const gemach = await getGemachById(params.gemachId);
   if (!gemach) {
     throw new Error("גמ״ח לא נמצא");
+  }
+
+  const loanHoursError = validateToolLoanHours(
+    params.defaultLoanHours,
+    params.maxLoanHours,
+    gemach
+  );
+  if (loanHoursError) {
+    throw new Error(loanHoursError);
   }
 
   const fees = resolveToolFees(gemach, params.loanFeeMin, params.loanFeeMax);
@@ -777,6 +862,10 @@ export async function createToolsForGemach(params: {
       gemachId: params.gemachId,
       kindId,
       ...(unitLabel ? { unitLabel } : {}),
+      ...(params.defaultLoanHours !== undefined
+        ? { defaultLoanHours: params.defaultLoanHours }
+        : {}),
+      ...(params.maxLoanHours !== undefined ? { maxLoanHours: params.maxLoanHours } : {}),
       safetyRules,
       createdBy: params.createdBy,
       createdAt: FieldValue.serverTimestamp(),
@@ -806,6 +895,10 @@ export async function createToolsForGemach(params: {
       gemachId: params.gemachId,
       kindId,
       ...(unitLabel ? { unitLabel } : {}),
+      ...(params.defaultLoanHours !== undefined
+        ? { defaultLoanHours: params.defaultLoanHours }
+        : {}),
+      ...(params.maxLoanHours !== undefined ? { maxLoanHours: params.maxLoanHours } : {}),
       safetyRules,
     });
   }
@@ -832,10 +925,17 @@ export async function createReservation(
     memberId: data.memberId,
     toolId: data.toolId,
     pickupDate: data.pickupDate,
+    pickupTimeStart: data.pickupTimeStart ?? null,
+    pickupTimeEnd: data.pickupTimeEnd ?? null,
     returnDate: data.returnDate,
+    returnTimeStart: data.returnTimeStart ?? null,
+    returnTimeEnd: data.returnTimeEnd ?? null,
     date: data.pickupDate,
     status: data.status,
     feeAmount: data.feeAmount,
+    ...(data.loanDurationHours !== undefined
+      ? { loanDurationHours: data.loanDurationHours }
+      : {}),
     createdAt: now,
   });
   return { ...data, id, createdAt: new Date().toISOString() };
@@ -1004,12 +1104,17 @@ export async function getAdminDashboard(options?: {
   includeGemachim?: boolean;
 }): Promise<AdminDashboardData> {
   const gemachId = options?.gemachId;
-  const [allTools, loans, reservations, gemachim, scopedGemach] = await Promise.all([
+  const lateFeeGemachFilter =
+    gemachId ?? (options?.includeGemachim ? PLATFORM_GEMACH_ID : undefined);
+  const [allTools, loans, reservations, gemachim, scopedGemach, openTickets, unpaidLateFees] =
+    await Promise.all([
     getAllTools(),
     getAllLoans(),
     getAllReservations(),
     options?.includeGemachim ? getAllGemachim({ includeInactive: true }) : Promise.resolve([]),
     gemachId ? getGemachById(gemachId) : Promise.resolve(null),
+    listMaintenanceTickets({ status: "open" }),
+    listLateReturnFees({ paid: false, gemachId: lateFeeGemachFilter }),
   ]);
 
   const tools = gemachId
@@ -1028,6 +1133,8 @@ export async function getAdminDashboard(options?: {
     ...new Set([
       ...activeLoans.map((l) => l.memberId),
       ...activeReservations.map((r) => r.memberId),
+      ...openTickets.map((t) => t.memberId),
+      ...unpaidLateFees.map((f) => f.memberId),
     ]),
   ];
   const members = await Promise.all(memberIds.map((id) => getMemberById(id)));
@@ -1075,6 +1182,56 @@ export async function getAdminDashboard(options?: {
   });
 
   const toolMap = new Map(tools.map((t) => [t.id, t]));
+  const allToolMap = new Map(allTools.map((t) => [t.id, t]));
+
+  const problemReports = openTickets
+    .map((ticket) => {
+      const tool = allToolMap.get(ticket.toolId);
+      if (!tool) return null;
+      if (gemachId && tool.gemachId !== gemachId) return null;
+      const member = memberMap.get(ticket.memberId);
+      const gemach = gemachMap.get(tool.gemachId);
+      return {
+        id: ticket.id,
+        toolId: ticket.toolId,
+        toolName: tool.name,
+        gemachId: tool.gemachId,
+        gemachName: gemach ? displayGemachName(gemach) : undefined,
+        memberId: ticket.memberId,
+        memberName: member?.name ?? "לא ידוע",
+        memberEmail: member?.email ?? "",
+        loanId: ticket.loanId,
+        description: ticket.description,
+        status: ticket.status,
+        createdAt: ticket.createdAt,
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => row !== null);
+
+  const lateReturnFees = unpaidLateFees.map((fee) => {
+    const tool = allToolMap.get(fee.toolId);
+    const member = memberMap.get(fee.memberId);
+    const gemach = gemachMap.get(fee.gemachId);
+    return {
+      id: fee.id,
+      loanId: fee.loanId,
+      memberId: fee.memberId,
+      memberName: member?.name ?? "לא ידוע",
+      memberEmail: member?.email ?? "",
+      toolId: fee.toolId,
+      toolName: tool?.name ?? fee.toolId,
+      gemachId: fee.gemachId,
+      gemachName: gemach ? displayGemachName(gemach) : undefined,
+      dueAt: fee.dueAt,
+      returnedAt: fee.returnedAt,
+      lateMinutes: fee.lateMinutes,
+      lateDurationLabel: formatLateDuration(fee.lateMinutes),
+      amount: fee.amount,
+      paid: fee.paid,
+      paidAt: fee.paidAt,
+      createdAt: fee.createdAt,
+    };
+  });
 
   return {
     stats: {
@@ -1086,6 +1243,8 @@ export async function getAdminDashboard(options?: {
       disabled: tools.filter((t) => t.status === "disabled").length,
       activeLoans: activeLoans.length,
       activeReservations: activeReservations.length,
+      openProblemReports: problemReports.length,
+      unpaidLateFees: lateReturnFees.length,
     },
     tools: toolRows.sort((a, b) => a.name.localeCompare(b.name, "he")),
     activeReservations: activeReservations.map((reservation) => {
@@ -1119,6 +1278,8 @@ export async function getAdminDashboard(options?: {
         dueReturnDate: loan.dueReturnDate,
       };
     }),
+    problemReports,
+    lateReturnFees,
     ...(scopedGemach ? { gemach: scopedGemach } : {}),
     ...(options?.includeGemachim ? { gemachim } : {}),
   };
@@ -1245,6 +1406,8 @@ export async function getPotsOverviewForGemach(gemachId: string) {
 export async function createLoanFromCheckout(params: {
   reservation: Reservation;
   checkoutPhotoUrl: string;
+  checkoutConditionNotes?: string;
+  checkoutItemsChecked?: string[];
 }): Promise<Loan> {
   const payment =
     params.reservation.feeAmount > 0
@@ -1267,8 +1430,13 @@ export async function createLoanFromCheckout(params: {
     status: "active",
     safetyAcknowledged: true,
     checkoutPhotoUrl: params.checkoutPhotoUrl,
+    checkoutConditionNotes: params.checkoutConditionNotes?.trim() || undefined,
+    checkoutItemsChecked: params.checkoutItemsChecked?.length
+      ? params.checkoutItemsChecked
+      : undefined,
     checkedOutAt: new Date().toISOString(),
     dueReturnDate: params.reservation.returnDate || undefined,
+    dueReturnTimeEnd: params.reservation.returnTimeEnd ?? params.reservation.returnTimeStart,
   };
 
   const transaction: Transaction = {
@@ -1324,24 +1492,150 @@ export async function createLoanFromCheckout(params: {
 
 export async function completeLoanReturn(
   loanId: string,
-  returnPhotoUrl: string
-): Promise<Loan> {
+  params: {
+    returnPhotoUrl: string;
+    returnConditionNotes?: string;
+    returnItemsChecked?: string[];
+  }
+): Promise<{ loan: Loan; lateFee: LateReturnFee | null }> {
   const db = getAdminDb();
   const loan = await getLoanById(loanId);
   if (!loan) throw new Error("Loan not found");
 
-  const returnedAt = new Date().toISOString();
+  const returnedAt = new Date();
+  const returnedAtIso = returnedAt.toISOString();
   const batch = db.batch();
 
   batch.update(db.collection("loans").doc(loanId), {
     status: "returned",
-    returnPhotoUrl,
+    returnPhotoUrl: params.returnPhotoUrl,
+    returnConditionNotes: params.returnConditionNotes?.trim() || null,
+    returnItemsChecked: params.returnItemsChecked?.length ? params.returnItemsChecked : null,
     returnedAt: FieldValue.serverTimestamp(),
   });
   batch.update(db.collection("tools").doc(loan.toolId), { status: "available" });
 
+  let lateFee: LateReturnFee | null = null;
+  const reservation = loan.reservationId
+    ? await getReservationById(loan.reservationId)
+    : null;
+
+  if (reservation) {
+    const { lateMinutes, dueAt } = computeLateness(reservation, returnedAt);
+    const amount = calculateLateFeeAmount(lateMinutes);
+    if (lateMinutes > 0 && amount > 0) {
+      const tool = await getToolById(loan.toolId);
+      const feeId = newId("late");
+      lateFee = {
+        id: feeId,
+        loanId,
+        reservationId: loan.reservationId,
+        memberId: loan.memberId,
+        toolId: loan.toolId,
+        gemachId: tool?.gemachId ?? PLATFORM_GEMACH_ID,
+        dueAt: dueAt.toISOString(),
+        returnedAt: returnedAtIso,
+        lateMinutes,
+        amount,
+        paid: false,
+        createdAt: returnedAtIso,
+      };
+      batch.set(db.collection("late_return_fees").doc(feeId), {
+        ...lateFee,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    }
+  }
+
   await batch.commit();
-  return { ...loan, status: "returned", returnPhotoUrl, returnedAt };
+
+  return {
+    loan: {
+      ...loan,
+      status: "returned",
+      returnPhotoUrl: params.returnPhotoUrl,
+      returnConditionNotes: params.returnConditionNotes?.trim() || undefined,
+      returnItemsChecked: params.returnItemsChecked,
+      returnedAt: returnedAtIso,
+    },
+    lateFee,
+  };
+}
+
+export async function addLoanPhoto(loanId: string, photoUrl: string): Promise<Loan> {
+  const loan = await getLoanById(loanId);
+  if (!loan) throw new Error("Loan not found");
+  if (loan.status !== "active") {
+    throw new Error("ניתן להוסיף צילום רק להשאלה פעילה");
+  }
+
+  const additionalPhotoUrls = [...(loan.additionalPhotoUrls ?? []), photoUrl];
+  await getAdminDb()
+    .collection("loans")
+    .doc(loanId)
+    .update({ additionalPhotoUrls });
+
+  return { ...loan, additionalPhotoUrls };
+}
+
+// ─── Late return fees ───────────────────────────────────────────────────────
+
+function lateReturnFeeFromDoc(id: string, data: DocumentData): LateReturnFee {
+  return {
+    id,
+    loanId: data.loanId as string,
+    reservationId: data.reservationId as string,
+    memberId: data.memberId as string,
+    toolId: data.toolId as string,
+    gemachId: (data.gemachId as string) ?? PLATFORM_GEMACH_ID,
+    dueAt: typeof data.dueAt === "string" ? data.dueAt : tsToIso(data.dueAt),
+    returnedAt:
+      typeof data.returnedAt === "string" ? data.returnedAt : tsToIso(data.returnedAt),
+    lateMinutes: (data.lateMinutes as number) ?? 0,
+    amount: (data.amount as number) ?? 0,
+    paid: (data.paid as boolean) ?? false,
+    paidAt: data.paidAt ? tsToIso(data.paidAt) : undefined,
+    markedPaidBy: (data.markedPaidBy as string) || undefined,
+    createdAt: data.createdAt ? tsToIso(data.createdAt) : new Date().toISOString(),
+  };
+}
+
+export async function listLateReturnFees(options?: {
+  paid?: boolean;
+  gemachId?: string;
+}): Promise<LateReturnFee[]> {
+  const snap = await getAdminDb().collection("late_return_fees").get();
+  return snap.docs
+    .map((d) => lateReturnFeeFromDoc(d.id, d.data()))
+    .filter((fee) => {
+      if (options?.paid !== undefined && fee.paid !== options.paid) return false;
+      if (options?.gemachId && fee.gemachId !== options.gemachId) return false;
+      return true;
+    })
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export async function markLateReturnFeePaid(
+  feeId: string,
+  markedPaidBy: string
+): Promise<LateReturnFee> {
+  const ref = getAdminDb().collection("late_return_fees").doc(feeId);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error("רשומת קנס לא נמצאה");
+
+  await ref.update({
+    paid: true,
+    paidAt: FieldValue.serverTimestamp(),
+    markedPaidBy,
+  });
+
+  const data = snap.data()!;
+  return {
+    ...lateReturnFeeFromDoc(feeId, data),
+    paid: true,
+    paidAt: new Date().toISOString(),
+    markedPaidBy,
+  };
 }
 
 // ─── Maintenance ───────────────────────────────────────────────────────────
@@ -1362,6 +1656,34 @@ export async function createMaintenanceTicket(
 
   await batch.commit();
   return { ...data, id, status: "open", createdAt: new Date().toISOString() };
+}
+
+function maintenanceTicketFromDoc(id: string, data: DocumentData): MaintenanceTicket {
+  return {
+    id,
+    toolId: data.toolId as string,
+    loanId: (data.loanId as string) || undefined,
+    memberId: data.memberId as string,
+    description: data.description as string,
+    status: (data.status as MaintenanceTicket["status"]) ?? "open",
+    createdAt: tsToIso(data.createdAt),
+  };
+}
+
+export async function listMaintenanceTickets(options?: {
+  status?: MaintenanceTicket["status"] | MaintenanceTicket["status"][];
+}): Promise<MaintenanceTicket[]> {
+  const snap = await getAdminDb().collection("maintenance_tickets").get();
+  const statuses = options?.status
+    ? Array.isArray(options.status)
+      ? options.status
+      : [options.status]
+    : null;
+
+  return snap.docs
+    .map((d) => maintenanceTicketFromDoc(d.id, d.data()))
+    .filter((t) => !statuses || statuses.includes(t.status))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 // ─── Pots ──────────────────────────────────────────────────────────────────

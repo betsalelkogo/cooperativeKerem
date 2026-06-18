@@ -9,6 +9,17 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const loanId = formData.get("loanId") as string | null;
     const photo = formData.get("photo") as File | null;
+    const returnConditionNotes = formData.get("returnConditionNotes") as string | null;
+    const returnItemsRaw = formData.get("returnItemsChecked") as string | null;
+
+    let returnItemsChecked: string[] = [];
+    if (returnItemsRaw) {
+      try {
+        returnItemsChecked = JSON.parse(returnItemsRaw) as string[];
+      } catch {
+        returnItemsChecked = [];
+      }
+    }
 
     if (!loanId || !photo) {
       return NextResponse.json({ error: "נדרשים מזהה השאלה ותמונה" }, { status: 400 });
@@ -24,11 +35,18 @@ export async function POST(request: Request) {
     }
 
     if (loan.status !== "active") {
-      return NextResponse.json({ error: "ההשאלה אינה פעילה" }, { status: 409 });
+      return NextResponse.json(
+        { error: "ניתן לסגור רק השאלה פעילה — ההשאלה כבר לא פעילה" },
+        { status: 409 }
+      );
     }
 
-    const updated = await completeLoanReturn(loanId, `/uploads/${photo.name}`);
-    return NextResponse.json(updated);
+    const { loan: updatedLoan, lateFee } = await completeLoanReturn(loanId, {
+      returnPhotoUrl: `/uploads/${photo.name}`,
+      returnConditionNotes: returnConditionNotes ?? undefined,
+      returnItemsChecked,
+    });
+    return NextResponse.json({ loan: updatedLoan, lateFee });
   } catch {
     return NextResponse.json({ error: "שגיאת שרת" }, { status: 500 });
   }

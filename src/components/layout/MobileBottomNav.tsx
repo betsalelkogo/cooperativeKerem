@@ -8,7 +8,18 @@ import { cn } from "@/lib/cn";
 
 const baseTabs = [
   { href: "/tools", label: "כלים", icon: "🔧", match: (p: string) => p.startsWith("/tools") },
-  { href: "/my-loans", label: "השאלות", icon: "📋", match: (p: string) => p.startsWith("/my-loans") },
+  {
+    href: "/my-reservations",
+    label: "שמירות",
+    icon: "📅",
+    match: (p: string) => p.startsWith("/my-reservations"),
+  },
+  {
+    href: "/my-loans",
+    label: "השאלות",
+    icon: "📋",
+    match: (p: string) => p.startsWith("/my-loans") || p.startsWith("/return"),
+  },
 ];
 
 const platformAdminTab = {

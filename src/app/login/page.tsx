@@ -6,6 +6,7 @@ import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 import { useAuth } from "@/contexts/AuthProvider";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Alert } from "@/components/ui/Alert";
+import { SiteLogo } from "@/components/layout/SiteLogo";
 
 function resolveRedirect(path: string | null): string {
   if (!path || path === "/" || path.startsWith("/login")) return "/tools";
@@ -46,11 +47,9 @@ function LoginContent() {
   return (
     <div className="mx-auto flex min-h-[70vh] max-w-md flex-col justify-center px-2">
       <div className="mb-8 text-center">
-        <span className="mb-4 inline-flex h-20 w-20 items-center justify-center rounded-3xl bg-kerem-700 text-4xl shadow-lg shadow-kerem-700/30">
-          🌿
-        </span>
+        <SiteLogo size="lg" priority className="mx-auto mb-4 shadow-lg shadow-stone-900/10" />
         <h1 className="text-3xl font-bold text-stone-900">כרם רעים</h1>
-        <p className="mt-2 text-lg font-medium text-kerem-800">ספריית כלים קואופרטיבית</p>
+        <p className="mt-2 text-lg font-medium text-kerem-800">קואופרטיב הציוד</p>
         <p className="mt-3 text-sm text-[var(--muted)]">
           התחברו פעם אחת — נזכור אתכם בפעם הבאה
         </p>

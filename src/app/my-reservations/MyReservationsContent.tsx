@@ -1,0 +1,145 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Card, CardBody } from "@/components/ui/Card";
+import { Alert } from "@/components/ui/Alert";
+import { useAuth } from "@/contexts/AuthProvider";
+import { authFetch } from "@/lib/api-client";
+import {
+  ActivityLoading,
+  ReservationCard,
+  type ReservationWithTool,
+} from "@/components/my-activity/ActivityCards";
+
+export default function MyReservationsContent() {
+  const { getIdToken, user } = useAuth();
+  const searchParams = useSearchParams();
+  const justCreated = searchParams.get("created") === "1";
+
+  const [reservations, setReservations] = useState<ReservationWithTool[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+
+  async function loadData() {
+    const token = await getIdToken();
+    if (!token) return;
+
+    const res = await authFetch("/api/reservations", { token });
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error ?? "שגיאה בטעינת שמירות");
+    }
+    setReservations(await res.json());
+  }
+
+  useEffect(() => {
+    if (!user) return;
+    async function load() {
+      try {
+        await loadData();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "שגיאה בטעינה");
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, [user, getIdToken]);
+
+  async function handleCancelReservation(reservationId: string) {
+    const confirmed = window.confirm(
+      "לבטל את השמירה? הכלי יחזור להיות זמין.\n\nאם כבר שילמת דרך PayBox, פנו למנהל לגבי החזר."
+    );
+    if (!confirmed) return;
+
+    setCancellingId(reservationId);
+    setError("");
+    try {
+      const token = await getIdToken();
+      const res = await authFetch(`/api/reservations/${reservationId}`, {
+        method: "DELETE",
+        token,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error ?? "ביטול השמירה נכשל");
+      }
+      if (data.hadPaidPayment) {
+        window.alert("השמירה בוטלה. שילמת דרך PayBox — פנו למנהל לגבי החזר.");
+      }
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "ביטול השמירה נכשל");
+    } finally {
+      setCancellingId(null);
+    }
+  }
+
+  if (loading) return <ActivityLoading />;
+
+  return (
+    <div>
+      <PageHeader
+        title="השמירות שלי"
+        description="שלב 1 — שמרתם כלי. כשמגיעים לאסוף, המשיכו ללקיחה והפעלת ההשאלה."
+      />
+
+      {justCreated && (
+        <Alert variant="success" className="mb-4">
+          <p className="font-semibold">השמירה נוצרה בהצלחה!</p>
+          <p className="mt-1 text-sm">
+            הכלי שמור עבורכם. ביום האיסוף לחצו «המשך ללקיחה» לתשלום (אם נדרש) והפעלת ההשאלה.
+          </p>
+        </Alert>
+      )}
+
+      {error && (
+        <Alert variant="error" className="mb-4">
+          {error}
+        </Alert>
+      )}
+
+      {reservations.length === 0 ? (
+        <Card className="border-dashed">
+          <CardBody className="py-16 text-center">
+            <span className="mb-4 inline-block text-5xl">📅</span>
+            <p className="text-lg font-semibold text-stone-800">אין שמירות פעילות</p>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              שריינו כלי מהקטלוג — השמירה תופיע כאן עד הלקיחה.
+            </p>
+            <Link
+              href="/tools"
+              className="mt-6 inline-flex items-center gap-2 rounded-xl bg-kerem-700 px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:bg-kerem-800"
+            >
+              ← לכלים הזמינים
+            </Link>
+          </CardBody>
+        </Card>
+      ) : (
+        <ul className="space-y-4">
+          {reservations.map(({ reservation, tool }) => (
+            <li key={reservation.id}>
+              <ReservationCard
+                reservation={reservation}
+                tool={tool}
+                cancelling={cancellingId === reservation.id}
+                onCancel={handleCancelReservation}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <p className="mt-8 text-center text-sm text-[var(--muted)]">
+        כבר לקחתם כלי?{" "}
+        <Link href="/my-loans" className="font-semibold text-kerem-700 underline">
+          עברו להשאלות שלי
+        </Link>
+      </p>
+    </div>
+  );
+}

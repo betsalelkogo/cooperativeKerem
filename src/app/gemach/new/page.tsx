@@ -5,12 +5,29 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
-import { gemachPricingModeLabels, gemachRequiresPaybox } from "@/lib/gemach";
+import type { GemachPricingMode, GemachReservationMode } from "@/lib/types";
+import {
+  gemachPricingModeLabels,
+  gemachRequiresPaybox,
+  gemachReservationModeLabels,
+  gemachReservationModeHints,
+} from "@/lib/gemach";
+
 import { BackLink, PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
-import type { GemachPricingMode } from "@/lib/types";
+
+const reservationModeOptions: { value: GemachReservationMode; hint: string }[] = [
+  {
+    value: "date_range",
+    hint: gemachReservationModeHints.date_range,
+  },
+  {
+    value: "fixed_hours",
+    hint: gemachReservationModeHints.fixed_hours,
+  },
+];
 
 const pricingOptions: { value: GemachPricingMode; hint: string }[] = [
   { value: "free", hint: "השאלה ללא תשלום — מתאים לגמ״חים קהילתיים" },
@@ -26,6 +43,7 @@ export default function AddGemachPage() {
   const [description, setDescription] = useState("");
   const [slug, setSlug] = useState("");
   const [pricingMode, setPricingMode] = useState<GemachPricingMode>("free");
+  const [reservationMode, setReservationMode] = useState<GemachReservationMode>("date_range");
   const [maintenanceFee, setMaintenanceFee] = useState("");
   const [payboxGroupUrl, setPayboxGroupUrl] = useState("");
   const [loading, setLoading] = useState(false);
@@ -47,6 +65,7 @@ export default function AddGemachPage() {
           description,
           slug: slug || undefined,
           pricingMode,
+          reservationMode,
           maintenanceFee:
             pricingMode === "maintenance_only" ? Number(maintenanceFee || 0) : undefined,
           payboxGroupUrl: gemachRequiresPaybox(pricingMode)
@@ -159,6 +178,42 @@ export default function AddGemachPage() {
                     <span>
                       <span className="block text-sm font-semibold text-stone-900">
                         {gemachPricingModeLabels[option.value]}
+                      </span>
+                      <span className="block text-xs text-[var(--muted)]">{option.hint}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+
+            <fieldset>
+              <legend className="mb-2 text-sm font-semibold text-stone-800">
+                מודל שמירה *
+              </legend>
+              <p className="mb-3 text-xs text-[var(--muted)]">
+                קואופרטיב כרם רעים משתמש בהשאלה לפי שעות. לגמ״ח שותף — בחרו מה מתאים לכם.
+              </p>
+              <div className="space-y-2">
+                {reservationModeOptions.map((option) => (
+                  <label
+                    key={option.value}
+                    className={`flex cursor-pointer gap-3 rounded-xl border p-3 transition ${
+                      reservationMode === option.value
+                        ? "border-kerem-500 bg-kerem-50 ring-1 ring-kerem-200"
+                        : "border-[var(--border)] hover:bg-warm-50"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="reservationMode"
+                      value={option.value}
+                      checked={reservationMode === option.value}
+                      onChange={() => setReservationMode(option.value)}
+                      className="mt-1"
+                    />
+                    <span>
+                      <span className="block text-sm font-semibold text-stone-900">
+                        {gemachReservationModeLabels[option.value]}
                       </span>
                       <span className="block text-xs text-[var(--muted)]">{option.hint}</span>
                     </span>

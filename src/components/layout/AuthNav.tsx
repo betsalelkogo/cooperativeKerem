@@ -6,10 +6,12 @@ import { useAuth } from "@/contexts/AuthProvider";
 import { isAdminMember, isGemachAdmin, isPlatformAdmin } from "@/lib/admin";
 import { cn } from "@/lib/cn";
 import type { Member } from "@/lib/types";
+import { SiteLogo } from "@/components/layout/SiteLogo";
 
 const baseNavItems = [
   { href: "/tools", label: "כלים" },
-  { href: "/my-loans", label: "ההשאלות שלי" },
+  { href: "/my-reservations", label: "שמירות" },
+  { href: "/my-loans", label: "השאלות" },
 ];
 
 const platformAdminNavItems = [
@@ -49,10 +51,8 @@ export function AuthNav() {
         style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
       >
         <div className="mx-auto flex max-w-6xl items-center justify-center px-4 py-4">
-          <div className="flex items-center gap-2">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-kerem-700 text-lg shadow-md">
-              🌿
-            </span>
+          <div className="flex items-center gap-3">
+            <SiteLogo size="sm" priority />
             <span className="text-xl font-bold text-kerem-900">כרם רעים</span>
           </div>
         </div>
@@ -66,16 +66,14 @@ export function AuthNav() {
       style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
     >
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-2.5 sm:px-6 sm:py-3">
-        <Link href="/tools" className="group flex shrink-0 items-center gap-2">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-kerem-700 text-lg shadow-md shadow-kerem-700/25">
-            🌿
-          </span>
+        <Link href="/tools" className="group flex shrink-0 items-center gap-3">
+          <SiteLogo size="sm" priority />
           <div>
             <span className="block text-base font-bold leading-tight text-kerem-900 sm:text-lg">
               כרם רעים
             </span>
             <span className="hidden text-[10px] font-medium text-[var(--muted)] sm:block">
-              קואופרטיב כלים
+              קואופרטיב הציוד
             </span>
           </div>
         </Link>
@@ -130,9 +128,9 @@ export function Footer() {
     <footer className="mt-auto hidden border-t border-[var(--border)] bg-white/60 py-8 md:block">
       <div className="mx-auto max-w-6xl px-4 sm:px-6">
         <div className="flex flex-col items-center justify-between gap-4 sm:flex-row">
-          <div className="flex items-center gap-2">
-            <span className="text-xl">🌿</span>
-            <span className="font-semibold text-kerem-900">כרם רעים — קואופרטיב כלים קהילתי</span>
+          <div className="flex items-center gap-3">
+            <SiteLogo size="sm" />
+            <span className="font-semibold text-kerem-900">כרם רעים — קואופרטיב הציוד</span>
           </div>
           <p className="text-sm text-[var(--muted)]">שיתוף ציוד · קופות חכמות · בטיחות קודמת</p>
         </div>

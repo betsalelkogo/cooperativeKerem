@@ -85,6 +85,8 @@ export function buildToolKindWithAvailability(
     category: representative.category,
     loanFeeMin: representative.loanFeeMin,
     loanFeeMax: representative.loanFeeMax,
+    defaultLoanHours: representative.defaultLoanHours,
+    maxLoanHours: representative.maxLoanHours,
     safetyRules: representative.safetyRules,
     imageUrl: representative.imageUrl,
     gemachId: representative.gemachId,

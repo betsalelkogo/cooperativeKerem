@@ -6,7 +6,10 @@
       "description": "קואופרטיב הכלים הקהילתי",
       "pricingMode": "loan_fee",
       "isPlatform": true,
-      "active": true
+      "active": true,
+      "reservationMode": "fixed_hours",
+      "defaultLoanHours": 4,
+      "maxLoanHours": 24
     },
     "gemach-baby": {
       "name": "גמ״ח תינוקות שכונתי",
@@ -14,7 +17,8 @@
       "description": "ציוד תינוקות וילדים — השאלה חינם",
       "pricingMode": "free",
       "isPlatform": false,
-      "active": true
+      "active": true,
+      "reservationMode": "date_range"
     }
   },
   "tools": {
@@ -29,11 +33,19 @@
       "gemachId": "kerem",
       "kindId": "kind-saw",
       "unitLabel": "יחידה 1",
+      "defaultLoanHours": 4,
+      "maxLoanHours": 8,
       "imageUrl": null,
       "safetyRules": [
         { "id": "sr-1", "text": "חובה לעטות משקפי מגן בכל עת" },
         { "id": "sr-2", "text": "אין להפעיל את המכשיר ליד מקור מים" },
         { "id": "sr-3", "text": "קראתי את הוראות השימוש" }
+      ],
+      "includedItems": [
+        { "id": "inc-case", "label": "מארז / תיק" },
+        { "id": "inc-blade", "label": "להב / אביזר חיתוך" },
+        { "id": "inc-cable", "label": "כבל חשמל" },
+        { "id": "inc-manual", "label": "מדריך שימוש" }
       ]
     },
     "tool-001b": {
@@ -47,11 +59,19 @@
       "gemachId": "kerem",
       "kindId": "kind-saw",
       "unitLabel": "יחידה 2",
+      "defaultLoanHours": 4,
+      "maxLoanHours": 8,
       "imageUrl": null,
       "safetyRules": [
         { "id": "sr-1", "text": "חובה לעטות משקפי מגן בכל עת" },
         { "id": "sr-2", "text": "אין להפעיל את המכשיר ליד מקור מים" },
         { "id": "sr-3", "text": "קראתי את הוראות השימוש" }
+      ],
+      "includedItems": [
+        { "id": "inc-case", "label": "מארז / תיק" },
+        { "id": "inc-blade", "label": "להב / אביזר חיתוך" },
+        { "id": "inc-cable", "label": "כבל חשמל" },
+        { "id": "inc-manual", "label": "מדריך שימוש" }
       ]
     },
     "tool-001c": {
@@ -65,11 +85,19 @@
       "gemachId": "kerem",
       "kindId": "kind-saw",
       "unitLabel": "יחידה 3",
+      "defaultLoanHours": 4,
+      "maxLoanHours": 8,
       "imageUrl": null,
       "safetyRules": [
         { "id": "sr-1", "text": "חובה לעטות משקפי מגן בכל עת" },
         { "id": "sr-2", "text": "אין להפעיל את המכשיר ליד מקור מים" },
         { "id": "sr-3", "text": "קראתי את הוראות השימוש" }
+      ],
+      "includedItems": [
+        { "id": "inc-case", "label": "מארז / תיק" },
+        { "id": "inc-blade", "label": "להב / אביזר חיתוך" },
+        { "id": "inc-cable", "label": "כבל חשמל" },
+        { "id": "inc-manual", "label": "מדריך שימוש" }
       ]
     },
     "tool-002": {
@@ -81,6 +109,8 @@
       "loanFeeMin": 30,
       "loanFeeMax": 50,
       "gemachId": "kerem",
+      "defaultLoanHours": 4,
+      "maxLoanHours": 12,
       "imageUrl": null,
       "safetyRules": [
         { "id": "sr-4", "text": "אין לכוון את המכשיר לעבר אנשים או בעלי חיים" },
@@ -97,6 +127,8 @@
       "loanFeeMin": 20,
       "loanFeeMax": 30,
       "gemachId": "kerem",
+      "defaultLoanHours": 4,
+      "maxLoanHours": 24,
       "imageUrl": null,
       "safetyRules": [
         { "id": "sr-7", "text": "יש לוודא שהסולם על קרקע יציבה ומישורית" },

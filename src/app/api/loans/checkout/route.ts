@@ -16,6 +16,17 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const reservationId = formData.get("reservationId") as string | null;
     const photo = formData.get("photo") as File | null;
+    const checkoutConditionNotes = formData.get("checkoutConditionNotes") as string | null;
+    const checkoutItemsRaw = formData.get("checkoutItemsChecked") as string | null;
+
+    let checkoutItemsChecked: string[] = [];
+    if (checkoutItemsRaw) {
+      try {
+        checkoutItemsChecked = JSON.parse(checkoutItemsRaw) as string[];
+      } catch {
+        checkoutItemsChecked = [];
+      }
+    }
 
     if (!reservationId || !photo) {
       return NextResponse.json(
@@ -41,6 +52,8 @@ export async function POST(request: Request) {
     const loan = await createLoanFromCheckout({
       reservation,
       checkoutPhotoUrl: `/uploads/${photo.name}`,
+      checkoutConditionNotes: checkoutConditionNotes ?? undefined,
+      checkoutItemsChecked,
     });
 
     return NextResponse.json(loan, { status: 201 });

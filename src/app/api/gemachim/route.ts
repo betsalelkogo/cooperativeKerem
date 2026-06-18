@@ -9,7 +9,7 @@ import {
   validatePayboxGroupUrl,
   gemachRequiresPaybox,
 } from "@/lib/gemach";
-import type { GemachPricingMode } from "@/lib/types";
+import type { GemachPricingMode, GemachReservationMode } from "@/lib/types";
 
 const PRICING_MODES: GemachPricingMode[] = ["free", "loan_fee", "maintenance_only"];
 
@@ -21,10 +21,11 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { name, description, pricingMode, maintenanceFee, slug, payboxGroupUrl } = body as {
+    const { name, description, pricingMode, reservationMode, maintenanceFee, slug, payboxGroupUrl } = body as {
       name?: string;
       description?: string;
       pricingMode?: GemachPricingMode;
+      reservationMode?: GemachReservationMode;
       maintenanceFee?: number;
       slug?: string;
       payboxGroupUrl?: string;
@@ -59,11 +60,16 @@ export async function POST(request: Request) {
       }
     }
 
+    if (reservationMode && reservationMode !== "fixed_hours" && reservationMode !== "date_range") {
+      return NextResponse.json({ error: "מודל שמירה לא תקין" }, { status: 400 });
+    }
+
     const { gemach, member } = await createGemachAndAssignAdmin({
       id: gemachId,
       name: name!.trim(),
       description: description?.trim(),
       pricingMode,
+      reservationMode: reservationMode ?? "date_range",
       maintenanceFee:
         pricingMode === "maintenance_only" ? Number(maintenanceFee ?? 0) : undefined,
       payboxGroupUrl:

@@ -5,12 +5,15 @@ import { Fragment, useState } from "react";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Alert } from "@/components/ui/Alert";
 import { authFetch } from "@/lib/api-client";
+import { PLATFORM_GEMACH_ID } from "@/lib/gemach";
 import type { AdminDashboardToolKindRow } from "@/lib/types";
 
 interface AdminToolKindsTableProps {
   tools: AdminDashboardToolKindRow[];
   showGemachColumn?: boolean;
   editable?: boolean;
+  /** When set, edit/status actions only appear for this gemach's tools. */
+  cooperativeOnly?: boolean;
   gemachId?: string;
   getToken: () => Promise<string | null>;
   onUpdated?: () => void;
@@ -20,6 +23,7 @@ export function AdminToolKindsTable({
   tools,
   showGemachColumn = false,
   editable = false,
+  cooperativeOnly = false,
   gemachId,
   getToken,
   onUpdated,
@@ -110,6 +114,10 @@ export function AdminToolKindsTable({
               tools.map((tool) => {
                 const isExpanded = expandedKind === tool.kindId;
                 const busy = loadingKey?.startsWith(tool.kindId);
+                const canEdit =
+                  editable &&
+                  (!cooperativeOnly || tool.gemachId === PLATFORM_GEMACH_ID);
+                const actionGemachId = gemachId ?? tool.gemachId;
                 return (
                   <Fragment key={tool.kindId}>
                     <tr className="border-b border-[var(--border)]">
@@ -147,11 +155,11 @@ export function AdminToolKindsTable({
                       <td className="px-4 py-3">
                         <StatusBadge status={tool.status} />
                       </td>
-                      {editable && (
+                      {canEdit && (
                         <td className="px-4 py-3">
                           <div className="flex flex-wrap items-center gap-1">
                             <Link
-                              href={`/admin/gemach/tools/${encodeURIComponent(tool.kindId)}/edit`}
+                              href={`/admin/gemach/tools/${encodeURIComponent(tool.kindId)}/edit?gemachId=${encodeURIComponent(actionGemachId)}`}
                               className="rounded-lg bg-kerem-50 px-2 py-1 text-xs font-semibold text-kerem-800 hover:bg-kerem-100"
                             >
                               ערוך
@@ -189,6 +197,7 @@ export function AdminToolKindsTable({
                           </div>
                         </td>
                       )}
+                      {editable && !canEdit && <td className="px-4 py-3" />}
                     </tr>
                     {isExpanded &&
                       tool.units.map((unit) => (
@@ -208,7 +217,7 @@ export function AdminToolKindsTable({
                           <td className="px-4 py-2">
                             <StatusBadge status={unit.status} />
                           </td>
-                          {editable && (
+                          {canEdit && (
                             <td className="px-4 py-2">
                               {(unit.status === "available" ||
                                 unit.status === "disabled" ||
@@ -248,6 +257,7 @@ export function AdminToolKindsTable({
                               )}
                             </td>
                           )}
+                          {editable && !canEdit && <td className="px-4 py-2" />}
                         </tr>
                       ))}
                   </Fragment>

@@ -1,13 +1,16 @@
 /**
  * Reset Firestore transactional data and mark all tools available.
  *
- * Deletes: reservations, loans, transactions, payments, paybox_payouts, maintenance_tickets
+ * Deletes: reservations, loans, transactions, payments, paybox_payouts, maintenance_tickets, late_return_fees
  * Resets:  all tools → status "available"
  * Resets:  device_pots + operations_pot balances to 0
  * Keeps:   tools (definitions), members, settings
  *
+ * With --reseed: overwrites gemachim, tools, device_pots, operations_pot, settings from seed-data.json
+ *
  * Usage:
  *   npm run migrate:reset
+ *   npm run migrate:reset -- --reseed
  *   npm run migrate:reset -- --dry-run
  */
 
@@ -15,7 +18,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
+import { getFirestore, FieldValue } from "firebase-admin/firestore";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
@@ -27,6 +30,7 @@ const COLLECTIONS_TO_DELETE = [
   "payments",
   "paybox_payouts",
   "maintenance_tickets",
+  "late_return_fees",
 ];
 
 function loadEnvFile(path) {
@@ -53,6 +57,7 @@ loadEnvFile(resolve(root, ".env"));
 loadEnvFile(resolve(root, ".env.local"));
 
 const dryRun = process.argv.includes("--dry-run");
+const reseed = process.argv.includes("--reseed");
 
 const keyArg = process.argv.find((a) => a.startsWith("--key="));
 let projectId = process.env.FIREBASE_ADMIN_PROJECT_ID;
@@ -193,8 +198,42 @@ async function resetPots() {
   return count;
 }
 
+async function reseedFromFile() {
+  const seedPath = resolve(__dirname, "seed-data.json");
+  const seed = JSON.parse(readFileSync(seedPath, "utf8"));
+
+  console.log("\n→ Reseeding from seed-data.json");
+  let count = 0;
+
+  for (const [collectionName, documents] of Object.entries(seed)) {
+    if (!documents || typeof documents !== "object") continue;
+
+    for (const [docId, data] of Object.entries(documents)) {
+      if (dryRun) {
+        console.log(`  · ${collectionName}/${docId}: would overwrite`);
+        count++;
+        continue;
+      }
+      await db
+        .collection(collectionName)
+        .doc(docId)
+        .set({ ...data, seededAt: FieldValue.serverTimestamp() });
+      console.log(`  ✓ ${collectionName}/${docId}`);
+      count++;
+    }
+  }
+
+  return count;
+}
+
 async function main() {
-  console.log(dryRun ? "Dry run — no writes.\n" : "Resetting Firestore…\n");
+  console.log(
+    dryRun
+      ? "Dry run — no writes.\n"
+      : reseed
+        ? "Full reset + reseed from seed-data.json…\n"
+        : "Resetting Firestore…\n"
+  );
   console.log(`Project: ${projectId}\n`);
 
   let total = 0;
@@ -205,17 +244,35 @@ async function main() {
   }
 
   console.log("\n→ Resetting tools");
-  total += await resetTools();
+  if (reseed) {
+    console.log("  · skipped (tools will be overwritten from seed-data.json)");
+  } else {
+    total += await resetTools();
+  }
 
   console.log("\n→ Resetting pots");
-  total += await resetPots();
+  if (reseed) {
+    console.log("  · skipped (pots will be overwritten from seed-data.json)");
+  } else {
+    total += await resetPots();
+  }
+
+  if (reseed) {
+    total += await reseedFromFile();
+  }
 
   console.log(
     dryRun
       ? `\nDry run complete. ${total} operations would run.`
-      : `\nDone! Database reset — all tools available, transactional data cleared.`
+      : reseed
+        ? `\nDone! Database reset and reseeded from seed-data.json.`
+        : `\nDone! Database reset — all tools available, transactional data cleared.`
   );
-  console.log("Kept: tools (definitions), members, settings");
+  console.log(
+    reseed
+      ? "Kept: members (user accounts). All seed collections overwritten."
+      : "Kept: tools (definitions), members, settings"
+  );
 }
 
 main().catch((err) => {
