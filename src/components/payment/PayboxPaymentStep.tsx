@@ -98,7 +98,7 @@ export function PayboxPaymentStep({
         body: JSON.stringify({
           reservationId,
           action: "create",
-          fullName: member?.name ?? user?.displayName ?? "חבר כרם",
+          fullName: member?.name ?? user?.displayName ?? "חבר כרם רעים",
           phone: user?.phoneNumber ?? "0500000000",
         }),
       });
@@ -230,7 +230,7 @@ export function PayboxPaymentStep({
 
               {openedPaybox && (
                 <Alert variant="info">
-                  PayBox נפתח. לאחר התשלום, חזרו לכרטיסייה הזו בדפדפן (או באפליקציית כרם
+                  PayBox נפתח. לאחר התשלום, חזרו לכרטיסייה הזו בדפדפן (או באפליקציית כרם רעים
                   אם הוספתם למסך הבית).
                 </Alert>
               )}

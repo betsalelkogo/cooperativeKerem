@@ -13,13 +13,13 @@ const heebo = Heebo({
 });
 
 export const metadata: Metadata = {
-  title: "כרם — ספריית כלים קואופרטיבית",
+  title: "כרם רעים — ספריית כלים קואופרטיבית",
   description: "השאלת כלים קהילתית עם ניהול קופות חכם",
-  applicationName: "כרם",
+  applicationName: "כרם רעים",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "כרם",
+    title: "כרם רעים",
   },
   formatDetection: {
     telephone: false,

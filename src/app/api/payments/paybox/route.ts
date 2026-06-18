@@ -7,11 +7,13 @@ import {
   getPayboxSettings,
   getReservationById,
   getToolById,
+  getGemachById,
   markPaymentPaid,
   getAdminDb,
 } from "@/lib/firestore/repository";
 import { createGrowPaymentLink } from "@/lib/paybox/grow";
-import { isGrowConfigured, resolvePayboxGroupUrl } from "@/lib/paybox/config";
+import { isGrowConfigured } from "@/lib/paybox/config";
+import { partnerUsesOwnPaybox, resolveCheckoutPayboxUrl } from "@/lib/paybox/gemach-paybox";
 
 export async function GET(request: Request) {
   try {
@@ -84,15 +86,22 @@ export async function POST(request: Request) {
     }
 
     const settings = await getPayboxSettings();
-    if (!settings.enabled || !settings.operationsGroupUrl) {
-      return NextResponse.json(
-        { error: "PayBox לא מוגדר. פנו למנהל הקואופרטיב." },
-        { status: 503 }
-      );
+    const tool = await getToolById(reservation.toolId);
+    if (!tool) {
+      return NextResponse.json({ error: "הכלי לא נמצא" }, { status: 404 });
     }
 
-    const tool = await getToolById(reservation.toolId);
-    const groupUrl = resolvePayboxGroupUrl(settings, "device");
+    const gemach = await getGemachById(tool.gemachId);
+    if (!gemach) {
+      return NextResponse.json({ error: "גמ״ח לא נמצא" }, { status: 404 });
+    }
+
+    const payboxResolved = resolveCheckoutPayboxUrl(gemach, settings);
+    if ("error" in payboxResolved) {
+      return NextResponse.json({ error: payboxResolved.error }, { status: 503 });
+    }
+
+    const groupUrl = payboxResolved.url;
     let growPaymentUrl: string | undefined;
     let provider: "paybox_group" | "grow" = "paybox_group";
 
@@ -102,7 +111,10 @@ export async function POST(request: Request) {
       provider,
     });
 
-    if (isGrowConfigured() && fullName && phone) {
+    const useGrow =
+      !partnerUsesOwnPaybox(gemach) && isGrowConfigured() && fullName && phone;
+
+    if (useGrow) {
       const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
       const grow = await createGrowPaymentLink({
         amount: reservation.feeAmount,

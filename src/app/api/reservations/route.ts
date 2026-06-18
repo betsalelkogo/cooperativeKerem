@@ -85,6 +85,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "גמ״ח לא נמצא" }, { status: 404 });
     }
 
+    if (!gemach.active) {
+      return NextResponse.json({ error: "הגמ״ח סגור — לא ניתן לשמור כלים" }, { status: 403 });
+    }
+
     const feeAmount = resolveReservationFee(gemach, tool);
 
     const reservation = await createReservation({

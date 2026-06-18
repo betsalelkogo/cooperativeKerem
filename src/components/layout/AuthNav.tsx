@@ -53,7 +53,7 @@ export function AuthNav() {
             <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-kerem-700 text-lg shadow-md">
               🌿
             </span>
-            <span className="text-xl font-bold text-kerem-900">כרם</span>
+            <span className="text-xl font-bold text-kerem-900">כרם רעים</span>
           </div>
         </div>
       </header>
@@ -72,7 +72,7 @@ export function AuthNav() {
           </span>
           <div>
             <span className="block text-base font-bold leading-tight text-kerem-900 sm:text-lg">
-              כרם
+              כרם רעים
             </span>
             <span className="hidden text-[10px] font-medium text-[var(--muted)] sm:block">
               קואופרטיב כלים
@@ -132,7 +132,7 @@ export function Footer() {
         <div className="flex flex-col items-center justify-between gap-4 sm:flex-row">
           <div className="flex items-center gap-2">
             <span className="text-xl">🌿</span>
-            <span className="font-semibold text-kerem-900">כרם — קואופרטיב כלים קהילתי</span>
+            <span className="font-semibold text-kerem-900">כרם רעים — קואופרטיב כלים קהילתי</span>
           </div>
           <p className="text-sm text-[var(--muted)]">שיתוף ציוד · קופות חכמות · בטיחות קודמת</p>
         </div>

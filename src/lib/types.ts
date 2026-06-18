@@ -56,8 +56,12 @@ export interface Gemach {
   description?: string;
   pricingMode: GemachPricingMode;
   maintenanceFee?: number;
+  /** Partner gemach PayBox group link for loan/maintenance payments. */
+  payboxGroupUrl?: string;
   isPlatform: boolean;
   active: boolean;
+  /** Set when the gemach is permanently closed. */
+  closedAt?: string;
 }
 
 export interface DevicePot {
@@ -220,6 +224,18 @@ export interface AdminDashboardData {
   activeReservations: AdminDashboardReservation[];
   gemach?: Gemach;
   gemachim?: Gemach[];
+}
+
+export interface AdminToolKindEdit {
+  kindId: string;
+  gemachId: string;
+  name: string;
+  description: string;
+  category: string;
+  loanFeeMin: number;
+  loanFeeMax: number;
+  totalUnits: number;
+  pricingMode: GemachPricingMode;
 }
 
 export interface AdminMemberSummary {

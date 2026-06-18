@@ -44,6 +44,9 @@ export async function POST(request: Request) {
     if (!gemach) {
       return NextResponse.json({ error: "גמ״ח לא נמצא" }, { status: 404 });
     }
+    if (!gemach.active) {
+      return NextResponse.json({ error: "הגמ״ח סגור — לא ניתן להוסיף כלים" }, { status: 403 });
+    }
 
     const result = await createToolsForGemach({
       gemachId,

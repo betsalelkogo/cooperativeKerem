@@ -19,6 +19,7 @@ import type {
   Gemach,
   ToolKindWithAvailability,
   SafetyRule,
+  AdminToolKindEdit,
 } from "@/lib/types";
 import {
   resolveKindId,
@@ -30,10 +31,12 @@ import {
 } from "@/lib/tool-kinds";
 import {
   PLATFORM_GEMACH_ID,
+  PLATFORM_GEMACH_DISPLAY_NAME,
   normalizeGemachId,
   formatToolPriceLabel,
   isPartnerGemach,
   resolveReservationFee,
+  displayGemachName,
 } from "@/lib/gemach";
 import { splitPayment, getOperationsPercent } from "@/lib/pots";
 import { getDefaultPayboxSettings } from "@/lib/paybox/config";
@@ -52,6 +55,7 @@ import {
   qrCodeForUnit,
   resolveToolFees,
   DEFAULT_SAFETY_RULES,
+  validateToolInput,
 } from "@/lib/tools-admin";
 
 function getAdminDb(): Firestore {
@@ -200,8 +204,13 @@ function gemachFromDoc(id: string, data: DocumentData): Gemach {
     description: (data.description as string) || undefined,
     pricingMode: (data.pricingMode as Gemach["pricingMode"]) ?? "loan_fee",
     maintenanceFee: (data.maintenanceFee as number) || undefined,
+    payboxGroupUrl:
+      typeof data.payboxGroupUrl === "string" && data.payboxGroupUrl
+        ? data.payboxGroupUrl
+        : undefined,
     isPlatform: (data.isPlatform as boolean) ?? false,
     active: (data.active as boolean) ?? true,
+    closedAt: data.closedAt ? tsToIso(data.closedAt) : undefined,
   };
 }
 
@@ -218,7 +227,7 @@ function enrichToolsWithGemach(
     return {
       ...tool,
       ...extra,
-      gemachName: gemach.name,
+      gemachName: displayGemachName(gemach),
       gemachPricingMode: gemach.pricingMode,
       priceLabel: formatToolPriceLabel(gemach, tool),
       isPartnerGemach: isPartnerGemach(gemach),
@@ -228,13 +237,15 @@ function enrichToolsWithGemach(
 
 // ─── Gemachim ────────────────────────────────────────────────────────────────
 
-export async function getAllGemachim(): Promise<Gemach[]> {
+export async function getAllGemachim(options?: {
+  includeInactive?: boolean;
+}): Promise<Gemach[]> {
   const snap = await getAdminDb().collection("gemachim").get();
   if (snap.empty) {
     return [
       {
         id: PLATFORM_GEMACH_ID,
-        name: "כרם",
+        name: PLATFORM_GEMACH_DISPLAY_NAME,
         slug: "kerem",
         pricingMode: "loan_fee",
         isPlatform: true,
@@ -242,7 +253,8 @@ export async function getAllGemachim(): Promise<Gemach[]> {
       },
     ];
   }
-  return snap.docs.map((d) => gemachFromDoc(d.id, d.data())).filter((g) => g.active);
+  const all = snap.docs.map((d) => gemachFromDoc(d.id, d.data()));
+  return options?.includeInactive ? all : all.filter((g) => g.active);
 }
 
 export async function getGemachById(id: string): Promise<Gemach | null> {
@@ -251,7 +263,7 @@ export async function getGemachById(id: string): Promise<Gemach | null> {
     if (id === PLATFORM_GEMACH_ID) {
       return {
         id: PLATFORM_GEMACH_ID,
-        name: "כרם",
+        name: PLATFORM_GEMACH_DISPLAY_NAME,
         slug: "kerem",
         pricingMode: "loan_fee",
         isPlatform: true,
@@ -269,6 +281,7 @@ export async function createGemachAndAssignAdmin(params: {
   description?: string;
   pricingMode: Gemach["pricingMode"];
   maintenanceFee?: number;
+  payboxGroupUrl?: string;
   createdBy: string;
 }): Promise<{ gemach: Gemach; member: Member }> {
   const db = getAdminDb();
@@ -300,6 +313,7 @@ export async function createGemachAndAssignAdmin(params: {
     ...(params.pricingMode === "maintenance_only" && params.maintenanceFee !== undefined
       ? { maintenanceFee: params.maintenanceFee }
       : {}),
+    ...(params.payboxGroupUrl ? { payboxGroupUrl: params.payboxGroupUrl.trim() } : {}),
     isPlatform: false,
     active: true,
     createdBy: params.createdBy,
@@ -324,6 +338,197 @@ export async function createGemachAndAssignAdmin(params: {
   return { gemach, member };
 }
 
+export async function updateGemachSettings(params: {
+  gemachId: string;
+  payboxGroupUrl?: string | null;
+  name?: string;
+  description?: string;
+}): Promise<Gemach> {
+  const ref = getAdminDb().collection("gemachim").doc(params.gemachId);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    throw new Error("גמ״ח לא נמצא");
+  }
+
+  const updates: Record<string, unknown> = {
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+
+  if (params.name !== undefined) {
+    updates.name = params.name.trim();
+  }
+  if (params.description !== undefined) {
+    updates.description = params.description.trim() || null;
+  }
+  if (params.payboxGroupUrl !== undefined) {
+    updates.payboxGroupUrl = params.payboxGroupUrl?.trim() || null;
+  }
+
+  await ref.update(updates);
+  return gemachFromDoc(params.gemachId, (await ref.get()).data()!);
+}
+
+export async function closeGemachPermanently(gemachId: string): Promise<{
+  deletedGemachId: string;
+  deletedToolCount: number;
+}> {
+  const gemach = await getGemachById(gemachId);
+  if (!gemach) {
+    throw new Error("גמ״ח לא נמצא");
+  }
+  if (gemach.isPlatform || gemachId === PLATFORM_GEMACH_ID) {
+    throw new Error("לא ניתן לסגור את קואופרטיב הפלטפורמה");
+  }
+
+  const tools = (await getAllTools()).filter((t) => t.gemachId === gemachId);
+  const toolIds = new Set(tools.map((t) => t.id));
+
+  const loans = await getAllLoans();
+  const activeLoans = loans.filter(
+    (l) =>
+      toolIds.has(l.toolId) &&
+      (l.status === "active" ||
+        l.status === "checkout_pending" ||
+        l.status === "return_pending")
+  );
+  if (activeLoans.length > 0) {
+    throw new Error(
+      `יש ${activeLoans.length} השאלות פעילות — יש להחזיר את הכלים לפני סגירת הגמ״ח`
+    );
+  }
+
+  const db = getAdminDb();
+  const reservations = await getAllReservations();
+  const reservationsToCancel = reservations.filter(
+    (r) =>
+      toolIds.has(r.toolId) &&
+      (r.status === "pending" || r.status === "confirmed")
+  );
+
+  const batch = db.batch();
+
+  for (const reservation of reservationsToCancel) {
+    batch.update(db.collection("reservations").doc(reservation.id), {
+      status: "cancelled",
+    });
+  }
+
+  for (const tool of tools) {
+    batch.delete(db.collection("tools").doc(tool.id));
+    batch.delete(db.collection("device_pots").doc(tool.id));
+  }
+
+  batch.delete(db.collection("gemachim").doc(gemachId));
+
+  await batch.commit();
+
+  for (const reservation of reservationsToCancel) {
+    const pending = await getPendingPaymentForReservation(reservation.id);
+    if (pending) {
+      await db.collection("payments").doc(pending.id).update({ status: "failed" });
+    }
+  }
+
+  const adminsSnap = await db
+    .collection("members")
+    .where("gemachAdminIds", "array-contains", gemachId)
+    .get();
+
+  for (const doc of adminsSnap.docs) {
+    const member = memberFromDoc(doc.id, doc.data());
+    const remainingIds = (member.gemachAdminIds ?? []).filter((id) => id !== gemachId);
+    const updates: Record<string, unknown> = {
+      gemachAdminIds: remainingIds,
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+    if (member.role !== "ADMIN" && remainingIds.length === 0) {
+      updates.role = "MEMBER";
+    }
+    await db.collection("members").doc(doc.id).update(updates);
+  }
+
+  return { deletedGemachId: gemachId, deletedToolCount: tools.length };
+}
+
+export async function getToolKindForAdmin(
+  gemachId: string,
+  kindId: string
+): Promise<AdminToolKindEdit | null> {
+  const [tools, gemach] = await Promise.all([getAllTools(), getGemachById(gemachId)]);
+  if (!gemach) return null;
+
+  const units = tools.filter(
+    (t) => t.gemachId === gemachId && (t.kindId ?? t.id) === kindId
+  );
+  if (units.length === 0) return null;
+
+  const representative = units[0];
+  return {
+    kindId,
+    gemachId,
+    name: representative.name,
+    description: representative.description,
+    category: representative.category,
+    loanFeeMin: representative.loanFeeMin,
+    loanFeeMax: representative.loanFeeMax,
+    totalUnits: units.length,
+    pricingMode: gemach.pricingMode,
+  };
+}
+
+export async function updateToolKindDetails(params: {
+  gemachId: string;
+  kindId: string;
+  name: string;
+  description: string;
+  category: string;
+  loanFeeMin?: number;
+  loanFeeMax?: number;
+}): Promise<{ updated: number }> {
+  const gemach = await getGemachById(params.gemachId);
+  if (!gemach) {
+    throw new Error("גמ״ח לא נמצא");
+  }
+
+  const validationError = validateToolInput({
+    name: params.name,
+    description: params.description,
+    category: params.category,
+    quantity: 1,
+  });
+  if (validationError) {
+    throw new Error(validationError);
+  }
+
+  const tools = await getAllTools();
+  const units = tools.filter(
+    (t) => t.gemachId === params.gemachId && (t.kindId ?? t.id) === params.kindId
+  );
+  if (units.length === 0) {
+    throw new Error("הכלי לא נמצא");
+  }
+
+  const fees = resolveToolFees(
+    gemach,
+    params.loanFeeMin ?? units[0].loanFeeMin,
+    params.loanFeeMax ?? params.loanFeeMin ?? units[0].loanFeeMax
+  );
+
+  const batch = getAdminDb().batch();
+  for (const tool of units) {
+    batch.update(getAdminDb().collection("tools").doc(tool.id), {
+      name: params.name.trim(),
+      description: params.description.trim(),
+      category: params.category.trim(),
+      loanFeeMin: fees.loanFeeMin,
+      loanFeeMax: fees.loanFeeMax,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  }
+  await batch.commit();
+  return { updated: units.length };
+}
+
 export { resolveReservationFee };
 
 // ─── Tools ───────────────────────────────────────────────────────────────────
@@ -346,12 +551,13 @@ export async function getToolKindsWithAvailability(): Promise<ToolKindWithAvaila
   const groups = groupToolsByKind(tools);
 
   return [...groups.values()]
+    .filter((units) => gemachMap.has(units[0].gemachId))
     .map((units) => {
       const gemach = gemachMap.get(units[0].gemachId);
       return buildToolKindWithAvailability(units, loanByTool, reservationByTool, {
         ...(gemach
           ? {
-              gemachName: gemach.name,
+              gemachName: displayGemachName(gemach),
               gemachPricingMode: gemach.pricingMode,
               priceLabel: formatToolPriceLabel(gemach, units[0]),
               isPartnerGemach: isPartnerGemach(gemach),
@@ -374,12 +580,13 @@ export async function getToolKindWithAvailability(
   if (units.length === 0) return null;
 
   const gemach = await getGemachById(units[0].gemachId);
+  if (!gemach?.active) return null;
   const { loanByTool, reservationByTool } = buildActiveHolders(loans, reservations);
 
   return buildToolKindWithAvailability(units, loanByTool, reservationByTool, {
     ...(gemach
       ? {
-          gemachName: gemach.name,
+          gemachName: displayGemachName(gemach),
           gemachPricingMode: gemach.pricingMode,
           priceLabel: formatToolPriceLabel(gemach, units[0]),
           isPartnerGemach: isPartnerGemach(gemach),
@@ -405,14 +612,16 @@ export async function getToolsWithAvailability(): Promise<ToolWithAvailability[]
   const gemachMap = new Map(gemachim.map((g) => [g.id, g]));
   const { loanByTool, reservationByTool } = buildActiveHolders(loans, reservations);
 
-  return tools.map((tool) => {
+  return tools
+    .filter((tool) => gemachMap.has(tool.gemachId))
+    .map((tool) => {
     const gemach = gemachMap.get(tool.gemachId);
     return {
       ...tool,
       ...availabilityForTool(tool, loanByTool, reservationByTool),
       ...(gemach
         ? {
-            gemachName: gemach.name,
+            gemachName: displayGemachName(gemach),
             gemachPricingMode: gemach.pricingMode,
             priceLabel: formatToolPriceLabel(gemach, tool),
             isPartnerGemach: isPartnerGemach(gemach),
@@ -799,7 +1008,7 @@ export async function getAdminDashboard(options?: {
     getAllTools(),
     getAllLoans(),
     getAllReservations(),
-    options?.includeGemachim ? getAllGemachim() : Promise.resolve([]),
+    options?.includeGemachim ? getAllGemachim({ includeInactive: true }) : Promise.resolve([]),
     gemachId ? getGemachById(gemachId) : Promise.resolve(null),
   ]);
 
@@ -850,7 +1059,10 @@ export async function getAdminDashboard(options?: {
       name: representative.name,
       category: representative.category,
       gemachId: representative.gemachId,
-      gemachName: gemachMap.get(representative.gemachId)?.name,
+      gemachName: (() => {
+        const g = gemachMap.get(representative.gemachId);
+        return g ? displayGemachName(g) : undefined;
+      })(),
       status: aggregateKindStatus(units),
       totalUnits: units.length,
       availableUnits: units.filter((t) => t.status === "available").length,

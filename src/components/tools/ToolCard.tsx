@@ -38,9 +38,16 @@ export function ToolCard({ kind }: { kind: ToolKindWithAvailability }) {
                 <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
                   {kind.category}
                 </p>
-                {kind.isPartnerGemach && kind.gemachName && (
-                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 ring-1 ring-inset ring-amber-200">
-                    ★ {kind.gemachName}
+                {kind.gemachName && (
+                  <span
+                    className={cn(
+                      "rounded-full px-2 py-0.5 text-[10px] font-bold ring-1 ring-inset",
+                      kind.isPartnerGemach
+                        ? "bg-amber-100 text-amber-800 ring-amber-200"
+                        : "bg-kerem-100 text-kerem-800 ring-kerem-200"
+                    )}
+                  >
+                    {kind.isPartnerGemach ? `★ ${kind.gemachName}` : kind.gemachName}
                   </span>
                 )}
                 {kind.totalUnits > 1 && (

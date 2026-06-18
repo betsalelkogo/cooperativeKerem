@@ -49,7 +49,7 @@ function LoginContent() {
         <span className="mb-4 inline-flex h-20 w-20 items-center justify-center rounded-3xl bg-kerem-700 text-4xl shadow-lg shadow-kerem-700/30">
           🌿
         </span>
-        <h1 className="text-3xl font-bold text-stone-900">כרם</h1>
+        <h1 className="text-3xl font-bold text-stone-900">כרם רעים</h1>
         <p className="mt-2 text-lg font-medium text-kerem-800">ספריית כלים קואופרטיבית</p>
         <p className="mt-3 text-sm text-[var(--muted)]">
           התחברו פעם אחת — נזכור אתכם בפעם הבאה

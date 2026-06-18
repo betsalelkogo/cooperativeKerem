@@ -2,6 +2,22 @@ import type { Gemach, GemachPricingMode, Tool } from "@/lib/types";
 import { formatNIS } from "@/lib/pots";
 
 export const PLATFORM_GEMACH_ID = "kerem";
+export const PLATFORM_GEMACH_DISPLAY_NAME = "כרם רעים";
+export const COOPERATIVE_FILTER_LABEL = "קואופרטיב";
+
+export function isPlatformGemach(gemach: Pick<Gemach, "id" | "isPlatform">): boolean {
+  return gemach.isPlatform || gemach.id === PLATFORM_GEMACH_ID;
+}
+
+export function displayGemachName(gemach: Pick<Gemach, "id" | "name" | "isPlatform">): string {
+  if (isPlatformGemach(gemach)) return PLATFORM_GEMACH_DISPLAY_NAME;
+  return gemach.name;
+}
+
+export function gemachFilterLabel(gemach: Pick<Gemach, "id" | "name" | "isPlatform">): string {
+  if (isPlatformGemach(gemach)) return COOPERATIVE_FILTER_LABEL;
+  return gemach.name;
+}
 
 export function normalizeGemachId(value: unknown): string {
   return typeof value === "string" && value ? value : PLATFORM_GEMACH_ID;
@@ -78,4 +94,22 @@ export function validateGemachName(name: string): string | null {
   if (trimmed.length < 2) return "שם הגמ״ח קצר מדי";
   if (trimmed.length > 80) return "שם הגמ״ח ארוך מדי";
   return null;
+}
+
+export function validatePayboxGroupUrl(url: string): string | null {
+  const trimmed = url.trim();
+  if (!trimmed) return "נדרש קישור PayBox";
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "https:") {
+      return "יש להזין כתובת HTTPS בלבד";
+    }
+    return null;
+  } catch {
+    return "כתובת PayBox לא תקינה";
+  }
+}
+
+export function gemachRequiresPaybox(pricingMode: GemachPricingMode): boolean {
+  return pricingMode === "loan_fee" || pricingMode === "maintenance_only";
 }

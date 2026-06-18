@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "כרם — ספריית כלים קואופרטיבית",
-    short_name: "כרם",
+    name: "כרם רעים — ספריית כלים קואופרטיבית",
+    short_name: "כרם רעים",
     description: "השאלת כלים מהקרוואן הקהילתי",
     start_url: "/login",
     display: "standalone",

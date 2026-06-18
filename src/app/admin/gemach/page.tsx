@@ -11,6 +11,8 @@ import {
 } from "@/components/admin/AdminDashboardView";
 import { Alert } from "@/components/ui/Alert";
 import { ButtonLink } from "@/components/ui/Button";
+import { DeleteGemachButton } from "@/components/admin/DeleteGemachButton";
+import { useSelectedGemachId } from "@/hooks/useSelectedGemachId";
 import type { AdminDashboardData } from "@/lib/types";
 
 export default function GemachAdminDashboardPage() {
@@ -21,7 +23,7 @@ export default function GemachAdminDashboardPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const gemachId = member?.gemachAdminIds?.[0];
+  const { gemachId, hrefWithGemachId } = useSelectedGemachId();
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -86,7 +88,7 @@ export default function GemachAdminDashboardPage() {
           <p className="font-semibold">הגמ״ח נוצר בהצלחה!</p>
           <p className="mt-1 text-sm">
             השלב הבא:{" "}
-            <Link href="/admin/gemach/tools/new" className="font-semibold underline">
+            <Link href={hrefWithGemachId("/admin/gemach/tools/new")} className="font-semibold underline">
               הוסיפו את הכלים הראשונים
             </Link>
           </p>
@@ -109,20 +111,32 @@ export default function GemachAdminDashboardPage() {
         </Alert>
       )}
 
-      <div className="mb-6 flex justify-end">
+      {data.gemach && !data.gemach.active && (
+        <Alert variant="warning" className="mb-6">
+          הגמ״ח סגור לצמיתות — ניתן לצפות בהיסטוריה בלבד.
+        </Alert>
+      )}
+
+      {data.gemach?.active !== false && (
+      <div className="mb-6 flex flex-wrap justify-end gap-2">
+        <DeleteGemachButton
+          gemachId={gemachId!}
+          gemachName={data.gemach?.name ?? ""}
+        />
         <Link
-          href="/admin/gemach/tools/new"
+          href={hrefWithGemachId("/admin/gemach/tools/new")}
           className="rounded-xl bg-kerem-700 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:bg-kerem-800"
         >
           + הוסף כלי
         </Link>
       </div>
+      )}
 
       <AdminDashboardView
         data={data}
         title="לוח בקרה — גמ״ח"
         description="סקירה של הכלים, השאלות והשמירות של הגמ״ח שלך."
-        editableTools
+        editableTools={data.gemach?.active !== false}
         gemachId={gemachId}
         getToken={getIdToken}
         onToolsUpdated={loadDashboard}

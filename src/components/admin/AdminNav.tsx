@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthProvider";
-import { isGemachAdmin, isPlatformAdmin, isGemachScopedAdmin, hasOwnedGemachim } from "@/lib/admin";
+import { isPlatformAdmin, isGemachScopedAdmin, hasOwnedGemachim } from "@/lib/admin";
 import { cn } from "@/lib/cn";
+import { useSelectedGemachId } from "@/hooks/useSelectedGemachId";
+import { GemachSelector } from "@/components/admin/GemachSelector";
 
 const platformTabs = [
   { href: "/admin", label: "לוח בקרה", match: (p: string) => p === "/admin" },
@@ -12,15 +14,20 @@ const platformTabs = [
   { href: "/admin/pots", label: "קופות", match: (p: string) => p.startsWith("/admin/pots") },
 ];
 
-const gemachTabs = [
-  { href: "/admin/gemach", label: "לוח בקרה", match: (p: string) => p === "/admin/gemach" },
+const gemachTabPaths = [
+  { path: "/admin/gemach", label: "לוח בקרה", match: (p: string) => p === "/admin/gemach" },
   {
-    href: "/admin/gemach/tools/new",
+    path: "/admin/gemach/tools/new",
     label: "הוסף כלי",
     match: (p: string) => p.startsWith("/admin/gemach/tools"),
   },
   {
-    href: "/admin/gemach/pots",
+    path: "/admin/gemach/settings",
+    label: "הגדרות",
+    match: (p: string) => p.startsWith("/admin/gemach/settings"),
+  },
+  {
+    path: "/admin/gemach/pots",
     label: "קופות",
     match: (p: string) => p.startsWith("/admin/gemach/pots"),
   },
@@ -29,6 +36,7 @@ const gemachTabs = [
 export function AdminNav() {
   const pathname = usePathname();
   const { member } = useAuth();
+  const { hrefWithGemachId } = useSelectedGemachId();
 
   const isGemachRoute = pathname.startsWith("/admin/gemach");
   const showPlatform = member && isPlatformAdmin(member) && !isGemachRoute;
@@ -37,35 +45,42 @@ export function AdminNav() {
     isGemachScopedAdmin(member) &&
     (isGemachRoute || !isPlatformAdmin(member));
 
-  const tabs = showPlatform ? platformTabs : showGemach ? gemachTabs : platformTabs;
+  const tabs: { href: string; label: string; match: (p: string) => boolean }[] = showPlatform
+    ? platformTabs
+    : showGemach
+      ? gemachTabPaths.map((tab) => ({ ...tab, href: hrefWithGemachId(tab.path) }))
+      : platformTabs;
 
   return (
-    <nav className="mb-6 flex gap-2 overflow-x-auto rounded-xl bg-warm-50 p-1 ring-1 ring-[var(--border)]">
-      {tabs.map((tab) => {
-        const active = tab.match(pathname);
-        return (
+    <>
+      <nav className="mb-6 flex gap-2 overflow-x-auto rounded-xl bg-warm-50 p-1 ring-1 ring-[var(--border)]">
+        {tabs.map((tab) => {
+          const active = tab.match(pathname);
+          return (
+            <Link
+              key={tab.href}
+              href={tab.href}
+              className={cn(
+                "shrink-0 rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors",
+                active
+                  ? "bg-white text-kerem-800 shadow-sm"
+                  : "text-[var(--muted)] hover:text-stone-800"
+              )}
+            >
+              {tab.label}
+            </Link>
+          );
+        })}
+        {member && isPlatformAdmin(member) && hasOwnedGemachim(member) && (
           <Link
-            key={tab.href}
-            href={tab.href}
-            className={cn(
-              "shrink-0 rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors",
-              active
-                ? "bg-white text-kerem-800 shadow-sm"
-                : "text-[var(--muted)] hover:text-stone-800"
-            )}
+            href={isGemachRoute ? "/admin" : hrefWithGemachId("/admin/gemach")}
+            className="mr-auto shrink-0 rounded-lg px-3 py-2.5 text-xs font-medium text-[var(--muted)] hover:text-stone-800"
           >
-            {tab.label}
+            {isGemachRoute ? "← מנהל פלטפורמה" : "גמ״ח שלי →"}
           </Link>
-        );
-      })}
-      {member && isPlatformAdmin(member) && hasOwnedGemachim(member) && (
-        <Link
-          href={isGemachRoute ? "/admin" : "/admin/gemach"}
-          className="mr-auto shrink-0 rounded-lg px-3 py-2.5 text-xs font-medium text-[var(--muted)] hover:text-stone-800"
-        >
-          {isGemachRoute ? "← מנהל פלטפורמה" : "גמ״ח שלי →"}
-        </Link>
-      )}
-    </nav>
+        )}
+      </nav>
+      {showGemach && isGemachRoute && <GemachSelector />}
+    </>
   );
 }

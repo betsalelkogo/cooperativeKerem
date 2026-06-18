@@ -6,6 +6,8 @@ import {
   slugifyGemachId,
   validateGemachId,
   validateGemachName,
+  validatePayboxGroupUrl,
+  gemachRequiresPaybox,
 } from "@/lib/gemach";
 import type { GemachPricingMode } from "@/lib/types";
 
@@ -19,12 +21,13 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { name, description, pricingMode, maintenanceFee, slug } = body as {
+    const { name, description, pricingMode, maintenanceFee, slug, payboxGroupUrl } = body as {
       name?: string;
       description?: string;
       pricingMode?: GemachPricingMode;
       maintenanceFee?: number;
       slug?: string;
+      payboxGroupUrl?: string;
     };
 
     const nameError = validateGemachName(name ?? "");
@@ -49,6 +52,13 @@ export async function POST(request: Request) {
       }
     }
 
+    if (gemachRequiresPaybox(pricingMode)) {
+      const payboxError = validatePayboxGroupUrl(payboxGroupUrl ?? "");
+      if (payboxError) {
+        return NextResponse.json({ error: payboxError }, { status: 400 });
+      }
+    }
+
     const { gemach, member } = await createGemachAndAssignAdmin({
       id: gemachId,
       name: name!.trim(),
@@ -56,6 +66,10 @@ export async function POST(request: Request) {
       pricingMode,
       maintenanceFee:
         pricingMode === "maintenance_only" ? Number(maintenanceFee ?? 0) : undefined,
+      payboxGroupUrl:
+        gemachRequiresPaybox(pricingMode) && payboxGroupUrl
+          ? payboxGroupUrl.trim()
+          : undefined,
       createdBy: uid,
     });
 

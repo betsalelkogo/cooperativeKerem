@@ -10,6 +10,7 @@ import { PayboxPayoutPanel } from "@/components/admin/PayboxPayoutPanel";
 import { formatNIS, splitPayment } from "@/lib/pots";
 import type { Gemach, Tool } from "@/lib/types";
 import type { DevicePot } from "@/lib/types";
+import { useSelectedGemachId } from "@/hooks/useSelectedGemachId";
 
 interface PotsData {
   tools: Tool[];
@@ -21,11 +22,10 @@ interface PotsData {
 
 export default function GemachAdminPotsPage() {
   const { member, getIdToken } = useAuth();
+  const { gemachId } = useSelectedGemachId();
   const [data, setData] = useState<PotsData | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-
-  const gemachId = member?.gemachAdminIds?.[0];
 
   useEffect(() => {
     if (!gemachId) {

@@ -56,13 +56,22 @@ export function AdminDashboardView({
       <PageHeader title={title} description={description} />
 
       {data.gemach && (
-        <Card className="mb-6 border-kerem-200">
+        <Card className={`mb-6 ${data.gemach.active ? "border-kerem-200" : "border-red-200"}`}>
           <CardBody className="py-4">
-            <p className="text-sm text-[var(--muted)]">גמ״ח</p>
-            <p className="text-xl font-bold text-stone-900">{data.gemach.name}</p>
-            <p className="mt-1 text-sm text-[var(--muted)]">
-              {gemachPricingModeLabels[data.gemach.pricingMode]}
-            </p>
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-sm text-[var(--muted)]">גמ״ח</p>
+                <p className="text-xl font-bold text-stone-900">{data.gemach.name}</p>
+                <p className="mt-1 text-sm text-[var(--muted)]">
+                  {gemachPricingModeLabels[data.gemach.pricingMode]}
+                </p>
+              </div>
+              {!data.gemach.active && (
+                <span className="rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-800">
+                  סגור
+                </span>
+              )}
+            </div>
           </CardBody>
         </Card>
       )}
@@ -90,7 +99,11 @@ export function AdminDashboardView({
                         {gemachPricingModeLabels[gemach.pricingMode]}
                       </p>
                     </div>
-                    {gemach.isPlatform ? (
+                    {!gemach.active ? (
+                      <span className="rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-800">
+                        סגור
+                      </span>
+                    ) : gemach.isPlatform ? (
                       <span className="rounded-full bg-kerem-100 px-2.5 py-1 text-xs font-bold text-kerem-800">
                         פלטפורמה
                       </span>

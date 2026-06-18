@@ -11,12 +11,14 @@ import { BackLink, PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
+import { useSelectedGemachId } from "@/hooks/useSelectedGemachId";
+import { withGemachIdQuery } from "@/lib/gemach-selection";
 import type { Gemach } from "@/lib/types";
 
 export default function AddGemachToolPage() {
   const router = useRouter();
   const { member, getIdToken } = useAuth();
-  const gemachId = member?.gemachAdminIds?.[0];
+  const { gemachId, hrefWithGemachId } = useSelectedGemachId();
   const [justCreated, setJustCreated] = useState(false);
 
   useEffect(() => {
@@ -83,7 +85,7 @@ export default function AddGemachToolPage() {
         throw new Error(data.error ?? "הוספת הכלי נכשלה");
       }
 
-      router.push(`/admin/gemach?toolsAdded=${data.tools.length}`);
+      router.push(withGemachIdQuery(`/admin/gemach?toolsAdded=${data.tools.length}`, gemachId));
     } catch (err) {
       setError(err instanceof Error ? err.message : "משהו השתבש");
     } finally {
@@ -109,7 +111,7 @@ export default function AddGemachToolPage() {
 
   return (
     <div className="mx-auto max-w-lg">
-      <BackLink href="/admin/gemach">חזרה ללוח הבקרה</BackLink>
+      <BackLink href={hrefWithGemachId("/admin/gemach")}>חזרה ללוח הבקרה</BackLink>
 
       <PageHeader
         title="הוספת כלי לגמ״ח"
@@ -122,7 +124,7 @@ export default function AddGemachToolPage() {
 
       {justCreated && (
         <Alert variant="success" className="mb-6">
-          <p className="font-semibold">הגemach נוצר! עכשיו הוסיפו את הכלים הראשונים.</p>
+          <p className="font-semibold">הגמ״ח נוצר! עכשיו הוסיפו את הכלים הראשונים.</p>
         </Alert>
       )}
 

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
-import { gemachPricingModeLabels } from "@/lib/gemach";
+import { gemachPricingModeLabels, gemachRequiresPaybox } from "@/lib/gemach";
 import { BackLink, PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -14,7 +14,7 @@ import type { GemachPricingMode } from "@/lib/types";
 
 const pricingOptions: { value: GemachPricingMode; hint: string }[] = [
   { value: "free", hint: "השאלה ללא תשלום — מתאים לגמ״חים קהילתיים" },
-  { value: "loan_fee", hint: "דמי השאלה לפי כל כלי (כמו בכרם)" },
+  { value: "loan_fee", hint: "דמי השאלה לפי כל כלי (כמו בכרם רעים)" },
   { value: "maintenance_only", hint: "סכום קבוע לתחזוקה בלבד" },
 ];
 
@@ -27,6 +27,7 @@ export default function AddGemachPage() {
   const [slug, setSlug] = useState("");
   const [pricingMode, setPricingMode] = useState<GemachPricingMode>("free");
   const [maintenanceFee, setMaintenanceFee] = useState("");
+  const [payboxGroupUrl, setPayboxGroupUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -48,6 +49,9 @@ export default function AddGemachPage() {
           pricingMode,
           maintenanceFee:
             pricingMode === "maintenance_only" ? Number(maintenanceFee || 0) : undefined,
+          payboxGroupUrl: gemachRequiresPaybox(pricingMode)
+            ? payboxGroupUrl.trim()
+            : undefined,
         }),
       });
 
@@ -57,7 +61,9 @@ export default function AddGemachPage() {
       }
 
       await refreshMember();
-      router.push("/admin/gemach/tools/new?created=1");
+      router.push(
+        `/admin/gemach/tools/new?created=1&gemachId=${encodeURIComponent(data.gemach.id)}`
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "משהו השתבש");
     } finally {
@@ -71,7 +77,7 @@ export default function AddGemachPage() {
 
       <PageHeader
         title="הוסיפו את הגמ״ח שלכם"
-        description="פתחו גמ״ח שותף בפלטפורמת כרם — הכלים שלכם יופיעו ברשימת הכלים המשותפת עם תג ★."
+        description="פתחו גמ״ח שותף בפלטפורמת כרם רעים — הכלים שלכם יופיעו ברשימת הכלים המשותפת עם תג ★."
       />
 
       <Card className="shadow-md">
@@ -179,6 +185,30 @@ export default function AddGemachPage() {
                   placeholder="0"
                   className="w-full rounded-xl border border-[var(--border)] px-4 py-3 text-sm focus:border-kerem-500 focus:outline-none focus:ring-2 focus:ring-kerem-200"
                 />
+              </div>
+            )}
+
+            {gemachRequiresPaybox(pricingMode) && (
+              <div>
+                <label
+                  htmlFor="payboxGroupUrl"
+                  className="mb-1.5 block text-sm font-semibold text-stone-800"
+                >
+                  קישור PayBox לתשלומים *
+                </label>
+                <input
+                  id="payboxGroupUrl"
+                  type="url"
+                  required
+                  dir="ltr"
+                  value={payboxGroupUrl}
+                  onChange={(e) => setPayboxGroupUrl(e.target.value)}
+                  placeholder="https://payboxapp.com/..."
+                  className="w-full rounded-xl border border-[var(--border)] px-4 py-3 text-sm focus:border-kerem-500 focus:outline-none focus:ring-2 focus:ring-kerem-200"
+                />
+                <p className="mt-1.5 text-xs text-[var(--muted)]">
+                  התשלומים על כלי הגמ״ח שלכם יועברו לקבוצת PayBox זו (HTTPS בלבד).
+                </p>
               </div>
             )}
 

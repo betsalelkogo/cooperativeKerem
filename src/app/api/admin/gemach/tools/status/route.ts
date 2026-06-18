@@ -4,7 +4,7 @@ import {
   requireGemachAdmin,
   resolveGemachAdminScope,
 } from "@/lib/firebase/admin-auth";
-import { updateToolKindStatus, updateToolStatusScoped } from "@/lib/firestore/repository";
+import { updateToolKindStatus, updateToolStatusScoped, getGemachById } from "@/lib/firestore/repository";
 
 export async function PATCH(request: Request) {
   const auth = await requireAdmin(request);
@@ -28,6 +28,11 @@ export async function PATCH(request: Request) {
 
     const scoped = await requireGemachAdmin(request, gemachId);
     if (scoped instanceof NextResponse) return scoped;
+
+    const gemach = await getGemachById(gemachId);
+    if (!gemach?.active) {
+      return NextResponse.json({ error: "הגמ״ח סגור" }, { status: 403 });
+    }
 
     if (toolId) {
       await updateToolStatusScoped({ toolId, status, gemachId });

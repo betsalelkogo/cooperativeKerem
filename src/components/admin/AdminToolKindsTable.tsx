@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Fragment, useState } from "react";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Alert } from "@/components/ui/Alert";
@@ -148,7 +149,13 @@ export function AdminToolKindsTable({
                       </td>
                       {editable && (
                         <td className="px-4 py-3">
-                          <div className="flex flex-wrap gap-1">
+                          <div className="flex flex-wrap items-center gap-1">
+                            <Link
+                              href={`/admin/gemach/tools/${encodeURIComponent(tool.kindId)}/edit`}
+                              className="rounded-lg bg-kerem-50 px-2 py-1 text-xs font-semibold text-kerem-800 hover:bg-kerem-100"
+                            >
+                              ערוך
+                            </Link>
                             {tool.availableUnits > 0 && (
                               <button
                                 type="button"
