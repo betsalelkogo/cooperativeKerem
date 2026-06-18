@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { authFetch } from "@/lib/api-client";
 import { gemachPricingModeLabels, MAX_LOAN_HOURS_CAP } from "@/lib/gemach";
 import { TOOL_CATEGORIES } from "@/lib/tools-admin";
+import { readImageFileAsDataUrl, resolveToolImageUrl, validateToolImageUrl } from "@/lib/tool-image";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
@@ -36,67 +37,54 @@ export function ToolKindEditForm({
   );
   const [adminNotes, setAdminNotes] = useState(kind.adminNotes ?? "");
   const [imageUrl, setImageUrl] = useState(kind.imageUrl ?? "");
+  const [imageUrlInput, setImageUrlInput] = useState(
+    kind.imageUrl?.startsWith("http") ? kind.imageUrl : ""
+  );
   const [imagePreview, setImagePreview] = useState(kind.imageUrl ?? "");
+  const [readingFile, setReadingFile] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [uploadingImage, setUploadingImage] = useState(false);
   const [error, setError] = useState("");
 
   const showFees = kind.pricingMode === "loan_fee";
   const showLoanHours = kind.reservationMode === "fixed_hours";
 
-  async function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleImageFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setUploadingImage(true);
+    setReadingFile(true);
     setError("");
-    setImagePreview(URL.createObjectURL(file));
-
     try {
-      const token = await getToken();
-      const formData = new FormData();
-      formData.append("gemachId", gemachId);
-      formData.append("image", file);
-
-      const res = await authFetch(
-        `/api/admin/gemach/tools/${encodeURIComponent(kind.kindId)}/image`,
-        { method: "POST", token, body: formData }
-      );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "העלאת התמונה נכשלה");
-      setImageUrl(data.imageUrl ?? "");
-      setImagePreview(data.imageUrl ?? "");
+      const dataUrl = await readImageFileAsDataUrl(file);
+      setImageUrl(dataUrl);
+      setImageUrlInput("");
+      setImagePreview(dataUrl);
     } catch (err) {
       setError(err instanceof Error ? err.message : "שגיאה");
-      setImagePreview(imageUrl);
     } finally {
-      setUploadingImage(false);
+      setReadingFile(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
 
-  async function handleRemoveImage() {
-    setUploadingImage(true);
+  function applyImageUrl() {
     setError("");
-    try {
-      const token = await getToken();
-      const formData = new FormData();
-      formData.append("gemachId", gemachId);
-      formData.append("remove", "true");
-
-      const res = await authFetch(
-        `/api/admin/gemach/tools/${encodeURIComponent(kind.kindId)}/image`,
-        { method: "POST", token, body: formData }
-      );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "הסרת התמונה נכשלה");
-      setImageUrl("");
-      setImagePreview("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "שגיאה");
-    } finally {
-      setUploadingImage(false);
+    const err = validateToolImageUrl(imageUrlInput);
+    if (err) {
+      setError(err);
+      return;
     }
+    const trimmed = imageUrlInput.trim();
+    if (trimmed) {
+      setImageUrl(trimmed);
+      setImagePreview(trimmed);
+    }
+  }
+
+  function handleRemoveImage() {
+    setImageUrl("");
+    setImageUrlInput("");
+    setImagePreview("");
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -105,6 +93,8 @@ export function ToolKindEditForm({
     setError("");
 
     try {
+      const imageToSave = resolveToolImageUrl(imageUrl || imageUrlInput);
+
       const token = await getToken();
       const res = await authFetch(
         `/api/admin/gemach/tools/${encodeURIComponent(kind.kindId)}`,
@@ -122,6 +112,7 @@ export function ToolKindEditForm({
             defaultLoanHours: defaultLoanHours.trim() === "" ? null : Number(defaultLoanHours),
             maxLoanHours: maxLoanHours.trim() === "" ? null : Number(maxLoanHours),
             adminNotes: adminNotes.trim() || null,
+            imageUrl: imageToSave,
           }),
         }
       );
@@ -162,19 +153,13 @@ export function ToolKindEditForm({
                 type="button"
                 variant="secondary"
                 size="sm"
-                disabled={uploadingImage}
+                disabled={readingFile}
                 onClick={() => fileInputRef.current?.click()}
               >
-                {uploadingImage ? "מעלה…" : imagePreview ? "החלף תמונה" : "העלה תמונה"}
+                {readingFile ? "טוען…" : imagePreview ? "החלף מהמחשב" : "בחר מהמחשב"}
               </Button>
               {imagePreview && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  disabled={uploadingImage}
-                  onClick={handleRemoveImage}
-                >
+                <Button type="button" variant="ghost" size="sm" onClick={handleRemoveImage}>
                   הסר תמונה
                 </Button>
               )}
@@ -184,9 +169,30 @@ export function ToolKindEditForm({
               type="file"
               accept="image/jpeg,image/png,image/webp"
               className="hidden"
-              onChange={handleImageChange}
+              onChange={handleImageFile}
             />
-            <p className="text-xs text-[var(--muted)]">JPG, PNG או WebP · עד 5MB</p>
+            <div>
+              <label htmlFor="imageUrl" className="mb-1.5 block text-xs font-semibold text-stone-800">
+                או קישור לתמונה (HTTPS)
+              </label>
+              <div className="flex gap-2">
+                <input
+                  id="imageUrl"
+                  type="url"
+                  dir="ltr"
+                  value={imageUrlInput}
+                  onChange={(e) => setImageUrlInput(e.target.value)}
+                  placeholder="https://..."
+                  className="min-w-0 flex-1 rounded-xl border border-[var(--border)] px-3 py-2 text-sm focus:border-kerem-500 focus:outline-none focus:ring-2 focus:ring-kerem-200"
+                />
+                <Button type="button" variant="secondary" size="sm" onClick={applyImageUrl}>
+                  הצג
+                </Button>
+              </div>
+            </div>
+            <p className="text-xs text-[var(--muted)]">
+              JPG, PNG או WebP · עד 400KB מהמחשב · נשמר ב-Firestore (ללא Firebase Storage)
+            </p>
           </fieldset>
 
           <div>
@@ -333,7 +339,7 @@ export function ToolKindEditForm({
             {gemachPricingModeLabels[kind.pricingMode]}
           </p>
 
-          <Button type="submit" size="lg" disabled={saving || uploadingImage} className="w-full">
+          <Button type="submit" size="lg" disabled={saving || readingFile} className="w-full">
             {saving ? "שומר…" : "שמור שינויים"}
           </Button>
         </form>

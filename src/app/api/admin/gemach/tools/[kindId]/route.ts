@@ -11,6 +11,7 @@ import {
 } from "@/lib/firestore/repository";
 import { isPlatformAdmin } from "@/lib/admin";
 import { isPlatformGemach } from "@/lib/gemach";
+import { resolveToolImageUrl } from "@/lib/tool-image";
 
 export async function GET(
   request: Request,
@@ -62,6 +63,7 @@ export async function PATCH(
       defaultLoanHours,
       maxLoanHours,
       adminNotes,
+      imageUrl,
     } = body as {
       gemachId?: string;
       name?: string;
@@ -72,6 +74,7 @@ export async function PATCH(
       defaultLoanHours?: number | null;
       maxLoanHours?: number | null;
       adminNotes?: string | null;
+      imageUrl?: string | null;
     };
 
     const gemachId = resolveGemachAdminScope(adminAuth.member, requestedGemachId ?? null);
@@ -97,6 +100,18 @@ export async function PATCH(
         { error: "מנהל פלטפורמה יכול לערוך רק כלי קואופרטיב" },
         { status: 403 }
       );
+    }
+
+    let normalizedImageUrl: string | null | undefined;
+    if (imageUrl === null) {
+      normalizedImageUrl = null;
+    } else if (imageUrl !== undefined) {
+      try {
+        normalizedImageUrl = resolveToolImageUrl(imageUrl);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "תמונה לא תקינה";
+        return NextResponse.json({ error: message }, { status: 400 });
+      }
     }
 
     const result = await updateToolKindDetails({
@@ -125,6 +140,7 @@ export async function PATCH(
           : adminNotes !== undefined
             ? adminNotes
             : undefined,
+      imageUrl: normalizedImageUrl,
     });
 
     return NextResponse.json(result);
