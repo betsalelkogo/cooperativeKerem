@@ -140,6 +140,7 @@ export default function GemachAdminDashboardPage() {
         gemachId={gemachId}
         getToken={getIdToken}
         onToolsUpdated={loadDashboard}
+        onRefresh={loadDashboard}
       />
     </div>
   );

@@ -61,6 +61,7 @@ export async function PATCH(
       loanFeeMax,
       defaultLoanHours,
       maxLoanHours,
+      adminNotes,
     } = body as {
       gemachId?: string;
       name?: string;
@@ -70,6 +71,7 @@ export async function PATCH(
       loanFeeMax?: number;
       defaultLoanHours?: number | null;
       maxLoanHours?: number | null;
+      adminNotes?: string | null;
     };
 
     const gemachId = resolveGemachAdminScope(adminAuth.member, requestedGemachId ?? null);
@@ -116,6 +118,12 @@ export async function PATCH(
           ? null
           : maxLoanHours !== undefined
             ? Number(maxLoanHours)
+            : undefined,
+      adminNotes:
+        adminNotes === null
+          ? null
+          : adminNotes !== undefined
+            ? adminNotes
             : undefined,
     });
 

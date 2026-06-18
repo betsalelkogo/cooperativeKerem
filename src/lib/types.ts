@@ -23,6 +23,8 @@ export interface Tool {
   /** Accessories / parts that ship with the tool — checked at pickup and return. */
   includedItems?: IncludedItem[];
   imageUrl?: string;
+  /** Internal admin notes — not shown to borrowers. */
+  adminNotes?: string;
   /** Owning gemach — defaults to platform (kerem). */
   gemachId: string;
   /** Groups identical physical units in the catalog (defaults to tool id). */
@@ -204,6 +206,9 @@ export interface MaintenanceTicket {
   memberId: string;
   description: string;
   status: "open" | "in_progress" | "resolved";
+  adminReply?: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
   createdAt: string;
 }
 
@@ -256,6 +261,7 @@ export interface AdminMaintenanceReport {
   loanId?: string;
   description: string;
   status: MaintenanceTicket["status"];
+  adminReply?: string;
   createdAt: string;
 }
 
@@ -340,6 +346,8 @@ export interface AdminToolKindEdit {
   /** Resolved values for UI hints. */
   gemachDefaultLoanHours: number;
   gemachMaxLoanHours: number;
+  imageUrl?: string;
+  adminNotes?: string;
 }
 
 export interface AdminMemberSummary {

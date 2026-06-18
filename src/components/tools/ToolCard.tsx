@@ -21,18 +21,31 @@ export function ToolCard({ kind }: { kind: ToolKindWithAvailability }) {
 
   return (
     <Card className="group overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:shadow-stone-900/10">
-      <div className={cn("h-1.5 bg-gradient-to-l", meta.gradient)} />
+      {kind.imageUrl ? (
+        <div className="relative h-36 overflow-hidden bg-warm-100">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={kind.imageUrl}
+            alt={kind.name}
+            className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+          />
+        </div>
+      ) : (
+        <div className={cn("h-1.5 bg-gradient-to-l", meta.gradient)} />
+      )}
       <CardBody className="pb-4">
         <div className="mb-4 flex items-start justify-between gap-3">
           <div className="flex items-start gap-3">
-            <span
-              className={cn(
-                "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-xl text-white shadow-md",
-                meta.gradient
-              )}
-            >
-              {meta.icon}
-            </span>
+            {!kind.imageUrl && (
+              <span
+                className={cn(
+                  "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-xl text-white shadow-md",
+                  meta.gradient
+                )}
+              >
+                {meta.icon}
+              </span>
+            )}
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">

@@ -220,6 +220,8 @@ function toolFromDoc(id: string, data: DocumentData): Tool {
     defaultLoanHours:
       typeof data.defaultLoanHours === "number" ? data.defaultLoanHours : undefined,
     maxLoanHours: typeof data.maxLoanHours === "number" ? data.maxLoanHours : undefined,
+    imageUrl: typeof data.imageUrl === "string" ? data.imageUrl : undefined,
+    adminNotes: typeof data.adminNotes === "string" ? data.adminNotes : undefined,
   };
 }
 
@@ -536,6 +538,8 @@ export async function getToolKindForAdmin(
     maxLoanHours: representative.maxLoanHours,
     gemachDefaultLoanHours: resolveGemachDefaultLoanHours(gemach),
     gemachMaxLoanHours: resolveGemachMaxLoanHours(gemach),
+    imageUrl: representative.imageUrl,
+    adminNotes: representative.adminNotes,
   };
 }
 
@@ -549,6 +553,8 @@ export async function updateToolKindDetails(params: {
   loanFeeMax?: number;
   defaultLoanHours?: number | null;
   maxLoanHours?: number | null;
+  imageUrl?: string | null;
+  adminNotes?: string | null;
 }): Promise<{ updated: number }> {
   const gemach = await getGemachById(params.gemachId);
   if (!gemach) {
@@ -609,6 +615,19 @@ export async function updateToolKindDetails(params: {
       update.maxLoanHours = FieldValue.delete();
     } else if (params.maxLoanHours !== undefined) {
       update.maxLoanHours = params.maxLoanHours;
+    }
+
+    if (params.imageUrl === null) {
+      update.imageUrl = FieldValue.delete();
+    } else if (params.imageUrl !== undefined) {
+      update.imageUrl = params.imageUrl;
+    }
+
+    if (params.adminNotes === null) {
+      update.adminNotes = FieldValue.delete();
+    } else if (params.adminNotes !== undefined) {
+      const notes = params.adminNotes.trim();
+      update.adminNotes = notes ? notes : FieldValue.delete();
     }
 
     batch.update(getAdminDb().collection("tools").doc(tool.id), update);
@@ -1184,11 +1203,14 @@ export async function getAdminDashboard(options?: {
   const toolMap = new Map(tools.map((t) => [t.id, t]));
   const allToolMap = new Map(allTools.map((t) => [t.id, t]));
 
+  const problemReportGemachFilter =
+    gemachId ?? (options?.includeGemachim ? PLATFORM_GEMACH_ID : undefined);
+
   const problemReports = openTickets
     .map((ticket) => {
       const tool = allToolMap.get(ticket.toolId);
       if (!tool) return null;
-      if (gemachId && tool.gemachId !== gemachId) return null;
+      if (problemReportGemachFilter && tool.gemachId !== problemReportGemachFilter) return null;
       const member = memberMap.get(ticket.memberId);
       const gemach = gemachMap.get(tool.gemachId);
       return {
@@ -1203,6 +1225,7 @@ export async function getAdminDashboard(options?: {
         loanId: ticket.loanId,
         description: ticket.description,
         status: ticket.status,
+        adminReply: ticket.adminReply,
         createdAt: ticket.createdAt,
       };
     })
@@ -1666,7 +1689,47 @@ function maintenanceTicketFromDoc(id: string, data: DocumentData): MaintenanceTi
     memberId: data.memberId as string,
     description: data.description as string,
     status: (data.status as MaintenanceTicket["status"]) ?? "open",
+    adminReply: (data.adminReply as string) || undefined,
+    resolvedAt: data.resolvedAt ? tsToIso(data.resolvedAt) : undefined,
+    resolvedBy: (data.resolvedBy as string) || undefined,
     createdAt: tsToIso(data.createdAt),
+  };
+}
+
+export async function resolveMaintenanceTicket(
+  ticketId: string,
+  params: { adminReply?: string; resolvedBy: string }
+): Promise<MaintenanceTicket> {
+  const db = getAdminDb();
+  const ref = db.collection("maintenance_tickets").doc(ticketId);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error("הדיווח לא נמצא");
+
+  const data = snap.data()!;
+  if (data.status === "resolved") throw new Error("הדיווח כבר נסגר");
+
+  const batch = db.batch();
+  batch.update(ref, {
+    status: "resolved",
+    adminReply: params.adminReply?.trim() || null,
+    resolvedAt: FieldValue.serverTimestamp(),
+    resolvedBy: params.resolvedBy,
+  });
+
+  const toolRef = db.collection("tools").doc(data.toolId as string);
+  const toolSnap = await toolRef.get();
+  if (toolSnap.exists && toolSnap.data()?.status === "disabled") {
+    batch.update(toolRef, { status: "available" });
+  }
+
+  await batch.commit();
+
+  return {
+    ...maintenanceTicketFromDoc(ticketId, data),
+    status: "resolved",
+    adminReply: params.adminReply?.trim() || undefined,
+    resolvedAt: new Date().toISOString(),
+    resolvedBy: params.resolvedBy,
   };
 }
 
@@ -1684,6 +1747,12 @@ export async function listMaintenanceTickets(options?: {
     .map((d) => maintenanceTicketFromDoc(d.id, d.data()))
     .filter((t) => !statuses || statuses.includes(t.status))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export async function getMaintenanceTicketById(id: string): Promise<MaintenanceTicket | null> {
+  const snap = await getAdminDb().collection("maintenance_tickets").doc(id).get();
+  if (!snap.exists) return null;
+  return maintenanceTicketFromDoc(snap.id, snap.data()!);
 }
 
 // ─── Pots ──────────────────────────────────────────────────────────────────

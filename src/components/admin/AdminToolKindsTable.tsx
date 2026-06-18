@@ -159,7 +159,11 @@ export function AdminToolKindsTable({
                         <td className="px-4 py-3">
                           <div className="flex flex-wrap items-center gap-1">
                             <Link
-                              href={`/admin/gemach/tools/${encodeURIComponent(tool.kindId)}/edit?gemachId=${encodeURIComponent(actionGemachId)}`}
+                              href={
+                                cooperativeOnly
+                                  ? `/admin/tools/${encodeURIComponent(tool.kindId)}/edit`
+                                  : `/admin/gemach/tools/${encodeURIComponent(tool.kindId)}/edit?gemachId=${encodeURIComponent(actionGemachId)}`
+                              }
                               className="rounded-lg bg-kerem-50 px-2 py-1 text-xs font-semibold text-kerem-800 hover:bg-kerem-100"
                             >
                               ערוך

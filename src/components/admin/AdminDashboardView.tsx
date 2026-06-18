@@ -11,6 +11,7 @@ import { formatDateHe } from "@/lib/dates";
 import { gemachPricingModeLabels } from "@/lib/gemach";
 import { formatNIS } from "@/lib/pots";
 import { AdminToolKindsTable } from "@/components/admin/AdminToolKindsTable";
+import { ProblemReportsPanel } from "@/components/admin/ProblemReportsPanel";
 import type { AdminDashboardData } from "@/lib/types";
 
 function StatCard({ label, value, accent }: { label: string; value: number; accent?: string }) {
@@ -187,37 +188,12 @@ export function AdminDashboardView({
       )}
 
       {data.problemReports.length > 0 && (
-        <section className="mb-10">
-          <h2 className="mb-4 text-lg font-bold text-stone-900">⚠️ דיווחים על בעיות</h2>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {data.problemReports.map((report) => (
-              <Card key={report.id} className="border-orange-300 bg-orange-50/50">
-                <CardBody className="py-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-bold text-stone-900">{report.toolName}</p>
-                      {showGemachColumn && report.gemachName && (
-                        <p className="mt-0.5 text-xs text-[var(--muted)]">{report.gemachName}</p>
-                      )}
-                      <p className="mt-2 text-sm text-stone-700">{report.memberName}</p>
-                      <p className="text-xs text-[var(--muted)]">{report.memberEmail}</p>
-                    </div>
-                    <span className="shrink-0 rounded-full bg-orange-200 px-2.5 py-1 text-xs font-bold text-orange-900 ring-1 ring-inset ring-orange-300">
-                      פתוח
-                    </span>
-                  </div>
-                  <p className="mt-3 rounded-lg bg-white/80 px-3 py-2 text-sm text-stone-800">
-                    {report.description}
-                  </p>
-                  <p className="mt-3 text-xs text-[var(--muted)]">
-                    דווח: {formatDateTime(report.createdAt)}
-                    {report.loanId ? ` · השאלה ${report.loanId}` : ""}
-                  </p>
-                </CardBody>
-              </Card>
-            ))}
-          </div>
-        </section>
+        <ProblemReportsPanel
+          reports={data.problemReports}
+          showGemachColumn={showGemachColumn}
+          getToken={getToken ?? (async () => null)}
+          onUpdated={onRefresh}
+        />
       )}
 
       {showGemachimList && data.gemachim && data.gemachim.length > 0 && (
