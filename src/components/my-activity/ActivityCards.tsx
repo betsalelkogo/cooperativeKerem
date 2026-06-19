@@ -8,6 +8,7 @@ import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { formatDateHe, formatReservationSchedule } from "@/lib/dates";
 import { authFetch } from "@/lib/api-client";
+import { compressImageFile } from "@/lib/compress-image";
 import type { Loan, Reservation, Tool } from "@/lib/types";
 
 export interface LoanWithTool {
@@ -104,8 +105,9 @@ export function LoanCard({ loan, tool, getToken, onPhotoAdded }: LoanCardProps) 
     try {
       const token = await getToken();
       if (!token) return;
+      const compressed = await compressImageFile(file);
       const formData = new FormData();
-      formData.append("photo", file);
+      formData.append("photo", compressed, "photo.jpg");
       const res = await authFetch(`/api/loans/${loan.id}/photos`, {
         method: "POST",
         token,

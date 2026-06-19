@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/Button";
 import { Card, CardBody } from "@/components/ui/Card";
 import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
+import { compressImageFile } from "@/lib/compress-image";
 import { REQUIRE_QR_SCAN } from "@/lib/features";
 import type { Reservation, Tool } from "@/lib/types";
 
@@ -97,9 +98,10 @@ export default function CheckoutPage() {
 
     try {
       const token = await getIdToken();
+      const compressed = await compressImageFile(photoFile);
       const formData = new FormData();
       formData.append("reservationId", reservation.id);
-      formData.append("photo", photoFile);
+      formData.append("photo", compressed, "checkout.jpg");
       formData.append("checkoutConditionNotes", conditionNotes);
       formData.append("checkoutItemsChecked", JSON.stringify(checkedItems));
 

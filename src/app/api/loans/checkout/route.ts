@@ -4,13 +4,24 @@ import {
   createLoanFromCheckout,
   getReservationById,
   getToolById,
+  getMemberById,
 } from "@/lib/firestore/repository";
+import {
+  isCloudinaryConfigured,
+  cloudinaryNotConfiguredMessage,
+  readImageUpload,
+  uploadLoanCheckoutPhoto,
+} from "@/lib/cloudinary-admin";
 
 export async function POST(request: Request) {
   try {
     const memberId = await getUidFromRequest(request);
     if (!memberId) {
       return NextResponse.json({ error: "נדרשת התחברות" }, { status: 401 });
+    }
+
+    if (!isCloudinaryConfigured()) {
+      return NextResponse.json({ error: cloudinaryNotConfiguredMessage() }, { status: 503 });
     }
 
     const formData = await request.formData();
@@ -49,9 +60,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "הכלי לא נמצא" }, { status: 404 });
     }
 
+    const buffer = await readImageUpload(photo);
+    const member = await getMemberById(memberId);
+    const memberName = member?.name ?? member?.email?.split("@")[0] ?? "user";
+    const checkoutPhotoUrl = await uploadLoanCheckoutPhoto({
+      memberName,
+      buffer,
+    });
+
     const loan = await createLoanFromCheckout({
       reservation,
-      checkoutPhotoUrl: `/uploads/${photo.name}`,
+      checkoutPhotoUrl,
       checkoutConditionNotes: checkoutConditionNotes ?? undefined,
       checkoutItemsChecked,
     });
@@ -74,6 +93,6 @@ export async function POST(request: Request) {
     }
 
     console.error("[api/loans/checkout]", message);
-    return NextResponse.json({ error: "שגיאת שרת" }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

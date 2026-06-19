@@ -2,9 +2,10 @@
 
 import { useRef, useState } from "react";
 import { authFetch } from "@/lib/api-client";
+import { compressImageFile } from "@/lib/compress-image";
 import { gemachPricingModeLabels, MAX_LOAN_HOURS_CAP } from "@/lib/gemach";
 import { TOOL_CATEGORIES } from "@/lib/tools-admin";
-import { readImageFileAsDataUrl, resolveToolImageUrl, validateToolImageUrl } from "@/lib/tool-image";
+import { resolveToolImageUrl, validateToolImageUrl } from "@/lib/tool-image";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
@@ -38,10 +39,11 @@ export function ToolKindEditForm({
   const [adminNotes, setAdminNotes] = useState(kind.adminNotes ?? "");
   const [imageUrl, setImageUrl] = useState(kind.imageUrl ?? "");
   const [imageUrlInput, setImageUrlInput] = useState(
-    kind.imageUrl?.startsWith("http") ? kind.imageUrl : ""
+    kind.imageUrl?.startsWith("https://") ? kind.imageUrl : ""
   );
   const [imagePreview, setImagePreview] = useState(kind.imageUrl ?? "");
-  const [readingFile, setReadingFile] = useState(false);
+  const [imageDirty, setImageDirty] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -52,17 +54,35 @@ export function ToolKindEditForm({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setReadingFile(true);
+    setUploadingImage(true);
     setError("");
+    const preview = URL.createObjectURL(file);
+    setImagePreview(preview);
+
     try {
-      const dataUrl = await readImageFileAsDataUrl(file);
-      setImageUrl(dataUrl);
+      const compressed = await compressImageFile(file);
+      const token = await getToken();
+      const formData = new FormData();
+      formData.append("gemachId", gemachId);
+      formData.append("image", compressed, "tool.jpg");
+
+      const res = await authFetch(
+        `/api/admin/gemach/tools/${encodeURIComponent(kind.kindId)}/image`,
+        { method: "POST", token, body: formData }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "העלאת התמונה נכשלה");
+
+      setImageUrl(data.imageUrl ?? "");
       setImageUrlInput("");
-      setImagePreview(dataUrl);
+      setImagePreview(data.imageUrl ?? "");
+      setImageDirty(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "שגיאה");
+      setImagePreview(imageUrl);
     } finally {
-      setReadingFile(false);
+      URL.revokeObjectURL(preview);
+      setUploadingImage(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
@@ -78,13 +98,35 @@ export function ToolKindEditForm({
     if (trimmed) {
       setImageUrl(trimmed);
       setImagePreview(trimmed);
+      setImageDirty(true);
     }
   }
 
-  function handleRemoveImage() {
-    setImageUrl("");
-    setImageUrlInput("");
-    setImagePreview("");
+  async function handleRemoveImage() {
+    setUploadingImage(true);
+    setError("");
+    try {
+      const token = await getToken();
+      const formData = new FormData();
+      formData.append("gemachId", gemachId);
+      formData.append("remove", "true");
+
+      const res = await authFetch(
+        `/api/admin/gemach/tools/${encodeURIComponent(kind.kindId)}/image`,
+        { method: "POST", token, body: formData }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "הסרת התמונה נכשלה");
+
+      setImageUrl("");
+      setImageUrlInput("");
+      setImagePreview("");
+      setImageDirty(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "שגיאה");
+    } finally {
+      setUploadingImage(false);
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -93,7 +135,10 @@ export function ToolKindEditForm({
     setError("");
 
     try {
-      const imageToSave = resolveToolImageUrl(imageUrl || imageUrlInput);
+      let imageToSave: string | null | undefined;
+      if (imageDirty) {
+        imageToSave = resolveToolImageUrl(imageUrlInput || imageUrl);
+      }
 
       const token = await getToken();
       const res = await authFetch(
@@ -112,7 +157,7 @@ export function ToolKindEditForm({
             defaultLoanHours: defaultLoanHours.trim() === "" ? null : Number(defaultLoanHours),
             maxLoanHours: maxLoanHours.trim() === "" ? null : Number(maxLoanHours),
             adminNotes: adminNotes.trim() || null,
-            imageUrl: imageToSave,
+            ...(imageToSave !== undefined ? { imageUrl: imageToSave } : {}),
           }),
         }
       );
@@ -153,13 +198,19 @@ export function ToolKindEditForm({
                 type="button"
                 variant="secondary"
                 size="sm"
-                disabled={readingFile}
+                disabled={uploadingImage}
                 onClick={() => fileInputRef.current?.click()}
               >
-                {readingFile ? "טוען…" : imagePreview ? "החלף מהמחשב" : "בחר מהמחשב"}
+                {uploadingImage ? "מעלה…" : imagePreview ? "החלף מהמחשב" : "בחר מהמחשב"}
               </Button>
               {imagePreview && (
-                <Button type="button" variant="ghost" size="sm" onClick={handleRemoveImage}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={uploadingImage}
+                  onClick={handleRemoveImage}
+                >
                   הסר תמונה
                 </Button>
               )}
@@ -167,7 +218,7 @@ export function ToolKindEditForm({
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/jpeg,image/png,image/webp"
+              accept="image/jpeg,image/png,image/webp,image/*"
               className="hidden"
               onChange={handleImageFile}
             />
@@ -191,7 +242,7 @@ export function ToolKindEditForm({
               </div>
             </div>
             <p className="text-xs text-[var(--muted)]">
-              JPG, PNG או WebP · עד 400KB מהמחשב · נשמר ב-Firestore (ללא Firebase Storage)
+              העלאה מהמחשב נשמרת מיד · דורש הגדרת Cloudinary (חינם) · JPG/PNG/WebP
             </p>
           </fieldset>
 
@@ -339,7 +390,7 @@ export function ToolKindEditForm({
             {gemachPricingModeLabels[kind.pricingMode]}
           </p>
 
-          <Button type="submit" size="lg" disabled={saving || readingFile} className="w-full">
+          <Button type="submit" size="lg" disabled={saving || uploadingImage} className="w-full">
             {saving ? "שומר…" : "שמור שינויים"}
           </Button>
         </form>

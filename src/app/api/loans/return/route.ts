@@ -1,10 +1,20 @@
 import { NextResponse } from "next/server";
 import { getUidFromRequest } from "@/lib/firebase/admin";
-import { completeLoanReturn, getLoanById } from "@/lib/firestore/repository";
+import { completeLoanReturn, getLoanById, getMemberById } from "@/lib/firestore/repository";
+import {
+  isCloudinaryConfigured,
+  cloudinaryNotConfiguredMessage,
+  readImageUpload,
+  uploadLoanReturnPhoto,
+} from "@/lib/cloudinary-admin";
 
 export async function POST(request: Request) {
   try {
     const memberId = await getUidFromRequest(request);
+
+    if (!isCloudinaryConfigured()) {
+      return NextResponse.json({ error: cloudinaryNotConfiguredMessage() }, { status: 503 });
+    }
 
     const formData = await request.formData();
     const loanId = formData.get("loanId") as string | null;
@@ -41,13 +51,23 @@ export async function POST(request: Request) {
       );
     }
 
+    const buffer = await readImageUpload(photo);
+    const member = await getMemberById(loan.memberId);
+    const memberName =
+      member?.name ?? member?.email?.split("@")[0] ?? loan.memberId.slice(0, 8);
+    const returnPhotoUrl = await uploadLoanReturnPhoto({
+      memberName,
+      buffer,
+    });
+
     const { loan: updatedLoan, lateFee } = await completeLoanReturn(loanId, {
-      returnPhotoUrl: `/uploads/${photo.name}`,
+      returnPhotoUrl,
       returnConditionNotes: returnConditionNotes ?? undefined,
       returnItemsChecked,
     });
     return NextResponse.json({ loan: updatedLoan, lateFee });
-  } catch {
-    return NextResponse.json({ error: "שגיאת שרת" }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "שגיאת שרת";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

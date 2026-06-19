@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/Button";
 import { Card, CardBody } from "@/components/ui/Card";
 import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
+import { compressImageFile } from "@/lib/compress-image";
 import { REQUIRE_QR_SCAN } from "@/lib/features";
 import type { LateReturnFee, Loan, Tool } from "@/lib/types";
 import { formatLateDuration } from "@/lib/late-fees";
@@ -83,9 +84,10 @@ export default function ReturnPage() {
 
     try {
       const token = await getIdToken();
+      const compressed = await compressImageFile(photoFile);
       const formData = new FormData();
       formData.append("loanId", loan.id);
-      formData.append("photo", photoFile);
+      formData.append("photo", compressed, "return.jpg");
       formData.append("returnConditionNotes", conditionNotes);
       formData.append("returnItemsChecked", JSON.stringify(checkedItems));
 

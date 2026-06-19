@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { getUidFromRequest } from "@/lib/firebase/admin";
 import { addLoanPhoto, getLoanById } from "@/lib/firestore/repository";
+import {
+  isCloudinaryConfigured,
+  cloudinaryNotConfiguredMessage,
+  readImageUpload,
+  uploadLoanExtraPhoto,
+} from "@/lib/cloudinary-admin";
 
 export async function POST(
   request: Request,
@@ -10,6 +16,10 @@ export async function POST(
     const memberId = await getUidFromRequest(request);
     if (!memberId) {
       return NextResponse.json({ error: "נדרשת התחברות" }, { status: 401 });
+    }
+
+    if (!isCloudinaryConfigured()) {
+      return NextResponse.json({ error: cloudinaryNotConfiguredMessage() }, { status: 503 });
     }
 
     const { id: loanId } = await params;
@@ -28,7 +38,9 @@ export async function POST(
       return NextResponse.json({ error: "אין הרשאה" }, { status: 403 });
     }
 
-    const updated = await addLoanPhoto(loanId, `/uploads/${photo.name}`);
+    const buffer = await readImageUpload(photo);
+    const photoUrl = await uploadLoanExtraPhoto(loanId, buffer);
+    const updated = await addLoanPhoto(loanId, photoUrl);
     return NextResponse.json(updated);
   } catch (err) {
     const message = err instanceof Error ? err.message : "שגיאת שרת";

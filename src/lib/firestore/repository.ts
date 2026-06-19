@@ -1,5 +1,5 @@
-import { getFirestore, FieldValue, type Firestore, type DocumentData } from "firebase-admin/firestore";
-import { initializeApp, getApps, cert } from "firebase-admin/app";
+import { FieldValue, type DocumentData } from "firebase-admin/firestore";
+import { getAdminDb, omitUndefined } from "@/lib/firebase/admin-app";
 import type {
   AdminDashboardData,
   AdminMemberHistory,
@@ -74,25 +74,6 @@ import {
   DEFAULT_SAFETY_RULES,
   validateToolInput,
 } from "@/lib/tools-admin";
-
-function getAdminDb(): Firestore {
-  if (!getApps().length) {
-    const projectId = process.env.FIREBASE_ADMIN_PROJECT_ID;
-    const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
-    const privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY?.replace(/\\n/g, "\n").trim();
-
-    if (!projectId || !clientEmail || !privateKey) {
-      throw new Error("Firebase Admin not configured");
-    }
-
-    initializeApp({
-      credential: cert({ projectId, clientEmail, privateKey }),
-    });
-
-    getFirestore().settings({ ignoreUndefinedProperties: true });
-  }
-  return getFirestore();
-}
 
 function tsToIso(value: unknown): string {
   if (value && typeof value === "object" && "toDate" in value) {
@@ -1476,7 +1457,7 @@ export async function createLoanFromCheckout(params: {
   const batch = db.batch();
 
   batch.set(db.collection("loans").doc(loanId), {
-    ...loan,
+    ...omitUndefined(loan as unknown as Record<string, unknown>),
     checkedOutAt: FieldValue.serverTimestamp(),
   });
   batch.set(db.collection("transactions").doc(txnId), {
@@ -1671,7 +1652,7 @@ export async function createMaintenanceTicket(
   const batch = db.batch();
 
   batch.set(db.collection("maintenance_tickets").doc(id), {
-    ...data,
+    ...omitUndefined(data as unknown as Record<string, unknown>),
     status: "open",
     createdAt: FieldValue.serverTimestamp(),
   });
@@ -2022,4 +2003,4 @@ export async function completePayboxPayout(payoutId: string): Promise<PayboxPayo
   return payout;
 }
 
-export { getAdminDb };
+export { getAdminDb } from "@/lib/firebase/admin-app";
