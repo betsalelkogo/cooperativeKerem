@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getUidFromRequest } from "@/lib/firebase/admin";
 import {
   cancelReservation,
+  expireNoShowReservationIfNeeded,
   getPaidPaymentForReservation,
   getReservationById,
   getToolById,
@@ -15,7 +16,9 @@ export async function GET(
     const memberId = await getUidFromRequest(_request);
     const { id } = await params;
 
-    const reservation = await getReservationById(id);
+    const reservation =
+      (await expireNoShowReservationIfNeeded(id)) ??
+      (await getReservationById(id));
     if (!reservation) {
       return NextResponse.json({ error: "השריון לא נמצא" }, { status: 404 });
     }

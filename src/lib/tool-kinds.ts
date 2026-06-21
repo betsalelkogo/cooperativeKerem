@@ -1,4 +1,4 @@
-import type { Tool, ToolStatus, ToolWithAvailability, ToolKindWithAvailability, Loan, Reservation } from "@/lib/types";
+import type { Tool, ToolStatus, ToolWithAvailability, ToolKindWithAvailability, ToolKindStats, Loan, Reservation } from "@/lib/types";
 import { formatAvailableFromLabel } from "@/lib/dates";
 
 /** Stable grouping key for a tool kind within a gemach. */
@@ -39,6 +39,12 @@ export function pickAvailableUnit(units: Tool[]): Tool | null {
   return units.find((t) => t.status === "available") ?? null;
 }
 
+/** Pick up to `quantity` available units; returns fewer if not enough stock. */
+export function pickAvailableUnits(units: Tool[], quantity: number): Tool[] {
+  const available = units.filter((t) => t.status === "available");
+  return available.slice(0, Math.max(1, quantity));
+}
+
 function aggregateAvailability(
   units: Tool[],
   loanByTool: Map<string, Loan>,
@@ -68,7 +74,7 @@ export function buildToolKindWithAvailability(
   units: Tool[],
   loanByTool: Map<string, Loan>,
   reservationByTool: Map<string, Reservation>,
-  extras?: Partial<ToolWithAvailability>
+  extras?: Partial<ToolWithAvailability> & { location?: string; stats?: ToolKindStats }
 ): ToolKindWithAvailability | null {
   if (units.length === 0) return null;
 
@@ -89,6 +95,12 @@ export function buildToolKindWithAvailability(
     maxLoanHours: representative.maxLoanHours,
     safetyRules: representative.safetyRules,
     imageUrl: representative.imageUrl,
+    imageUrls: representative.imageUrls,
+    location: representative.location ?? extras?.location,
+    brand: representative.brand,
+    supplier: representative.supplier,
+    purpose: representative.purpose,
+    productAge: representative.productAge,
     gemachId: representative.gemachId,
     status,
     totalUnits: units.length,
@@ -96,6 +108,7 @@ export function buildToolKindWithAvailability(
     representativeToolId: pickAvailableUnit(units)?.id ?? representative.id,
     ...aggregateAvailability(units, loanByTool, reservationByTool),
     ...extras,
+    stats: extras?.stats,
   };
 }
 

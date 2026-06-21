@@ -12,6 +12,8 @@ const platformTabs = [
   { href: "/admin", label: "לוח בקרה", match: (p: string) => p === "/admin" },
   { href: "/admin/members", label: "חברים", match: (p: string) => p.startsWith("/admin/members") },
   { href: "/admin/pots", label: "קופות", match: (p: string) => p.startsWith("/admin/pots") },
+  { href: "/admin/board", label: "לוגיסטיקה", match: (p: string) => p.startsWith("/admin/board") },
+  { href: "/admin/finance", label: "כספים", match: (p: string) => p.startsWith("/admin/finance") },
 ];
 
 const gemachTabPaths = [

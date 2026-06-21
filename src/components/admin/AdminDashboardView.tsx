@@ -115,7 +115,7 @@ export function AdminDashboardView({
         <StatCard label="סה״כ כלים" value={data.stats.totalTools} />
         <StatCard label="זמינים" value={data.stats.available} accent="text-emerald-700" />
         <StatCard label="מושאלים" value={data.stats.onLoan} accent="text-amber-700" />
-        <StatCard label="שמירות פעילות" value={data.stats.activeReservations} accent="text-sky-700" />
+        <StatCard label="שריונים פעילות" value={data.stats.activeReservations} accent="text-sky-700" />
         <StatCard label="בתחזוקה" value={data.stats.maintenance} accent="text-orange-700" />
         <StatCard label="השאלות פעילות" value={data.stats.activeLoans} accent="text-violet-700" />
         <StatCard
@@ -244,11 +244,11 @@ export function AdminDashboardView({
       />
 
       <section className="mb-10">
-        <h2 className="mb-4 text-lg font-bold text-stone-900">שמירות פעילות</h2>
+        <h2 className="mb-4 text-lg font-bold text-stone-900">שריונים פעילות</h2>
         {data.activeReservations.length === 0 ? (
           <Card>
             <CardBody className="py-8 text-center text-[var(--muted)]">
-              אין שמירות פעילות כרגע
+              אין שריונים פעילות כרגע
             </CardBody>
           </Card>
         ) : (

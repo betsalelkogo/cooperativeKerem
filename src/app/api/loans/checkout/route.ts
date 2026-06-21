@@ -2,9 +2,11 @@ import { NextResponse } from "next/server";
 import { getUidFromRequest } from "@/lib/firebase/admin";
 import {
   createLoanFromCheckout,
+  expireNoShowReservationIfNeeded,
   getReservationById,
   getToolById,
 } from "@/lib/firestore/repository";
+import { canStartCheckout } from "@/lib/reservation-checkout";
 import {
   isCloudinaryConfigured,
   cloudinaryNotConfiguredMessage,
@@ -38,6 +40,16 @@ export async function POST(request: Request) {
       }
     }
 
+    const checkoutDefectRaw = formData.get("checkoutDefect") as string | null;
+    let checkoutDefect;
+    if (checkoutDefectRaw) {
+      try {
+        checkoutDefect = JSON.parse(checkoutDefectRaw);
+      } catch {
+        checkoutDefect = undefined;
+      }
+    }
+
     if (!reservationId || !photo) {
       return NextResponse.json(
         { error: "נדרשים מזהה שריון ותמונה" },
@@ -45,9 +57,18 @@ export async function POST(request: Request) {
       );
     }
 
-    const reservation = await getReservationById(reservationId);
+    const reservation =
+      (await expireNoShowReservationIfNeeded(reservationId)) ??
+      (await getReservationById(reservationId));
     if (!reservation) {
       return NextResponse.json({ error: "השריון לא נמצא" }, { status: 404 });
+    }
+
+    if (reservation.status === "cancelled" && reservation.cancelReason === "no_show") {
+      return NextResponse.json(
+        { error: "חלף מועד האיסוף — השריון בוטל אוטומטית והכלי שוחרר" },
+        { status: 409 }
+      );
     }
 
     if (reservation.memberId !== memberId) {
@@ -59,6 +80,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "הכלי לא נמצא" }, { status: 404 });
     }
 
+    const checkoutGate = canStartCheckout(reservation, tool);
+    if (!checkoutGate.allowed) {
+      return NextResponse.json({ error: checkoutGate.reason }, { status: 409 });
+    }
+
     const buffer = await readImageUpload(photo);
     const loanId = `loan-${Date.now()}`;
     const checkoutPhotoUrl = await uploadLoanCheckoutPhoto({
@@ -66,15 +92,16 @@ export async function POST(request: Request) {
       buffer,
     });
 
-    const loan = await createLoanFromCheckout({
+    const { loan, loans } = await createLoanFromCheckout({
       reservation,
       checkoutPhotoUrl,
       checkoutConditionNotes: checkoutConditionNotes ?? undefined,
       checkoutItemsChecked,
+      checkoutDefect,
       loanId,
     });
 
-    return NextResponse.json(loan, { status: 201 });
+    return NextResponse.json({ loan, loans }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "שגיאת שרת";
 

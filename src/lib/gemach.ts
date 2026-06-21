@@ -71,11 +71,35 @@ export function resolveReservationFee(gemach: Gemach, tool: Tool): number {
   return tool.loanFeeMin;
 }
 
+/** Platform cooperative fee per unit on free gemach reservations. */
+export function resolveCooperativeFee(gemach: Gemach): number {
+  if (gemach.pricingMode !== "free") return 0;
+  return Math.max(0, gemach.cooperativeFee ?? 0);
+}
+
+export function resolveTotalReservationFee(
+  gemach: Gemach,
+  tool: Tool,
+  quantity = 1
+): { feeAmount: number; cooperativeFeeAmount: number } {
+  const qty = Math.max(1, quantity);
+  const unitFee = resolveReservationFee(gemach, tool);
+  const cooperativeFeeAmount = resolveCooperativeFee(gemach) * qty;
+  return {
+    feeAmount: unitFee * qty + cooperativeFeeAmount,
+    cooperativeFeeAmount,
+  };
+}
+
 export function formatToolPriceLabel(
-  gemach: Pick<Gemach, "pricingMode" | "maintenanceFee" | "isPlatform">,
+  gemach: Pick<Gemach, "pricingMode" | "maintenanceFee" | "isPlatform" | "cooperativeFee">,
   tool: Pick<Tool, "loanFeeMin" | "loanFeeMax">
 ): string {
-  if (gemach.pricingMode === "free") return "חינם";
+  if (gemach.pricingMode === "free") {
+    const coop = resolveCooperativeFee(gemach as Gemach);
+    if (coop > 0) return `${formatNIS(coop)} דמי קואופרטיב`;
+    return "חינם";
+  }
   if (gemach.pricingMode === "maintenance_only") {
     const fee = gemach.maintenanceFee ?? 0;
     return fee > 0 ? `${formatNIS(fee)} דמי תחזוקה` : "חינם";
@@ -152,6 +176,11 @@ export function validatePayboxGroupUrl(url: string): string | null {
 
 export function gemachRequiresPaybox(pricingMode: GemachPricingMode): boolean {
   return pricingMode === "loan_fee" || pricingMode === "maintenance_only";
+}
+
+/** Free gemachim may optionally set PayBox for donations or cooperative fees. */
+export function gemachAllowsOptionalPaybox(pricingMode: GemachPricingMode): boolean {
+  return pricingMode === "free";
 }
 
 export function resolveGemachReservationMode(

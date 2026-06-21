@@ -46,6 +46,8 @@ export default function AddGemachPage() {
   const [reservationMode, setReservationMode] = useState<GemachReservationMode>("date_range");
   const [maintenanceFee, setMaintenanceFee] = useState("");
   const [payboxGroupUrl, setPayboxGroupUrl] = useState("");
+  const [location, setLocation] = useState("");
+  const [cooperativeFee, setCooperativeFee] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -53,6 +55,15 @@ export default function AddGemachPage() {
     e.preventDefault();
     setLoading(true);
     setError("");
+
+    const coop = pricingMode === "free" && cooperativeFee.trim()
+      ? Math.max(0, Number(cooperativeFee) || 0)
+      : 0;
+    if (pricingMode === "free" && coop > 0 && !payboxGroupUrl.trim()) {
+      setError("גמ״ח חינמי עם דמי קואופרטיב דורש קישור PayBox");
+      setLoading(false);
+      return;
+    }
 
     try {
       const token = await getIdToken();
@@ -68,9 +79,12 @@ export default function AddGemachPage() {
           reservationMode,
           maintenanceFee:
             pricingMode === "maintenance_only" ? Number(maintenanceFee || 0) : undefined,
-          payboxGroupUrl: gemachRequiresPaybox(pricingMode)
-            ? payboxGroupUrl.trim()
-            : undefined,
+          payboxGroupUrl: payboxGroupUrl.trim() || undefined,
+          location: location.trim() || undefined,
+          cooperativeFee:
+            pricingMode === "free" && cooperativeFee.trim()
+              ? Math.max(0, Number(cooperativeFee) || 0)
+              : undefined,
         }),
       });
 
@@ -152,6 +166,23 @@ export default function AddGemachPage() {
               />
               <p className="mt-1.5 text-xs text-[var(--muted)]">
                 אותיות קטנות באנגלית, מספרים ומקף. אם ריק — יווצר אוטומטית.
+              </p>
+            </div>
+
+            <div>
+              <label htmlFor="location" className="mb-1.5 block text-sm font-semibold text-stone-800">
+                מיקום אחסון / איסוף (ברירת מחדל לכלים)
+              </label>
+              <input
+                id="location"
+                type="text"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                placeholder="לדוגמה: מחסן קהילתי, רח' …"
+                className="w-full rounded-xl border border-[var(--border)] px-4 py-3 text-sm focus:border-kerem-500 focus:outline-none focus:ring-2 focus:ring-kerem-200"
+              />
+              <p className="mt-1.5 text-xs text-[var(--muted)]">
+                יוצג בקטלוג ובעמוד הכלי — ניתן לדרוס לכל כלי בנפרד.
               </p>
             </div>
 
@@ -241,6 +272,53 @@ export default function AddGemachPage() {
                   className="w-full rounded-xl border border-[var(--border)] px-4 py-3 text-sm focus:border-kerem-500 focus:outline-none focus:ring-2 focus:ring-kerem-200"
                 />
               </div>
+            )}
+
+            {pricingMode === "free" && (
+              <>
+                <div>
+                  <label
+                    htmlFor="payboxDonation"
+                    className="mb-1.5 block text-sm font-semibold text-stone-800"
+                  >
+                    קישור PayBox לתרומות (אופציונלי)
+                  </label>
+                  <input
+                    id="payboxDonation"
+                    type="url"
+                    dir="ltr"
+                    value={payboxGroupUrl}
+                    onChange={(e) => setPayboxGroupUrl(e.target.value)}
+                    placeholder="https://payboxapp.com/..."
+                    className="w-full rounded-xl border border-[var(--border)] px-4 py-3 text-sm focus:border-kerem-500 focus:outline-none focus:ring-2 focus:ring-kerem-200"
+                  />
+                  <p className="mt-1.5 text-xs text-[var(--muted)]">
+                    קישור לקבוצת PayBox לתרומות לגמ״ח — גם משמש לגביית דמי קואופרטיב אם
+                    הוגדרו למטה.
+                  </p>
+                </div>
+                <div>
+                  <label
+                    htmlFor="cooperativeFee"
+                    className="mb-1.5 block text-sm font-semibold text-stone-800"
+                  >
+                    דמי קואופרטיב ליחידה (₪, אופציונלי)
+                  </label>
+                  <input
+                    id="cooperativeFee"
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={cooperativeFee}
+                    onChange={(e) => setCooperativeFee(e.target.value)}
+                    placeholder="0 = השאלה חינם לגמרי"
+                    className="w-full rounded-xl border border-[var(--border)] px-4 py-3 text-sm focus:border-kerem-500 focus:outline-none focus:ring-2 focus:ring-kerem-200"
+                  />
+                  <p className="mt-1.5 text-xs text-[var(--muted)]">
+                    אם גובים דמי קואופרטיב — חובה להזין קישור PayBox למעלה.
+                  </p>
+                </div>
+              </>
             )}
 
             {gemachRequiresPaybox(pricingMode) && (

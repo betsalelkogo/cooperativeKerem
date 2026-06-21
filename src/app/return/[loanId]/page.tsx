@@ -14,7 +14,8 @@ import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
 import { compressImageFile } from "@/lib/compress-image";
 import { REQUIRE_QR_SCAN } from "@/lib/features";
-import type { LateReturnFee, Loan, Tool } from "@/lib/types";
+import { DEFECT_CATEGORIES } from "@/lib/defects";
+import type { DefectCategory, LateReturnFee, Loan, Tool } from "@/lib/types";
 import { formatLateDuration } from "@/lib/late-fees";
 import { formatNIS } from "@/lib/pots";
 
@@ -39,7 +40,9 @@ export default function ReturnPage() {
   const [checkedItems, setCheckedItems] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [showFaultForm, setShowFaultForm] = useState(false);
+  const [faultCategory, setFaultCategory] = useState<DefectCategory>("broken");
   const [faultDescription, setFaultDescription] = useState("");
+  const [returnHasDefect, setReturnHasDefect] = useState(false);
   const [error, setError] = useState("");
   const [faultReported, setFaultReported] = useState(false);
   const [lateFee, setLateFee] = useState<LateReturnFee | null>(null);
@@ -79,6 +82,10 @@ export default function ReturnPage() {
 
   async function handleCloseLoan() {
     if (!photoFile || !loan) return;
+    if (returnHasDefect && !faultDescription.trim()) {
+      setError("נא לתאר את התקלה לפני סגירת ההשאלה");
+      return;
+    }
     setLoading(true);
     setError("");
 
@@ -90,6 +97,18 @@ export default function ReturnPage() {
       formData.append("photo", compressed, "return.jpg");
       formData.append("returnConditionNotes", conditionNotes);
       formData.append("returnItemsChecked", JSON.stringify(checkedItems));
+      formData.append("returnOk", returnHasDefect ? "false" : "true");
+      if (returnHasDefect && faultDescription.trim()) {
+        formData.append(
+          "returnDefect",
+          JSON.stringify({
+            category: faultCategory,
+            description: faultDescription.trim(),
+            responsibility: "unknown",
+            reportedAt: new Date().toISOString(),
+          })
+        );
+      }
 
       const res = await authFetch("/api/loans/return", {
         method: "POST",
@@ -213,14 +232,68 @@ export default function ReturnPage() {
       )}
 
       {step === "condition" && (
-        <ConditionNotes
-          label="מצב הכלי בהחזרה"
-          placeholder="לדוגמה: ניקוי בסיסי, ללא נזקים חדשים…"
-          value={conditionNotes}
-          onChange={setConditionNotes}
-          onContinue={() => setStep("photo")}
-          continueLabel="המשך לצילום"
-        />
+        <div className="space-y-4">
+          <ConditionNotes
+            label="מצב הכלי בהחזרה"
+            placeholder="לדוגמה: ניקוי בסיסי, ללא נזקים חדשים…"
+            value={conditionNotes}
+            onChange={setConditionNotes}
+            onContinue={() => setStep("photo")}
+            continueLabel="המשך לצילום"
+          />
+          <Card className="border-[var(--border)]">
+            <CardBody className="space-y-3">
+              <p className="text-sm font-bold text-stone-900">האם הכלי הוחזר תקין?</p>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant={!returnHasDefect ? "primary" : "secondary"}
+                  className="flex-1"
+                  onClick={() => {
+                    setReturnHasDefect(false);
+                    setShowFaultForm(false);
+                  }}
+                >
+                  כן — תקין
+                </Button>
+                <Button
+                  type="button"
+                  variant={returnHasDefect ? "primary" : "secondary"}
+                  className="flex-1"
+                  onClick={() => {
+                    setReturnHasDefect(true);
+                    setShowFaultForm(true);
+                  }}
+                >
+                  יש תקלה
+                </Button>
+              </div>
+              {returnHasDefect && showFaultForm && (
+                <div className="space-y-3 border-t border-[var(--border)] pt-3">
+                  <select
+                    value={faultCategory}
+                    onChange={(e) => setFaultCategory(e.target.value as DefectCategory)}
+                    className="w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm"
+                  >
+                    {DEFECT_CATEGORIES.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
+                  <textarea
+                    required
+                    value={faultDescription}
+                    onChange={(e) => setFaultDescription(e.target.value)}
+                    placeholder="תארו את התקלה…"
+                    rows={3}
+                    className="w-full rounded-xl border border-[var(--border)] px-4 py-3 text-sm"
+                  />
+                </div>
+              )}
+            </CardBody>
+          </Card>
+        </div>
       )}
 
       {step === "photo" && (

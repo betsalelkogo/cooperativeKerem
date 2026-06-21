@@ -69,7 +69,7 @@ export function DeleteGemachButton({
               <CardBody className="pt-6">
                 <h3 className="text-lg font-bold text-red-800">מחיקת גמ״ח לצמיתות</h3>
                 <p className="mt-2 text-sm text-stone-600">
-                  הגמ״ח, כל הכלים והשמירות יימחקו. הקלידו את השם לאישור.
+                  הגמ״ח, כל הכלים והשריונים יימחקו. הקלידו את השם לאישור.
                 </p>
                 {error && (
                   <Alert variant="error" className="mt-3">

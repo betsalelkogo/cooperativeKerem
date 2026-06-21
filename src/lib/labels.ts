@@ -18,7 +18,7 @@ export const loanStatusLabels: Record<LoanStatus, string> = {
 
 export const reservationStatusLabels: Record<ReservationStatus, string> = {
   pending: "ממתין",
-  confirmed: "שמור — ממתין ללקיחה",
+  confirmed: "שריון פעיל — ממתין ללקיחה",
   cancelled: "בוטל",
   completed: "הושלם",
 };

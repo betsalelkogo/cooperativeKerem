@@ -14,6 +14,8 @@ import type { AdminMemberHistory, AdminMemberSummary, MemberRole } from "@/lib/t
 const roleLabels: Record<MemberRole, string> = {
   ADMIN: "מנהל פלטפורמה",
   GEMACH_ADMIN: "מנהל גמ״ח",
+  BOARD: "דירקטוריון",
+  DISPUTE_RESOLVER: "מיישב מחלוקות",
   MEMBER: "חבר",
 };
 
@@ -254,10 +256,10 @@ export default function AdminMembersPage() {
 
               <div>
                 <h3 className="mb-2 font-bold text-stone-900">
-                  שמירות ({selected.reservations.length})
+                  שריונים ({selected.reservations.length})
                 </h3>
                 {selected.reservations.length === 0 ? (
-                  <p className="text-sm text-[var(--muted)]">אין שמירות</p>
+                  <p className="text-sm text-[var(--muted)]">אין שריונים</p>
                 ) : (
                   <div className="max-h-64 space-y-2 overflow-y-auto">
                     {selected.reservations.map((reservation) => (

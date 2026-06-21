@@ -67,6 +67,7 @@ export default function PlatformEditToolPage() {
       <ToolKindEditForm
         kind={kind}
         gemachId={gemachId}
+        gemachDefaultLocation={kind.gemachLocation}
         getToken={getIdToken}
         onSaved={() => router.push("/admin")}
       />

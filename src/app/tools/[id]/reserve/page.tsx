@@ -54,6 +54,7 @@ export default function ReserveToolPage() {
   const [returnDate, setReturnDate] = useState("");
   const [returnTimeStart, setReturnTimeStart] = useState(DEFAULT_RETURN_START);
   const [returnTimeEnd, setReturnTimeEnd] = useState(DEFAULT_RETURN_END);
+  const [quantity, setQuantity] = useState(1);
 
   const hourOptions = useMemo(
     () => (kind ? loanHourOptions(kind) : [4]),
@@ -126,12 +127,14 @@ export default function ReserveToolPage() {
       const body = isFixedHours
         ? {
             kindId: kind.catalogId,
+            quantity,
             pickupDate,
             pickupTimeStart,
             loanDurationHours: loanHours,
           }
         : {
             kindId: kind.catalogId,
+            quantity,
             pickupDate,
             pickupTimeStart,
             pickupTimeEnd,
@@ -181,7 +184,7 @@ export default function ReserveToolPage() {
       <Card className="shadow-md">
         <div className="h-1.5 bg-gradient-to-l from-kerem-500 to-kerem-700" />
         <CardBody className="py-6">
-          <h1 className="text-2xl font-bold text-stone-900">שמירת {kind.name}</h1>
+          <h1 className="text-2xl font-bold text-stone-900">שריון {kind.name}</h1>
           <p className="mt-2 text-sm text-[var(--muted)]">
             {isFixedHours
               ? `בחרו מתי מתחילים — ברירת מחדל ${kind.gemachDefaultLoanHours ?? 4} שעות, עד ${kind.gemachMaxLoanHours ?? 24} שעות.`
@@ -197,6 +200,25 @@ export default function ReserveToolPage() {
           )}
 
           <form onSubmit={handleSubmit} className="mt-6 space-y-5">
+            {kind.totalUnits > 1 && (
+              <div>
+                <label htmlFor="quantity" className="mb-1.5 block text-sm font-semibold text-stone-800">
+                  כמות יחידות
+                </label>
+                <input
+                  id="quantity"
+                  type="number"
+                  min={1}
+                  max={Math.min(kind.availableUnits, 500)}
+                  value={quantity}
+                  onChange={(e) => setQuantity(Math.max(1, Number(e.target.value) || 1))}
+                  className="w-full rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm focus:border-kerem-400 focus:outline-none focus:ring-2 focus:ring-kerem-200"
+                />
+                <p className="mt-1 text-xs text-[var(--muted)]">
+                  עד {Math.min(kind.availableUnits, 500)} יחידות זמינות
+                </p>
+              </div>
+            )}
             {isFixedHours ? (
               <>
                 <fieldset className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/40 p-4">
@@ -251,7 +273,7 @@ export default function ReserveToolPage() {
 
                 {fixedSchedule && (
                   <div className="rounded-xl border border-sky-200 bg-sky-50/60 p-4 text-sm">
-                    <p className="font-bold text-stone-900">סיכום השמירה</p>
+                    <p className="font-bold text-stone-900">סיכום השריון</p>
                     <p className="mt-2 text-[var(--muted)]">
                       <span className="font-medium text-stone-800">משך:</span>{" "}
                       {formatLoanDurationLabel(loanHours)}
@@ -389,7 +411,7 @@ export default function ReserveToolPage() {
               className="w-full"
               size="lg"
             >
-              {loading ? "שומר…" : "אישור שמירה"}
+              {loading ? "שומר…" : "אישור שריון"}
             </Button>
           </form>
         </CardBody>

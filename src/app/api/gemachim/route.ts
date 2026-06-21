@@ -21,7 +21,17 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { name, description, pricingMode, reservationMode, maintenanceFee, slug, payboxGroupUrl } = body as {
+    const {
+      name,
+      description,
+      pricingMode,
+      reservationMode,
+      maintenanceFee,
+      slug,
+      payboxGroupUrl,
+      location,
+      cooperativeFee,
+    } = body as {
       name?: string;
       description?: string;
       pricingMode?: GemachPricingMode;
@@ -29,6 +39,8 @@ export async function POST(request: Request) {
       maintenanceFee?: number;
       slug?: string;
       payboxGroupUrl?: string;
+      location?: string;
+      cooperativeFee?: number;
     };
 
     const nameError = validateGemachName(name ?? "");
@@ -53,11 +65,30 @@ export async function POST(request: Request) {
       }
     }
 
+    const payboxTrimmed = payboxGroupUrl?.trim() ?? "";
+
     if (gemachRequiresPaybox(pricingMode)) {
-      const payboxError = validatePayboxGroupUrl(payboxGroupUrl ?? "");
+      const payboxError = validatePayboxGroupUrl(payboxTrimmed);
       if (payboxError) {
         return NextResponse.json({ error: payboxError }, { status: 400 });
       }
+    } else if (payboxTrimmed) {
+      const payboxError = validatePayboxGroupUrl(payboxTrimmed);
+      if (payboxError) {
+        return NextResponse.json({ error: payboxError }, { status: 400 });
+      }
+    }
+
+    const coopFee =
+      pricingMode === "free" && cooperativeFee !== undefined
+        ? Math.max(0, Number(cooperativeFee) || 0)
+        : undefined;
+
+    if (coopFee && coopFee > 0 && pricingMode === "free" && !payboxTrimmed) {
+      return NextResponse.json(
+        { error: "גמ״ח חינמי עם דמי קואופרטיב דורש קישור PayBox לתשלום" },
+        { status: 400 }
+      );
     }
 
     if (reservationMode && reservationMode !== "fixed_hours" && reservationMode !== "date_range") {
@@ -72,10 +103,9 @@ export async function POST(request: Request) {
       reservationMode: reservationMode ?? "date_range",
       maintenanceFee:
         pricingMode === "maintenance_only" ? Number(maintenanceFee ?? 0) : undefined,
-      payboxGroupUrl:
-        gemachRequiresPaybox(pricingMode) && payboxGroupUrl
-          ? payboxGroupUrl.trim()
-          : undefined,
+      payboxGroupUrl: payboxTrimmed || undefined,
+      location: location?.trim() || undefined,
+      cooperativeFee: coopFee,
       createdBy: uid,
     });
 

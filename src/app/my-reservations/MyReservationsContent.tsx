@@ -31,7 +31,7 @@ export default function MyReservationsContent() {
     const res = await authFetch("/api/reservations", { token });
     if (!res.ok) {
       const data = await res.json();
-      throw new Error(data.error ?? "שגיאה בטעינת שמירות");
+      throw new Error(data.error ?? "שגיאה בטעינת שריונים");
     }
     setReservations(await res.json());
   }, [getIdToken]);
@@ -52,7 +52,7 @@ export default function MyReservationsContent() {
 
   async function handleCancelReservation(reservationId: string) {
     const confirmed = window.confirm(
-      "לבטל את השמירה? הכלי יחזור להיות זמין.\n\nאם כבר שילמת דרך PayBox, פנו למנהל לגבי החזר."
+      "לבטל את השריון? הכלי יחזור להיות זמין.\n\nאם כבר שילמת דרך PayBox, פנו למנהל לגבי החזר."
     );
     if (!confirmed) return;
 
@@ -66,14 +66,14 @@ export default function MyReservationsContent() {
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error ?? "ביטול השמירה נכשל");
+        throw new Error(data.error ?? "ביטול השריון נכשל");
       }
       if (data.hadPaidPayment) {
-        window.alert("השמירה בוטלה. שילמת דרך PayBox — פנו למנהל לגבי החזר.");
+        window.alert("השריון בוטל. שילמת דרך PayBox — פנו למנהל לגבי החזר.");
       }
       await loadData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "ביטול השמירה נכשל");
+      setError(err instanceof Error ? err.message : "ביטול השריון נכשל");
     } finally {
       setCancellingId(null);
     }
@@ -84,13 +84,13 @@ export default function MyReservationsContent() {
   return (
     <div>
       <PageHeader
-        title="השמירות שלי"
+        title="השריונים שלי"
         description="שלב 1 — שמרתם כלי. כשמגיעים לאסוף, המשיכו ללקיחה והפעלת ההשאלה."
       />
 
       {justCreated && (
         <Alert variant="success" className="mb-4">
-          <p className="font-semibold">השמירה נוצרה בהצלחה!</p>
+          <p className="font-semibold">השריון נוצר בהצלחה!</p>
           <p className="mt-1 text-sm">
             הכלי שמור עבורכם. ביום האיסוף לחצו «המשך ללקיחה» לתשלום (אם נדרש) והפעלת ההשאלה.
           </p>
@@ -107,9 +107,9 @@ export default function MyReservationsContent() {
         <Card className="border-dashed">
           <CardBody className="py-16 text-center">
             <span className="mb-4 inline-block text-5xl">📅</span>
-            <p className="text-lg font-semibold text-stone-800">אין שמירות פעילות</p>
+            <p className="text-lg font-semibold text-stone-800">אין שריונים פעילות</p>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              שריינו כלי מהקטלוג — השמירה תופיע כאן עד הלקיחה.
+              שריינו כלי מהקטלוג — השריון יופיע כאן עד הלקיחה.
             </p>
             <Link
               href="/tools"

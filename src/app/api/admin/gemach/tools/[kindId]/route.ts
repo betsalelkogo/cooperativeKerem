@@ -64,6 +64,12 @@ export async function PATCH(
       maxLoanHours,
       adminNotes,
       imageUrl,
+      location,
+      brand,
+      supplier,
+      purpose,
+      productAge,
+      imageUrls,
     } = body as {
       gemachId?: string;
       name?: string;
@@ -75,6 +81,12 @@ export async function PATCH(
       maxLoanHours?: number | null;
       adminNotes?: string | null;
       imageUrl?: string | null;
+      location?: string | null;
+      brand?: string | null;
+      supplier?: string | null;
+      purpose?: string | null;
+      productAge?: number | null;
+      imageUrls?: string[] | null;
     };
 
     const gemachId = resolveGemachAdminScope(adminAuth.member, requestedGemachId ?? null);
@@ -141,6 +153,22 @@ export async function PATCH(
             ? adminNotes
             : undefined,
       imageUrl: normalizedImageUrl,
+      location:
+        location === null
+          ? null
+          : location !== undefined
+            ? location
+            : undefined,
+      brand: brand === null ? null : brand !== undefined ? brand : undefined,
+      supplier: supplier === null ? null : supplier !== undefined ? supplier : undefined,
+      purpose: purpose === null ? null : purpose !== undefined ? purpose : undefined,
+      productAge:
+        productAge === null
+          ? null
+          : productAge !== undefined
+            ? Number(productAge)
+            : undefined,
+      imageUrls: imageUrls === null ? null : imageUrls,
     });
 
     return NextResponse.json(result);

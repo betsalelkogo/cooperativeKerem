@@ -10,6 +10,9 @@ const categoryMeta: Record<string, { icon: string; gradient: string }> = {
   ניקוי: { icon: "💧", gradient: "from-sky-400 to-blue-500" },
   גישה: { icon: "🪜", gradient: "from-violet-400 to-purple-500" },
   "תינוקות וילדים": { icon: "👶", gradient: "from-pink-400 to-rose-500" },
+  "ריהוט ואירועים": { icon: "🪑", gradient: "from-stone-400 to-stone-600" },
+  "כיסאות ושולחנות": { icon: "🪑", gradient: "from-amber-500 to-yellow-600" },
+  גינון: { icon: "🌿", gradient: "from-green-400 to-emerald-600" },
 };
 
 const defaultMeta = { icon: "🔧", gradient: "from-kerem-400 to-kerem-600" };
@@ -69,12 +72,27 @@ export function ToolCard({ kind }: { kind: ToolKindWithAvailability }) {
                   </span>
                 )}
               </div>
-              <h3 className="text-lg font-bold text-stone-900">{kind.name}</h3>
+              <h3 className="text-lg font-bold text-stone-900">
+                <Link
+                  href={`/tools/${kind.catalogId}`}
+                  className="hover:text-kerem-800 hover:underline"
+                >
+                  {kind.name}
+                </Link>
+              </h3>
             </div>
           </div>
           <StatusBadge status={kind.status} />
         </div>
         <p className="text-sm leading-relaxed text-[var(--muted)]">{kind.description}</p>
+        {kind.location && (
+          <p className="mt-2 flex items-start gap-1.5 text-xs text-stone-600">
+            <span className="shrink-0" aria-hidden>
+              📍
+            </span>
+            <span>{kind.location}</span>
+          </p>
+        )}
         {stockLabel && (
           <p className="mt-2 text-xs font-semibold text-sky-700">{stockLabel}</p>
         )}
@@ -94,12 +112,20 @@ export function ToolCard({ kind }: { kind: ToolKindWithAvailability }) {
           </p>
         </div>
         {kind.availableUnits > 0 ? (
-          <Link
-            href={`/tools/${kind.catalogId}/reserve`}
-            className="rounded-xl bg-kerem-700 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-kerem-700/20 transition hover:bg-kerem-800 group-hover:shadow-lg"
-          >
-            שריון
-          </Link>
+          <div className="flex gap-2">
+            <Link
+              href={`/tools/${kind.catalogId}`}
+              className="rounded-xl border border-[var(--border)] bg-white px-3 py-2 text-sm font-semibold text-stone-700 transition hover:bg-warm-50"
+            >
+              פרטים
+            </Link>
+            <Link
+              href={`/tools/${kind.catalogId}/reserve`}
+              className="rounded-xl bg-kerem-700 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-kerem-700/20 transition hover:bg-kerem-800 group-hover:shadow-lg"
+            >
+              שריון
+            </Link>
+          </div>
         ) : (
           <div className="text-left">
             <span className="block text-sm text-[var(--muted)]">לא זמין</span>

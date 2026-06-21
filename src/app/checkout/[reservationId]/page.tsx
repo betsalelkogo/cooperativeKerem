@@ -15,6 +15,7 @@ import { Card, CardBody } from "@/components/ui/Card";
 import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
 import { compressImageFile } from "@/lib/compress-image";
+import { canStartCheckout } from "@/lib/reservation-checkout";
 import { REQUIRE_QR_SCAN } from "@/lib/features";
 import type { Reservation, Tool } from "@/lib/types";
 
@@ -63,6 +64,11 @@ export default function CheckoutPage() {
         }
 
         const data = await reservationRes.json();
+        const checkoutGate = canStartCheckout(data.reservation, data.tool);
+        if (!checkoutGate.allowed) {
+          throw new Error(checkoutGate.reason);
+        }
+
         setReservation(data.reservation);
         setTool(data.tool);
 

@@ -4,20 +4,28 @@ import type {
   AdminDashboardData,
   AdminMemberHistory,
   AdminMemberSummary,
+  BoardDashboardData,
+  DefectRecord,
+  Dispute,
+  DisputeStatus,
   Loan,
   LateReturnFee,
   MaintenanceTicket,
+  MediatorDecision,
   Member,
   MemberPayment,
   PayboxPayout,
   PayboxSettings,
   Reservation,
   Tool,
+  ToolKindStats,
   ToolWithAvailability,
   Transaction,
   DevicePot,
   OperationsPot,
   Gemach,
+  GemachPricingMode,
+  GemachReservationMode,
   ToolKindWithAvailability,
   SafetyRule,
   AdminToolKindEdit,
@@ -32,6 +40,7 @@ import {
   groupToolsByKind,
   resolveKindUnits,
   pickAvailableUnit,
+  pickAvailableUnits,
   buildToolKindWithAvailability,
   aggregateKindStatus,
 } from "@/lib/tool-kinds";
@@ -74,6 +83,10 @@ import {
   DEFAULT_SAFETY_RULES,
   validateToolInput,
 } from "@/lib/tools-admin";
+import { pickRandomMediators } from "@/lib/disputes";
+import { countUnitsAvailableInWindow } from "@/lib/availability";
+import { isReservationNoShowExpired } from "@/lib/reservation-expiry";
+import type { DefectCategory } from "@/lib/types";
 
 function tsToIso(value: unknown): string {
   if (value && typeof value === "object" && "toDate" in value) {
@@ -97,8 +110,40 @@ function docWithId<T extends { id: string }>(
   } as T;
 }
 
+function parseDefectRecord(value: unknown): DefectRecord | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const d = value as Record<string, unknown>;
+  const category = d.category as DefectCategory;
+  if (
+    category !== "broken" &&
+    category !== "missing_part" &&
+    category !== "wont_start" &&
+    category !== "battery" &&
+    category !== "other"
+  ) {
+    return undefined;
+  }
+  return {
+    category,
+    description: typeof d.description === "string" ? d.description : "",
+    responsibility:
+      d.responsibility === "member" ||
+      d.responsibility === "gemach" ||
+      d.responsibility === "unknown"
+        ? d.responsibility
+        : undefined,
+    reportedAt:
+      typeof d.reportedAt === "string" ? d.reportedAt : new Date().toISOString(),
+  };
+}
+
 function newId(prefix: string) {
   return `${prefix}-${Date.now()}`;
+}
+
+function reservationToolIds(reservation: Reservation): string[] {
+  if (reservation.toolIds?.length) return reservation.toolIds;
+  return reservation.toolId ? [reservation.toolId] : [];
 }
 
 function reservationFromDoc(id: string, data: DocumentData): Reservation {
@@ -117,6 +162,19 @@ function reservationFromDoc(id: string, data: DocumentData): Reservation {
     loanDurationHours:
       typeof data.loanDurationHours === "number" ? data.loanDurationHours : undefined,
     createdAt: data.createdAt ? tsToIso(data.createdAt) : new Date().toISOString(),
+    kindId: typeof data.kindId === "string" ? data.kindId : undefined,
+    quantity: typeof data.quantity === "number" ? data.quantity : undefined,
+    toolIds: Array.isArray(data.toolIds)
+      ? data.toolIds.filter((id): id is string => typeof id === "string")
+      : undefined,
+    groupId: typeof data.groupId === "string" ? data.groupId : undefined,
+    cooperativeFeeAmount:
+      typeof data.cooperativeFeeAmount === "number" ? data.cooperativeFeeAmount : undefined,
+    cancelReason:
+      data.cancelReason === "member" || data.cancelReason === "no_show"
+        ? data.cancelReason
+        : undefined,
+    cancelledAt: data.cancelledAt ? tsToIso(data.cancelledAt) : undefined,
   };
 }
 
@@ -126,6 +184,11 @@ function loanFromDoc(id: string, data: DocumentData): Loan {
   if (data.returnedAt) loan.returnedAt = tsToIso(data.returnedAt);
   if (typeof data.dueReturnDate === "string") loan.dueReturnDate = data.dueReturnDate;
   if (typeof data.dueReturnTimeEnd === "string") loan.dueReturnTimeEnd = data.dueReturnTimeEnd;
+  if (typeof data.groupId === "string") loan.groupId = data.groupId;
+  if (typeof data.disputeId === "string") loan.disputeId = data.disputeId;
+  if (data.returnOk === true) loan.returnOk = true;
+  loan.checkoutDefect = parseDefectRecord(data.checkoutDefect);
+  loan.returnDefect = parseDefectRecord(data.returnDefect);
   return loan;
 }
 
@@ -159,9 +222,12 @@ function buildActiveHolders(loans: Loan[], reservations: Reservation[]) {
 
   const reservationByTool = new Map<string, Reservation>();
   for (const reservation of activeReservations) {
-    const existing = reservationByTool.get(reservation.toolId);
-    if (!existing || reservation.createdAt > existing.createdAt) {
-      reservationByTool.set(reservation.toolId, reservation);
+    const ids = reservationToolIds(reservation);
+    for (const toolId of ids) {
+      const existing = reservationByTool.get(toolId);
+      if (!existing || reservation.createdAt > existing.createdAt) {
+        reservationByTool.set(toolId, reservation);
+      }
     }
   }
 
@@ -203,6 +269,14 @@ function toolFromDoc(id: string, data: DocumentData): Tool {
     maxLoanHours: typeof data.maxLoanHours === "number" ? data.maxLoanHours : undefined,
     imageUrl: typeof data.imageUrl === "string" ? data.imageUrl : undefined,
     adminNotes: typeof data.adminNotes === "string" ? data.adminNotes : undefined,
+    location: typeof data.location === "string" ? data.location : undefined,
+    brand: typeof data.brand === "string" ? data.brand : undefined,
+    supplier: typeof data.supplier === "string" ? data.supplier : undefined,
+    purpose: typeof data.purpose === "string" ? data.purpose : undefined,
+    productAge: typeof data.productAge === "number" ? data.productAge : undefined,
+    imageUrls: Array.isArray(data.imageUrls)
+      ? data.imageUrls.filter((u): u is string => typeof u === "string")
+      : undefined,
   };
 }
 
@@ -226,6 +300,9 @@ function gemachFromDoc(id: string, data: DocumentData): Gemach {
       typeof data.defaultLoanHours === "number" ? data.defaultLoanHours : undefined,
     maxLoanHours: typeof data.maxLoanHours === "number" ? data.maxLoanHours : undefined,
     closedAt: data.closedAt ? tsToIso(data.closedAt) : undefined,
+    cooperativeFee:
+      typeof data.cooperativeFee === "number" ? data.cooperativeFee : undefined,
+    location: typeof data.location === "string" ? data.location : undefined,
   };
 }
 
@@ -314,6 +391,8 @@ export async function createGemachAndAssignAdmin(params: {
   reservationMode?: Gemach["reservationMode"];
   maintenanceFee?: number;
   payboxGroupUrl?: string;
+  location?: string;
+  cooperativeFee?: number;
   createdBy: string;
 }): Promise<{ gemach: Gemach; member: Member }> {
   const db = getAdminDb();
@@ -355,6 +434,10 @@ export async function createGemachAndAssignAdmin(params: {
       ? { maintenanceFee: params.maintenanceFee }
       : {}),
     ...(params.payboxGroupUrl ? { payboxGroupUrl: params.payboxGroupUrl.trim() } : {}),
+    ...(params.location?.trim() ? { location: params.location.trim() } : {}),
+    ...(params.cooperativeFee !== undefined && params.cooperativeFee > 0
+      ? { cooperativeFee: params.cooperativeFee }
+      : {}),
     isPlatform: false,
     active: true,
     createdBy: params.createdBy,
@@ -384,6 +467,11 @@ export async function updateGemachSettings(params: {
   payboxGroupUrl?: string | null;
   name?: string;
   description?: string;
+  cooperativeFee?: number | null;
+  location?: string | null;
+  pricingMode?: GemachPricingMode;
+  reservationMode?: GemachReservationMode;
+  maintenanceFee?: number | null;
 }): Promise<Gemach> {
   const ref = getAdminDb().collection("gemachim").doc(params.gemachId);
   const snap = await ref.get();
@@ -403,6 +491,35 @@ export async function updateGemachSettings(params: {
   }
   if (params.payboxGroupUrl !== undefined) {
     updates.payboxGroupUrl = params.payboxGroupUrl?.trim() || null;
+  }
+  if (params.cooperativeFee === null) {
+    updates.cooperativeFee = FieldValue.delete();
+  } else if (params.cooperativeFee !== undefined) {
+    updates.cooperativeFee = Math.max(0, params.cooperativeFee);
+  }
+  if (params.location === null) {
+    updates.location = FieldValue.delete();
+  } else if (params.location !== undefined) {
+    updates.location = params.location.trim() || null;
+  }
+  if (params.pricingMode !== undefined) {
+    updates.pricingMode = params.pricingMode;
+    if (params.pricingMode === "free") {
+      updates.maintenanceFee = FieldValue.delete();
+    } else if (params.pricingMode === "loan_fee") {
+      updates.cooperativeFee = FieldValue.delete();
+      updates.maintenanceFee = FieldValue.delete();
+    } else if (params.pricingMode === "maintenance_only") {
+      updates.cooperativeFee = FieldValue.delete();
+    }
+  }
+  if (params.reservationMode !== undefined) {
+    updates.reservationMode = params.reservationMode;
+  }
+  if (params.maintenanceFee === null) {
+    updates.maintenanceFee = FieldValue.delete();
+  } else if (params.maintenanceFee !== undefined) {
+    updates.maintenanceFee = Math.max(0, params.maintenanceFee);
   }
 
   await ref.update(updates);
@@ -520,7 +637,14 @@ export async function getToolKindForAdmin(
     gemachDefaultLoanHours: resolveGemachDefaultLoanHours(gemach),
     gemachMaxLoanHours: resolveGemachMaxLoanHours(gemach),
     imageUrl: representative.imageUrl,
+    imageUrls: representative.imageUrls,
+    location: representative.location,
+    brand: representative.brand,
+    supplier: representative.supplier,
+    purpose: representative.purpose,
+    productAge: representative.productAge,
     adminNotes: representative.adminNotes,
+    gemachLocation: gemach.location,
   };
 }
 
@@ -535,6 +659,12 @@ export async function updateToolKindDetails(params: {
   defaultLoanHours?: number | null;
   maxLoanHours?: number | null;
   imageUrl?: string | null;
+  imageUrls?: string[] | null;
+  location?: string | null;
+  brand?: string | null;
+  supplier?: string | null;
+  purpose?: string | null;
+  productAge?: number | null;
   adminNotes?: string | null;
 }): Promise<{ updated: number }> {
   const gemach = await getGemachById(params.gemachId);
@@ -611,6 +741,46 @@ export async function updateToolKindDetails(params: {
       update.adminNotes = notes ? notes : FieldValue.delete();
     }
 
+    if (params.imageUrls === null) {
+      update.imageUrls = FieldValue.delete();
+    } else if (params.imageUrls !== undefined) {
+      update.imageUrls = params.imageUrls.length ? params.imageUrls : FieldValue.delete();
+    }
+
+    if (params.location === null) {
+      update.location = FieldValue.delete();
+    } else if (params.location !== undefined) {
+      const loc = params.location.trim();
+      update.location = loc ? loc : FieldValue.delete();
+    }
+
+    if (params.brand === null) {
+      update.brand = FieldValue.delete();
+    } else if (params.brand !== undefined) {
+      const v = params.brand.trim();
+      update.brand = v ? v : FieldValue.delete();
+    }
+
+    if (params.supplier === null) {
+      update.supplier = FieldValue.delete();
+    } else if (params.supplier !== undefined) {
+      const v = params.supplier.trim();
+      update.supplier = v ? v : FieldValue.delete();
+    }
+
+    if (params.purpose === null) {
+      update.purpose = FieldValue.delete();
+    } else if (params.purpose !== undefined) {
+      const v = params.purpose.trim();
+      update.purpose = v ? v : FieldValue.delete();
+    }
+
+    if (params.productAge === null) {
+      update.productAge = FieldValue.delete();
+    } else if (params.productAge !== undefined) {
+      update.productAge = params.productAge;
+    }
+
     batch.update(getAdminDb().collection("tools").doc(tool.id), update);
   }
   await batch.commit();
@@ -627,6 +797,7 @@ export async function getAllTools(): Promise<Tool[]> {
 }
 
 export async function getToolKindsWithAvailability(): Promise<ToolKindWithAvailability[]> {
+  await expireStaleNoShowReservations();
   const [tools, loans, reservations, gemachim] = await Promise.all([
     getAllTools(),
     getAllLoans(),
@@ -644,6 +815,7 @@ export async function getToolKindsWithAvailability(): Promise<ToolKindWithAvaila
       const gemach = gemachMap.get(units[0].gemachId);
       return buildToolKindWithAvailability(units, loanByTool, reservationByTool, {
         ...(gemach ? gemachCatalogFields(gemach, units[0]) : {}),
+        location: units[0].location ?? gemach?.location,
       });
     })
     .filter((k): k is ToolKindWithAvailability => k !== null);
@@ -652,6 +824,7 @@ export async function getToolKindsWithAvailability(): Promise<ToolKindWithAvaila
 export async function getToolKindWithAvailability(
   catalogKey: string
 ): Promise<ToolKindWithAvailability | null> {
+  await expireStaleNoShowReservations();
   const [tools, loans, reservations] = await Promise.all([
     getAllTools(),
     getAllLoans(),
@@ -666,13 +839,38 @@ export async function getToolKindWithAvailability(
 
   return buildToolKindWithAvailability(units, loanByTool, reservationByTool, {
     ...(gemach ? gemachCatalogFields(gemach, units[0]) : {}),
+    location: units[0].location ?? gemach?.location,
+    stats: computeToolKindStats(units, loans),
   });
 }
 
-export async function pickAvailableToolUnit(catalogKey: string): Promise<Tool | null> {
+function computeToolKindStats(units: Tool[], loans: Loan[]): ToolKindStats {
+  const unitIds = new Set(units.map((u) => u.id));
+  const kindLoans = loans.filter((l) => unitIds.has(l.toolId));
+  const activeLoans = kindLoans.filter(
+    (l) => l.status === "active" || l.status === "return_pending" || l.status === "checkout_pending"
+  );
+  const borrowers = new Set(kindLoans.map((l) => l.memberId));
+  return {
+    totalLoans: kindLoans.length,
+    activeLoans: activeLoans.length,
+    uniqueBorrowers: borrowers.size,
+  };
+}
+
+export async function pickAvailableToolUnits(
+  catalogKey: string,
+  quantity: number
+): Promise<Tool[]> {
+  await expireStaleNoShowReservations();
   const tools = await getAllTools();
   const units = resolveKindUnits(tools, catalogKey);
-  return pickAvailableUnit(units);
+  return pickAvailableUnits(units, quantity);
+}
+
+export async function pickAvailableToolUnit(catalogKey: string): Promise<Tool | null> {
+  const picked = await pickAvailableToolUnits(catalogKey, 1);
+  return picked[0] ?? null;
 }
 
 export async function getToolsWithAvailability(): Promise<ToolWithAvailability[]> {
@@ -819,6 +1017,11 @@ export async function createToolsForGemach(params: {
   safetyRules?: SafetyRule[];
   defaultLoanHours?: number;
   maxLoanHours?: number;
+  location?: string;
+  brand?: string;
+  supplier?: string;
+  purpose?: string;
+  productAge?: number;
   createdBy: string;
 }): Promise<{ kindId: string; tools: Tool[] }> {
   const gemach = await getGemachById(params.gemachId);
@@ -866,6 +1069,13 @@ export async function createToolsForGemach(params: {
         ? { defaultLoanHours: params.defaultLoanHours }
         : {}),
       ...(params.maxLoanHours !== undefined ? { maxLoanHours: params.maxLoanHours } : {}),
+      ...(params.location?.trim() ? { location: params.location.trim() } : {}),
+      ...(params.brand?.trim() ? { brand: params.brand.trim() } : {}),
+      ...(params.supplier?.trim() ? { supplier: params.supplier.trim() } : {}),
+      ...(params.purpose?.trim() ? { purpose: params.purpose.trim() } : {}),
+      ...(params.productAge !== undefined && Number.isFinite(params.productAge)
+        ? { productAge: params.productAge }
+        : {}),
       safetyRules,
       createdBy: params.createdBy,
       createdAt: FieldValue.serverTimestamp(),
@@ -899,6 +1109,13 @@ export async function createToolsForGemach(params: {
         ? { defaultLoanHours: params.defaultLoanHours }
         : {}),
       ...(params.maxLoanHours !== undefined ? { maxLoanHours: params.maxLoanHours } : {}),
+      ...(params.location?.trim() ? { location: params.location.trim() } : {}),
+      ...(params.brand?.trim() ? { brand: params.brand.trim() } : {}),
+      ...(params.supplier?.trim() ? { supplier: params.supplier.trim() } : {}),
+      ...(params.purpose?.trim() ? { purpose: params.purpose.trim() } : {}),
+      ...(params.productAge !== undefined && Number.isFinite(params.productAge)
+        ? { productAge: params.productAge }
+        : {}),
       safetyRules,
     });
   }
@@ -936,6 +1153,13 @@ export async function createReservation(
     ...(data.loanDurationHours !== undefined
       ? { loanDurationHours: data.loanDurationHours }
       : {}),
+    ...(data.kindId ? { kindId: data.kindId } : {}),
+    ...(data.quantity !== undefined ? { quantity: data.quantity } : {}),
+    ...(data.toolIds?.length ? { toolIds: data.toolIds } : {}),
+    ...(data.groupId ? { groupId: data.groupId } : {}),
+    ...(data.cooperativeFeeAmount !== undefined
+      ? { cooperativeFeeAmount: data.cooperativeFeeAmount }
+      : {}),
     createdAt: now,
   });
   return { ...data, id, createdAt: new Date().toISOString() };
@@ -943,6 +1167,119 @@ export async function createReservation(
 
 export async function updateReservationStatus(id: string, status: Reservation["status"]) {
   await getAdminDb().collection("reservations").doc(id).update({ status });
+}
+
+async function releaseReservedToolsForReservation(
+  db: FirebaseFirestore.Firestore,
+  batch: FirebaseFirestore.WriteBatch,
+  reservation: Reservation,
+  reservationId: string
+): Promise<void> {
+  const toolIds = reservationToolIds(reservation);
+  for (const toolId of toolIds) {
+    const tool = await getToolById(toolId);
+    if (tool?.status !== "reserved") continue;
+
+    const onToolSnap = await db
+      .collection("reservations")
+      .where("toolId", "==", toolId)
+      .get();
+
+    let hasOtherActive = onToolSnap.docs.some((doc) => {
+      if (doc.id === reservationId) return false;
+      const status = doc.data().status as Reservation["status"];
+      return status === "pending" || status === "confirmed";
+    });
+
+    if (!hasOtherActive) {
+      const multiSnap = await db.collection("reservations").get();
+      hasOtherActive = multiSnap.docs.some((doc) => {
+        if (doc.id === reservationId) return false;
+        const data = doc.data();
+        const status = data.status as Reservation["status"];
+        if (status !== "pending" && status !== "confirmed") return false;
+        const ids = Array.isArray(data.toolIds)
+          ? (data.toolIds as string[])
+          : [data.toolId as string];
+        return ids.includes(toolId);
+      });
+    }
+
+    if (!hasOtherActive) {
+      batch.update(db.collection("tools").doc(toolId), { status: "available" });
+    }
+  }
+}
+
+/** Cancel a reservation and free tools (no member auth — system no-show). */
+export async function autoCancelNoShowReservation(
+  reservationId: string
+): Promise<Reservation | null> {
+  const reservation = await getReservationById(reservationId);
+  if (!reservation) return null;
+  if (reservation.status !== "pending" && reservation.status !== "confirmed") {
+    return reservation;
+  }
+  if (!isReservationNoShowExpired(reservation)) return reservation;
+
+  const db = getAdminDb();
+  const existingLoan = await db
+    .collection("loans")
+    .where("reservationId", "==", reservationId)
+    .limit(1)
+    .get();
+  if (!existingLoan.empty) return reservation;
+
+  const batch = db.batch();
+  batch.update(db.collection("reservations").doc(reservationId), {
+    status: "cancelled",
+    cancelReason: "no_show",
+    cancelledAt: FieldValue.serverTimestamp(),
+  });
+
+  await releaseReservedToolsForReservation(db, batch, reservation, reservationId);
+
+  const pendingPayment = await getPendingPaymentForReservation(reservationId);
+  if (pendingPayment) {
+    batch.update(db.collection("payments").doc(pendingPayment.id), {
+      status: "failed",
+    });
+  }
+
+  await batch.commit();
+  return { ...reservation, status: "cancelled" };
+}
+
+/** Cancel all active reservations past the no-show pickup deadline. */
+export async function expireStaleNoShowReservations(): Promise<number> {
+  const now = new Date();
+  const reservations = await getAllReservations();
+  const db = getAdminDb();
+  const loanSnap = await db.collection("loans").get();
+  const reservationIdsWithLoans = new Set(
+    loanSnap.docs
+      .map((d) => d.data().reservationId as string | undefined)
+      .filter((id): id is string => Boolean(id))
+  );
+
+  const expired = reservations.filter(
+    (r) =>
+      isReservationNoShowExpired(r, now) && !reservationIdsWithLoans.has(r.id)
+  );
+
+  let count = 0;
+  for (const r of expired) {
+    const result = await autoCancelNoShowReservation(r.id);
+    if (result?.status === "cancelled") count += 1;
+  }
+  return count;
+}
+
+export async function expireNoShowReservationIfNeeded(
+  reservationId: string
+): Promise<Reservation | null> {
+  await autoCancelNoShowReservation(reservationId);
+  return getReservationById(reservationId);
 }
 
 export async function cancelReservation(
@@ -954,10 +1291,10 @@ export async function cancelReservation(
     throw new Error("השריון לא נמצא");
   }
   if (reservation.memberId !== memberId) {
-    throw new Error("אין הרשאה לבטל שמירה זו");
+    throw new Error("אין הרשאה לבטל שריון זה");
   }
   if (reservation.status !== "pending" && reservation.status !== "confirmed") {
-    throw new Error("לא ניתן לבטל שמירה זו");
+    throw new Error("לא ניתן לבטל שריון זה");
   }
 
   const db = getAdminDb();
@@ -972,27 +1309,13 @@ export async function cancelReservation(
   }
 
   const batch = db.batch();
-  batch.update(db.collection("reservations").doc(id), { status: "cancelled" });
+  batch.update(db.collection("reservations").doc(id), {
+    status: "cancelled",
+    cancelReason: "member",
+    cancelledAt: FieldValue.serverTimestamp(),
+  });
 
-  const tool = await getToolById(reservation.toolId);
-  if (tool?.status === "reserved") {
-    const onToolSnap = await db
-      .collection("reservations")
-      .where("toolId", "==", reservation.toolId)
-      .get();
-
-    const hasOtherActive = onToolSnap.docs.some((doc) => {
-      if (doc.id === id) return false;
-      const status = doc.data().status as Reservation["status"];
-      return status === "pending" || status === "confirmed";
-    });
-
-    if (!hasOtherActive) {
-      batch.update(db.collection("tools").doc(reservation.toolId), {
-        status: "available",
-      });
-    }
-  }
+  await releaseReservedToolsForReservation(db, batch, reservation, id);
 
   const pendingPayment = await getPendingPaymentForReservation(id);
   if (pendingPayment) {
@@ -1011,6 +1334,7 @@ export async function getAllReservations(): Promise<Reservation[]> {
 }
 
 export async function getReservationsByMember(memberId: string): Promise<Reservation[]> {
+  await expireStaleNoShowReservations();
   const snap = await getAdminDb()
     .collection("reservations")
     .where("memberId", "==", memberId)
@@ -1417,8 +1741,9 @@ export async function createLoanFromCheckout(params: {
   checkoutPhotoUrl: string;
   checkoutConditionNotes?: string;
   checkoutItemsChecked?: string[];
+  checkoutDefect?: DefectRecord;
   loanId?: string;
-}): Promise<Loan> {
+}): Promise<{ loan: Loan; loans: Loan[] }> {
   const payment =
     params.reservation.feeAmount > 0
       ? await getPaidPaymentForReservation(params.reservation.id)
@@ -1429,43 +1754,68 @@ export async function createLoanFromCheckout(params: {
 
   const db = getAdminDb();
   const split = splitPayment(params.reservation.feeAmount);
-  const loanId = params.loanId ?? newId("loan");
+  const toolIds = reservationToolIds(params.reservation);
+  const groupId = toolIds.length > 1 ? newId("grp") : undefined;
+  const perUnitDevice = toolIds.length > 0 ? split.deviceAmount / toolIds.length : 0;
   const txnId = newId("txn");
-
-  const loan: Loan = {
-    id: loanId,
-    reservationId: params.reservation.id,
-    memberId: params.reservation.memberId,
-    toolId: params.reservation.toolId,
-    status: "active",
-    safetyAcknowledged: true,
-    checkoutPhotoUrl: params.checkoutPhotoUrl,
-    checkoutConditionNotes: params.checkoutConditionNotes?.trim() || undefined,
-    checkoutItemsChecked: params.checkoutItemsChecked?.length
-      ? params.checkoutItemsChecked
-      : undefined,
-    checkedOutAt: new Date().toISOString(),
-    dueReturnDate: params.reservation.returnDate || undefined,
-    dueReturnTimeEnd: params.reservation.returnTimeEnd ?? params.reservation.returnTimeStart,
-  };
 
   const transaction: Transaction = {
     id: txnId,
     memberId: params.reservation.memberId,
-    toolId: params.reservation.toolId,
-    loanId,
+    toolId: toolIds[0],
+    loanId: params.loanId ?? newId("loan"),
     amount: split.totalAmount,
     operationsAmount: split.operationsAmount,
     deviceAmount: split.deviceAmount,
     createdAt: new Date().toISOString(),
   };
 
+  const loans: Loan[] = [];
   const batch = db.batch();
 
-  batch.set(db.collection("loans").doc(loanId), {
-    ...omitUndefined(loan as unknown as Record<string, unknown>),
-    checkedOutAt: FieldValue.serverTimestamp(),
-  });
+  for (let i = 0; i < toolIds.length; i++) {
+    const toolId = toolIds[i];
+    const loanId =
+      i === 0 && params.loanId ? params.loanId : i === 0 ? transaction.loanId : newId("loan");
+
+    const loan: Loan = {
+      id: loanId,
+      reservationId: params.reservation.id,
+      memberId: params.reservation.memberId,
+      toolId,
+      status: "active",
+      safetyAcknowledged: true,
+      checkoutPhotoUrl: params.checkoutPhotoUrl,
+      checkoutConditionNotes: params.checkoutConditionNotes?.trim() || undefined,
+      checkoutItemsChecked: params.checkoutItemsChecked?.length
+        ? params.checkoutItemsChecked
+        : undefined,
+      checkoutDefect: params.checkoutDefect,
+      checkedOutAt: new Date().toISOString(),
+      dueReturnDate: params.reservation.returnDate || undefined,
+      dueReturnTimeEnd:
+        params.reservation.returnTimeEnd ?? params.reservation.returnTimeStart,
+      ...(groupId ? { groupId } : {}),
+    };
+
+    loans.push(loan);
+    batch.set(db.collection("loans").doc(loanId), {
+      ...omitUndefined(loan as unknown as Record<string, unknown>),
+      checkedOutAt: FieldValue.serverTimestamp(),
+    });
+    batch.update(db.collection("tools").doc(toolId), { status: "on_loan" });
+    batch.set(
+      db.collection("device_pots").doc(toolId),
+      {
+        toolId,
+        balance: FieldValue.increment(perUnitDevice),
+        totalEarned: FieldValue.increment(perUnitDevice),
+        totalSpent: 0,
+      },
+      { merge: true }
+    );
+  }
+
   batch.set(db.collection("transactions").doc(txnId), {
     ...transaction,
     createdAt: FieldValue.serverTimestamp(),
@@ -1473,19 +1823,6 @@ export async function createLoanFromCheckout(params: {
   batch.update(db.collection("reservations").doc(params.reservation.id), {
     status: "completed",
   });
-  batch.update(db.collection("tools").doc(params.reservation.toolId), {
-    status: "on_loan",
-  });
-  batch.set(
-    db.collection("device_pots").doc(params.reservation.toolId),
-    {
-      toolId: params.reservation.toolId,
-      balance: FieldValue.increment(split.deviceAmount),
-      totalEarned: FieldValue.increment(split.deviceAmount),
-      totalSpent: 0,
-    },
-    { merge: true }
-  );
   batch.set(
     db.collection("operations_pot").doc("main"),
     {
@@ -1497,7 +1834,7 @@ export async function createLoanFromCheckout(params: {
   );
 
   await batch.commit();
-  return loan;
+  return { loan: loans[0], loans };
 }
 
 export async function completeLoanReturn(
@@ -1506,26 +1843,35 @@ export async function completeLoanReturn(
     returnPhotoUrl: string;
     returnConditionNotes?: string;
     returnItemsChecked?: string[];
+    returnOk?: boolean;
+    returnDefect?: DefectRecord;
   }
-): Promise<{ loan: Loan; lateFee: LateReturnFee | null }> {
+): Promise<{ loan: Loan; lateFee: LateReturnFee | null; dispute?: Dispute }> {
   const db = getAdminDb();
   const loan = await getLoanById(loanId);
   if (!loan) throw new Error("Loan not found");
+
+  const hasDefect = Boolean(params.returnDefect);
+  const loanStatus: Loan["status"] = hasDefect ? "disputed" : "returned";
+  const toolStatus: Tool["status"] = hasDefect ? "maintenance" : "available";
 
   const returnedAt = new Date();
   const returnedAtIso = returnedAt.toISOString();
   const batch = db.batch();
 
   batch.update(db.collection("loans").doc(loanId), {
-    status: "returned",
+    status: loanStatus,
     returnPhotoUrl: params.returnPhotoUrl,
     returnConditionNotes: params.returnConditionNotes?.trim() || null,
     returnItemsChecked: params.returnItemsChecked?.length ? params.returnItemsChecked : null,
+    returnOk: params.returnOk === true ? true : null,
+    returnDefect: params.returnDefect ?? null,
     returnedAt: FieldValue.serverTimestamp(),
   });
-  batch.update(db.collection("tools").doc(loan.toolId), { status: "available" });
+  batch.update(db.collection("tools").doc(loan.toolId), { status: toolStatus });
 
   let lateFee: LateReturnFee | null = null;
+  let dispute: Dispute | undefined;
   const reservation = loan.reservationId
     ? await getReservationById(loan.reservationId)
     : null;
@@ -1533,7 +1879,7 @@ export async function completeLoanReturn(
   if (reservation) {
     const { lateMinutes, dueAt } = computeLateness(reservation, returnedAt);
     const amount = calculateLateFeeAmount(lateMinutes);
-    if (lateMinutes > 0 && amount > 0) {
+    if (lateMinutes > 0 && amount > 0 && !hasDefect) {
       const tool = await getToolById(loan.toolId);
       const feeId = newId("late");
       lateFee = {
@@ -1557,18 +1903,37 @@ export async function completeLoanReturn(
     }
   }
 
+  if (hasDefect && params.returnDefect) {
+    const tool = await getToolById(loan.toolId);
+  const members = await listMembers();
+    dispute = buildDisputeForBatch({
+      loanId,
+      toolId: loan.toolId,
+      memberId: loan.memberId,
+      gemachId: tool?.gemachId ?? PLATFORM_GEMACH_ID,
+      defect: params.returnDefect,
+      members,
+      batch,
+    });
+    batch.update(db.collection("loans").doc(loanId), { disputeId: dispute.id });
+  }
+
   await batch.commit();
 
   return {
     loan: {
       ...loan,
-      status: "returned",
+      status: loanStatus,
       returnPhotoUrl: params.returnPhotoUrl,
       returnConditionNotes: params.returnConditionNotes?.trim() || undefined,
       returnItemsChecked: params.returnItemsChecked,
+      returnOk: params.returnOk,
+      returnDefect: params.returnDefect,
       returnedAt: returnedAtIso,
+      disputeId: dispute?.id,
     },
     lateFee,
+    dispute,
   };
 }
 
@@ -2007,6 +2372,227 @@ export async function completePayboxPayout(payoutId: string): Promise<PayboxPayo
   payout.status = "completed";
   payout.completedAt = new Date().toISOString();
   return payout;
+}
+
+// ─── Disputes ────────────────────────────────────────────────────────────────
+
+function disputeFromDoc(id: string, data: DocumentData): Dispute {
+  return {
+    id,
+    loanId: data.loanId as string,
+    toolId: data.toolId as string,
+    memberId: data.memberId as string,
+    gemachId: data.gemachId as string,
+    status: (data.status as DisputeStatus) ?? "new",
+    defect: parseDefectRecord(data.defect) ?? {
+      category: "other",
+      description: "",
+      reportedAt: new Date().toISOString(),
+    },
+    damageAmount:
+      typeof data.damageAmount === "number" ? data.damageAmount : undefined,
+    mediatorIds: Array.isArray(data.mediatorIds)
+      ? data.mediatorIds.filter((x): x is string => typeof x === "string")
+      : [],
+    mediatorDecisions:
+      data.mediatorDecisions && typeof data.mediatorDecisions === "object"
+        ? (data.mediatorDecisions as Record<string, MediatorDecision>)
+        : undefined,
+    resolvedAt: data.resolvedAt ? tsToIso(data.resolvedAt) : undefined,
+    createdAt: data.createdAt ? tsToIso(data.createdAt) : new Date().toISOString(),
+  };
+}
+
+function buildDisputeForBatch(params: {
+  loanId: string;
+  toolId: string;
+  memberId: string;
+  gemachId: string;
+  defect: DefectRecord;
+  members: Array<{ id: string; role?: string }>;
+  batch: import("firebase-admin/firestore").WriteBatch;
+}): Dispute {
+  const id = newId("dispute");
+  const mediatorIds = pickRandomMediators(params.members, [
+    params.memberId,
+  ]);
+  const dispute: Dispute = {
+    id,
+    loanId: params.loanId,
+    toolId: params.toolId,
+    memberId: params.memberId,
+    gemachId: params.gemachId,
+    status: mediatorIds.length > 0 ? "mediators_assigned" : "new",
+    defect: params.defect,
+    mediatorIds,
+    createdAt: new Date().toISOString(),
+  };
+
+  params.batch.set(getAdminDb().collection("disputes").doc(id), {
+    ...omitUndefined(dispute as unknown as Record<string, unknown>),
+    createdAt: FieldValue.serverTimestamp(),
+  });
+
+  return dispute;
+}
+
+export async function getAllDisputes(): Promise<Dispute[]> {
+  const snap = await getAdminDb().collection("disputes").get();
+  return snap.docs.map((d) => disputeFromDoc(d.id, d.data()));
+}
+
+export async function getDisputeById(id: string): Promise<Dispute | null> {
+  const snap = await getAdminDb().collection("disputes").doc(id).get();
+  if (!snap.exists) return null;
+  return disputeFromDoc(snap.id, snap.data()!);
+}
+
+export async function submitMediatorDecision(params: {
+  disputeId: string;
+  mediatorId: string;
+  decision: MediatorDecision;
+}): Promise<Dispute> {
+  const db = getAdminDb();
+  const ref = db.collection("disputes").doc(params.disputeId);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error("המחלוקת לא נמצאה");
+
+  const dispute = disputeFromDoc(snap.id, snap.data()!);
+  if (!dispute.mediatorIds.includes(params.mediatorId)) {
+    throw new Error("אין הרשאה להכריע במחלוקת זו");
+  }
+
+  const decisions = { ...(dispute.mediatorDecisions ?? {}), [params.mediatorId]: params.decision };
+  const votes = Object.values(decisions).filter((v) => v !== "abstain");
+  const charge = votes.filter((v) => v === "charge_member").length;
+  const waive = votes.filter((v) => v === "waive_member").length;
+  const totalMediators = dispute.mediatorIds.length;
+  const allVoted = votes.length >= totalMediators;
+
+  let status: DisputeStatus = "deliberating";
+  if (dispute.status === "mediators_assigned") status = "deliberating";
+  let resolvedAt: string | undefined;
+
+  if (allVoted && charge !== waive) {
+    status = charge > waive ? "resolved_charge" : "resolved_waive";
+    resolvedAt = new Date().toISOString();
+  } else if (allVoted) {
+    status = "closed";
+    resolvedAt = new Date().toISOString();
+  }
+
+  await ref.update({
+    mediatorDecisions: decisions,
+    status,
+    ...(resolvedAt ? { resolvedAt: FieldValue.serverTimestamp() } : {}),
+  });
+
+  return {
+    ...dispute,
+    mediatorDecisions: decisions,
+    status,
+    resolvedAt,
+  };
+}
+
+// ─── Board dashboard ─────────────────────────────────────────────────────────
+
+export async function getBoardDashboardData(): Promise<BoardDashboardData> {
+  const [tools, loans, reservations, disputes, tickets, lateFees, opsPot, devicePots, payouts] =
+    await Promise.all([
+      getAllTools(),
+      getAllLoans(),
+      getAllReservations(),
+      getAllDisputes(),
+      listMaintenanceTickets(),
+      listLateReturnFees(),
+      getOperationsPot(),
+      getDevicePots(),
+      getPayboxPayouts(50),
+    ]);
+
+  const activeDisputes = disputes.filter(
+    (d) => d.status !== "closed" && d.status !== "resolved_charge" && d.status !== "resolved_waive"
+  ).length;
+
+  const openReports = tickets.filter((t) => t.status !== "resolved").length;
+  const unpaidLate = lateFees.filter((f) => !f.paid).reduce((s, f) => s + f.amount, 0);
+  const pendingPayouts = payouts
+    .filter((p) => p.status === "pending")
+    .reduce((s, p) => s + p.amount, 0);
+
+  const statusCounts = {
+    available: 0,
+    on_loan: 0,
+    reserved: 0,
+    maintenance: 0,
+    disabled: 0,
+  };
+  for (const t of tools) {
+    if (t.status in statusCounts) {
+      statusCounts[t.status as keyof typeof statusCounts] += 1;
+    }
+  }
+
+  const activeReservations = reservations.filter(
+    (r) => r.status === "pending" || r.status === "confirmed"
+  ).length;
+
+  const members = await listMembers();
+  const memberMap = new Map(members.map((m) => [m.id, m]));
+  const toolMap = new Map(tools.map((t) => [t.id, t]));
+
+  const recentDisputes = [...disputes]
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, 8)
+    .map((d) => ({
+      id: d.id,
+      toolName: toolMap.get(d.toolId)?.name ?? d.toolId,
+      memberName: memberMap.get(d.memberId)?.name ?? d.memberId,
+      status: d.status,
+      createdAt: d.createdAt,
+    }));
+
+  return {
+    logistics: {
+      totalUnits: tools.length,
+      availableUnits: statusCounts.available,
+      onLoanUnits: statusCounts.on_loan,
+      reservedUnits: statusCounts.reserved + activeReservations,
+      maintenanceUnits: statusCounts.maintenance,
+      disabledUnits: statusCounts.disabled,
+      activeDisputes,
+      openProblemReports: openReports,
+    },
+    finance: {
+      operationsBalance: opsPot.balance,
+      deviceBalanceTotal: devicePots.reduce((s, p) => s + p.balance, 0),
+      totalIncome: opsPot.totalEarned + devicePots.reduce((s, p) => s + p.totalEarned, 0),
+      totalExpenses: opsPot.totalSpent + devicePots.reduce((s, p) => s + p.totalSpent, 0),
+      unpaidLateFees: unpaidLate,
+      pendingPayouts,
+    },
+    recentDisputes,
+  };
+}
+
+export async function countKindAvailabilityInWindow(
+  catalogKey: string,
+  schedule: {
+    pickupDate: string;
+    pickupTimeStart?: string;
+    returnDate: string;
+    returnTimeEnd?: string;
+  }
+): Promise<number> {
+  const [tools, loans, reservations] = await Promise.all([
+    getAllTools(),
+    getAllLoans(),
+    getAllReservations(),
+  ]);
+  const units = resolveKindUnits(tools, catalogKey);
+  const { loanByTool, reservationByTool } = buildActiveHolders(loans, reservations);
+  return countUnitsAvailableInWindow(units, schedule, reservationByTool, loanByTool);
 }
 
 export { getAdminDb } from "@/lib/firebase/admin-app";

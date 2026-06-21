@@ -7,6 +7,8 @@ import { loanStatusLabels, reservationStatusLabels } from "@/lib/labels";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { formatDateHe, formatReservationSchedule } from "@/lib/dates";
+import { canStartCheckout } from "@/lib/reservation-checkout";
+import { formatNoShowDeadlineHe } from "@/lib/reservation-expiry";
 import { authFetch } from "@/lib/api-client";
 import { compressImageFile } from "@/lib/compress-image";
 import type { Loan, Reservation, Tool } from "@/lib/types";
@@ -39,6 +41,7 @@ export function ReservationCard({
   onCancel,
 }: ReservationCardProps) {
   const schedule = formatReservationSchedule(reservation);
+  const checkoutGate = canStartCheckout(reservation, tool);
 
   return (
     <Card className="border-amber-200 bg-amber-50/40">
@@ -50,7 +53,9 @@ export function ReservationCard({
           <div>
             <p className="font-bold text-stone-900">{tool?.name ?? reservation.toolId}</p>
             <p className="text-sm text-[var(--muted)]">
-              {reservationStatusLabels[reservation.status]}
+              {reservation.cancelReason === "no_show"
+                ? "בוטל — לא הגיע לקיחה בזמן"
+                : reservationStatusLabels[reservation.status]}
             </p>
             <p className="text-xs text-[var(--muted)]">
               נשמר: {formatActivityDate(reservation.createdAt)}
@@ -60,6 +65,11 @@ export function ReservationCard({
               איסוף: {schedule.pickup}
             </p>
             <p className="text-xs text-[var(--muted)]">החזרה עד: {schedule.return}</p>
+            {(reservation.status === "confirmed" || reservation.status === "pending") && (
+              <p className="text-xs font-medium text-amber-800">
+                לקיחה עד: {formatNoShowDeadlineHe(reservation)} (2 שעות ממועד האיסוף)
+              </p>
+            )}
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
@@ -72,15 +82,24 @@ export function ReservationCard({
               disabled={cancelling}
               onClick={() => onCancel(reservation.id)}
             >
-              {cancelling ? "מבטל..." : "בטל שמירה"}
+              {cancelling ? "מבטל..." : "בטל שריון"}
             </Button>
           )}
-          <Link
-            href={`/checkout/${reservation.id}`}
-            className="rounded-xl bg-kerem-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-kerem-800"
-          >
-            המשך ללקיחה
-          </Link>
+          {checkoutGate.allowed ? (
+            <Link
+              href={`/checkout/${reservation.id}`}
+              className="rounded-xl bg-kerem-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-kerem-800"
+            >
+              המשך ללקיחה
+            </Link>
+          ) : (
+            <span
+              className="max-w-[12rem] rounded-xl bg-stone-100 px-3 py-2 text-xs font-medium text-stone-600"
+              title={checkoutGate.reason}
+            >
+              {checkoutGate.reason}
+            </span>
+          )}
         </div>
       </CardBody>
     </Card>

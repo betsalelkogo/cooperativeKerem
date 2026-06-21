@@ -10,7 +10,7 @@ import { SiteLogo } from "@/components/layout/SiteLogo";
 
 const baseNavItems = [
   { href: "/tools", label: "כלים" },
-  { href: "/my-reservations", label: "שמירות" },
+  { href: "/my-reservations", label: "שריונים" },
   { href: "/my-loans", label: "השאלות" },
 ];
 

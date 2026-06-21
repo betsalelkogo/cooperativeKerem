@@ -35,6 +35,16 @@ export interface Tool {
   defaultLoanHours?: number;
   /** Override gemach max loan length borrowers may select (fixed_hours). */
   maxLoanHours?: number;
+  /** Physical storage location (e.g. מחסן קרem). */
+  location?: string;
+  brand?: string;
+  supplier?: string;
+  /** Intended use / purpose description. */
+  purpose?: string;
+  /** Product age in years (approximate). */
+  productAge?: number;
+  /** Additional gallery images (first may duplicate imageUrl). */
+  imageUrls?: string[];
 }
 
 /** Tool plus catalog availability hint for list/detail views. */
@@ -61,6 +71,22 @@ export interface ToolKindWithAvailability extends Omit<
   totalUnits: number;
   availableUnits: number;
   representativeToolId: string;
+  /** Units free for a specific reservation window (when computed). */
+  availableUnitsInWindow?: number;
+  location?: string;
+  brand?: string;
+  supplier?: string;
+  purpose?: string;
+  productAge?: number;
+  imageUrls?: string[];
+  /** Catalog popularity / usage stats (when loaded for detail page). */
+  stats?: ToolKindStats;
+}
+
+export interface ToolKindStats {
+  totalLoans: number;
+  activeLoans: number;
+  uniqueBorrowers: number;
 }
 
 export type GemachPricingMode = "free" | "loan_fee" | "maintenance_only";
@@ -87,6 +113,10 @@ export interface Gemach {
   maxLoanHours?: number;
   /** Set when the gemach is permanently closed. */
   closedAt?: string;
+  /** Platform cooperative fee (₪) charged on free gemach reservations. */
+  cooperativeFee?: number;
+  /** Default pickup / storage location for tools in this gemach. */
+  location?: string;
 }
 
 export interface DevicePot {
@@ -129,6 +159,19 @@ export interface Reservation {
   loanDurationHours?: number;
   /** When the reservation was created. */
   createdAt: string;
+  /** Catalog kind — all units in a multi-qty booking share this. */
+  kindId?: string;
+  /** Number of units reserved (default 1). */
+  quantity?: number;
+  /** All tool unit IDs held by this reservation. */
+  toolIds?: string[];
+  /** Links multi-unit reservations created together. */
+  groupId?: string;
+  /** Cooperative platform fee portion (free gemachim). */
+  cooperativeFeeAmount?: number;
+  /** Why the reservation was cancelled. */
+  cancelReason?: "member" | "no_show";
+  cancelledAt?: string;
 }
 
 export type LoanStatus = "checkout_pending" | "active" | "return_pending" | "returned" | "disputed";
@@ -160,6 +203,59 @@ export interface Loan {
   dueReturnTimeEnd?: string;
   /** When the tool was actually returned. */
   returnedAt?: string;
+  /** Links loans from the same multi-unit checkout. */
+  groupId?: string;
+  /** Structured defect reported at checkout. */
+  checkoutDefect?: DefectRecord;
+  /** Structured defect reported at return. */
+  returnDefect?: DefectRecord;
+  /** Borrower confirmed tool returned in good condition. */
+  returnOk?: boolean;
+  /** Active dispute for this loan. */
+  disputeId?: string;
+}
+
+export type DefectCategory =
+  | "broken"
+  | "missing_part"
+  | "wont_start"
+  | "battery"
+  | "other";
+
+export interface DefectRecord {
+  category: DefectCategory;
+  description: string;
+  /** Who is responsible: borrower or gemach (cooperative). */
+  responsibility?: "member" | "gemach" | "unknown";
+  reportedAt: string;
+}
+
+export type DisputeStatus =
+  | "new"
+  | "mediators_assigned"
+  | "deliberating"
+  | "resolved_charge"
+  | "resolved_waive"
+  | "closed";
+
+export type MediatorDecision = "charge_member" | "waive_member" | "abstain";
+
+export interface Dispute {
+  id: string;
+  loanId: string;
+  toolId: string;
+  memberId: string;
+  gemachId: string;
+  status: DisputeStatus;
+  /** Defect details that triggered the dispute. */
+  defect: DefectRecord;
+  /** Assessed damage amount (₪) if mediators charge member. */
+  damageAmount?: number;
+  mediatorIds: string[];
+  /** Mediator memberId → decision (blind until all voted). */
+  mediatorDecisions?: Record<string, MediatorDecision>;
+  resolvedAt?: string;
+  createdAt: string;
 }
 
 export interface LateReturnFee {
@@ -212,7 +308,12 @@ export interface MaintenanceTicket {
   createdAt: string;
 }
 
-export type MemberRole = "ADMIN" | "GEMACH_ADMIN" | "MEMBER";
+export type MemberRole =
+  | "ADMIN"
+  | "GEMACH_ADMIN"
+  | "BOARD"
+  | "DISPUTE_RESOLVER"
+  | "MEMBER";
 
 export interface Member {
   id: string;
@@ -349,7 +450,15 @@ export interface AdminToolKindEdit {
   gemachDefaultLoanHours: number;
   gemachMaxLoanHours: number;
   imageUrl?: string;
+  imageUrls?: string[];
+  location?: string;
+  brand?: string;
+  supplier?: string;
+  purpose?: string;
+  productAge?: number;
   adminNotes?: string;
+  /** Gemach default location — shown when tool has no override. */
+  gemachLocation?: string;
 }
 
 export interface AdminMemberSummary {
@@ -436,4 +545,36 @@ export interface PayboxPayout {
   createdBy: string;
   createdAt: string;
   completedAt?: string;
+}
+
+export interface BoardLogisticsStats {
+  totalUnits: number;
+  availableUnits: number;
+  onLoanUnits: number;
+  reservedUnits: number;
+  maintenanceUnits: number;
+  disabledUnits: number;
+  activeDisputes: number;
+  openProblemReports: number;
+}
+
+export interface BoardFinanceStats {
+  operationsBalance: number;
+  deviceBalanceTotal: number;
+  totalIncome: number;
+  totalExpenses: number;
+  unpaidLateFees: number;
+  pendingPayouts: number;
+}
+
+export interface BoardDashboardData {
+  logistics: BoardLogisticsStats;
+  finance: BoardFinanceStats;
+  recentDisputes: Array<{
+    id: string;
+    toolName: string;
+    memberName: string;
+    status: DisputeStatus;
+    createdAt: string;
+  }>;
 }

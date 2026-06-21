@@ -31,6 +31,17 @@ export async function POST(request: Request) {
       }
     }
 
+    const returnDefectRaw = formData.get("returnDefect") as string | null;
+    const returnOkRaw = formData.get("returnOk") as string | null;
+    let returnDefect;
+    if (returnDefectRaw) {
+      try {
+        returnDefect = JSON.parse(returnDefectRaw);
+      } catch {
+        returnDefect = undefined;
+      }
+    }
+
     if (!loanId || !photo) {
       return NextResponse.json({ error: "נדרשים מזהה השאלה ותמונה" }, { status: 400 });
     }
@@ -57,12 +68,14 @@ export async function POST(request: Request) {
       buffer,
     });
 
-    const { loan: updatedLoan, lateFee } = await completeLoanReturn(loanId, {
+    const { loan: updatedLoan, lateFee, dispute } = await completeLoanReturn(loanId, {
       returnPhotoUrl,
       returnConditionNotes: returnConditionNotes ?? undefined,
       returnItemsChecked,
+      returnOk: returnOkRaw === "true",
+      returnDefect,
     });
-    return NextResponse.json({ loan: updatedLoan, lateFee });
+    return NextResponse.json({ loan: updatedLoan, lateFee, dispute });
   } catch (err) {
     const message = err instanceof Error ? err.message : "שגיאת שרת";
     return NextResponse.json({ error: message }, { status: 500 });

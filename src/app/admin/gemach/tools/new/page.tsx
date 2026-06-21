@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
+import { compressImageFile } from "@/lib/compress-image";
 import {
   gemachPricingModeLabels,
   resolveGemachReservationMode,
@@ -12,7 +13,7 @@ import {
   resolveGemachMaxLoanHours,
   MAX_LOAN_HOURS_CAP,
 } from "@/lib/gemach";
-import { TOOL_CATEGORIES } from "@/lib/tools-admin";
+import { MAX_TOOL_UNITS, TOOL_CATEGORIES } from "@/lib/tools-admin";
 import { BackLink, PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -37,7 +38,16 @@ export default function AddGemachToolPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState<string>(TOOL_CATEGORIES[0]);
+  const [customCategory, setCustomCategory] = useState("");
   const [quantity, setQuantity] = useState("1");
+  const [location, setLocation] = useState("");
+  const [brand, setBrand] = useState("");
+  const [supplier, setSupplier] = useState("");
+  const [purpose, setPurpose] = useState("");
+  const [productAge, setProductAge] = useState("");
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [loanFeeMin, setLoanFeeMin] = useState("20");
   const [loanFeeMax, setLoanFeeMax] = useState("50");
   const [defaultLoanHours, setDefaultLoanHours] = useState("");
@@ -78,6 +88,9 @@ export default function AddGemachToolPage() {
 
     try {
       const token = await getIdToken();
+      const resolvedCategory =
+        category === "אחר" ? customCategory.trim() || "אחר" : category;
+
       const res = await authFetch("/api/admin/gemach/tools", {
         method: "POST",
         token,
@@ -86,10 +99,15 @@ export default function AddGemachToolPage() {
           gemachId,
           name,
           description,
-          category,
+          category: resolvedCategory,
           quantity: Number(quantity),
           loanFeeMin: Number(loanFeeMin),
           loanFeeMax: Number(loanFeeMax),
+          ...(location.trim() ? { location: location.trim() } : {}),
+          ...(brand.trim() ? { brand: brand.trim() } : {}),
+          ...(supplier.trim() ? { supplier: supplier.trim() } : {}),
+          ...(purpose.trim() ? { purpose: purpose.trim() } : {}),
+          ...(productAge.trim() ? { productAge: Number(productAge) } : {}),
           ...(showLoanHours && defaultLoanHours.trim()
             ? { defaultLoanHours: Number(defaultLoanHours) }
             : {}),
@@ -102,6 +120,21 @@ export default function AddGemachToolPage() {
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.error ?? "הוספת הכלי נכשלה");
+      }
+
+      if (imageFile && data.kindId) {
+        const compressed = await compressImageFile(imageFile);
+        const formData = new FormData();
+        formData.append("gemachId", gemachId);
+        formData.append("image", compressed, "tool.jpg");
+        const imgRes = await authFetch(
+          `/api/admin/gemach/tools/${encodeURIComponent(data.kindId)}/image`,
+          { method: "POST", token, body: formData }
+        );
+        if (!imgRes.ok) {
+          const imgData = await imgRes.json();
+          throw new Error(imgData.error ?? "הכלי נוסף אך העלאת התמונה נכשלה");
+        }
       }
 
       router.push(withGemachIdQuery(`/admin/gemach?toolsAdded=${data.tools.length}`, gemachId));
@@ -187,6 +220,84 @@ export default function AddGemachToolPage() {
             </div>
 
             <div>
+              <label htmlFor="location" className="mb-1.5 block text-sm font-semibold text-stone-800">
+                מיקום איסוף / אחסון
+              </label>
+              <input
+                id="location"
+                type="text"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                placeholder={
+                  gemach?.location
+                    ? `ריק = ${gemach.location}`
+                    : "לדוגמה: מחסן קרem, רח' …"
+                }
+                className="w-full rounded-xl border border-[var(--border)] px-4 py-3 text-sm focus:border-kerem-500 focus:outline-none focus:ring-2 focus:ring-kerem-200"
+              />
+              {gemach?.location && !location.trim() && (
+                <p className="mt-1 text-xs text-[var(--muted)]">
+                  ברירת מחדל מהגמ״ח: {gemach.location}
+                </p>
+              )}
+            </div>
+
+            <fieldset className="space-y-3 rounded-xl border border-sky-200 bg-sky-50/30 p-4">
+              <legend className="px-1 text-sm font-bold text-stone-900">
+                פרטי עמוד הכלי (אופציונלי)
+              </legend>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="brand" className="mb-1 block text-sm font-semibold text-stone-800">
+                    מותג
+                  </label>
+                  <input
+                    id="brand"
+                    value={brand}
+                    onChange={(e) => setBrand(e.target.value)}
+                    className="w-full rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="supplier" className="mb-1 block text-sm font-semibold text-stone-800">
+                    ספק
+                  </label>
+                  <input
+                    id="supplier"
+                    value={supplier}
+                    onChange={(e) => setSupplier(e.target.value)}
+                    className="w-full rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm"
+                  />
+                </div>
+              </div>
+              <div>
+                <label htmlFor="purpose" className="mb-1 block text-sm font-semibold text-stone-800">
+                  ייעוד
+                </label>
+                <input
+                  id="purpose"
+                  value={purpose}
+                  onChange={(e) => setPurpose(e.target.value)}
+                  placeholder="למשל: אירועים, גינון…"
+                  className="w-full rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm"
+                />
+              </div>
+              <div>
+                <label htmlFor="productAge" className="mb-1 block text-sm font-semibold text-stone-800">
+                  גיל המוצר (שנים)
+                </label>
+                <input
+                  id="productAge"
+                  type="number"
+                  min={0}
+                  value={productAge}
+                  onChange={(e) => setProductAge(e.target.value)}
+                  className="w-full max-w-[8rem] rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm"
+                />
+              </div>
+            </fieldset>
+
+            <div>
               <label htmlFor="category" className="mb-1.5 block text-sm font-semibold text-stone-800">
                 קטגוריה *
               </label>
@@ -202,6 +313,69 @@ export default function AddGemachToolPage() {
                   </option>
                 ))}
               </select>
+              {category === "אחר" && (
+                <input
+                  type="text"
+                  value={customCategory}
+                  onChange={(e) => setCustomCategory(e.target.value)}
+                  placeholder="שם קטגוריה מותאם (למשל: ציוד לאירועים)"
+                  className="mt-2 w-full rounded-xl border border-[var(--border)] px-4 py-3 text-sm focus:border-kerem-500 focus:outline-none focus:ring-2 focus:ring-kerem-200"
+                />
+              )}
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-sm font-semibold text-stone-800">
+                תמונה (אופציונלי)
+              </label>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                {imagePreview ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={imagePreview}
+                    alt="תצוגה מקדימה"
+                    className="h-28 w-28 rounded-xl border border-[var(--border)] object-cover"
+                  />
+                ) : (
+                  <div className="flex h-28 w-28 items-center justify-center rounded-xl border border-dashed border-[var(--border)] bg-warm-50 text-2xl text-[var(--muted)]">
+                    📷
+                  </div>
+                )}
+                <div className="flex flex-col gap-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      setImageFile(file);
+                      setImagePreview(URL.createObjectURL(file));
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="rounded-xl border border-kerem-200 bg-kerem-50 px-4 py-2 text-sm font-semibold text-kerem-800 hover:bg-kerem-100"
+                  >
+                    {imagePreview ? "החלף תמונה" : "העלה תמונה"}
+                  </button>
+                  {imagePreview && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImageFile(null);
+                        setImagePreview(null);
+                        if (fileInputRef.current) fileInputRef.current.value = "";
+                      }}
+                      className="text-xs font-medium text-red-700 hover:underline"
+                    >
+                      הסר תמונה
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
 
             <div>
@@ -212,14 +386,15 @@ export default function AddGemachToolPage() {
                 id="quantity"
                 type="number"
                 min={1}
-                max={50}
+                max={MAX_TOOL_UNITS}
                 required
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
                 className="w-full rounded-xl border border-[var(--border)] px-4 py-3 text-sm focus:border-kerem-500 focus:outline-none focus:ring-2 focus:ring-kerem-200"
               />
               <p className="mt-1.5 text-xs text-[var(--muted)]">
-                יופיעו ברשימה ככלי אחד עם מספר יחידות (למשל 3 מסורים זהים).
+                עד {MAX_TOOL_UNITS} יחידות מאותו סוג (למשל 150 כיסאות). כל שריון הוא יחידה אחת — לכמות
+                גדולה יש לבצע מספר שריונים.
               </p>
             </div>
 

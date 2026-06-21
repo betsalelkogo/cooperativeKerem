@@ -14,6 +14,7 @@ import type { AdminToolKindEdit } from "@/lib/types";
 interface ToolKindEditFormProps {
   kind: AdminToolKindEdit;
   gemachId: string;
+  gemachDefaultLocation?: string;
   getToken: () => Promise<string | null>;
   onSaved: () => void;
 }
@@ -21,13 +22,22 @@ interface ToolKindEditFormProps {
 export function ToolKindEditForm({
   kind,
   gemachId,
+  gemachDefaultLocation,
   getToken,
   onSaved,
 }: ToolKindEditFormProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState(kind.name);
   const [description, setDescription] = useState(kind.description);
-  const [category, setCategory] = useState(kind.category);
+  const initialCategoryInList = TOOL_CATEGORIES.includes(
+    kind.category as (typeof TOOL_CATEGORIES)[number]
+  );
+  const [category, setCategory] = useState(
+    initialCategoryInList ? kind.category : "אחר"
+  );
+  const [customCategory, setCustomCategory] = useState(
+    initialCategoryInList ? "" : kind.category
+  );
   const [loanFeeMin, setLoanFeeMin] = useState(String(kind.loanFeeMin));
   const [loanFeeMax, setLoanFeeMax] = useState(String(kind.loanFeeMax));
   const [defaultLoanHours, setDefaultLoanHours] = useState(
@@ -37,6 +47,16 @@ export function ToolKindEditForm({
     kind.maxLoanHours !== undefined ? String(kind.maxLoanHours) : ""
   );
   const [adminNotes, setAdminNotes] = useState(kind.adminNotes ?? "");
+  const [location, setLocation] = useState(kind.location ?? "");
+  const [brand, setBrand] = useState(kind.brand ?? "");
+  const [supplier, setSupplier] = useState(kind.supplier ?? "");
+  const [purpose, setPurpose] = useState(kind.purpose ?? "");
+  const [productAge, setProductAge] = useState(
+    kind.productAge !== undefined ? String(kind.productAge) : ""
+  );
+  const [extraImageUrls, setExtraImageUrls] = useState(
+    (kind.imageUrls ?? []).join("\n")
+  );
   const [imageUrl, setImageUrl] = useState(kind.imageUrl ?? "");
   const [imageUrlInput, setImageUrlInput] = useState(
     kind.imageUrl?.startsWith("https://") ? kind.imageUrl : ""
@@ -48,6 +68,7 @@ export function ToolKindEditForm({
   const [error, setError] = useState("");
 
   const showFees = kind.pricingMode === "loan_fee";
+  const isFree = kind.pricingMode === "free";
   const showLoanHours = kind.reservationMode === "fixed_hours";
 
   async function handleImageFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -140,6 +161,18 @@ export function ToolKindEditForm({
         imageToSave = resolveToolImageUrl(imageUrlInput || imageUrl);
       }
 
+      const galleryUrls = extraImageUrls
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+      for (const url of galleryUrls) {
+        const err = validateToolImageUrl(url);
+        if (err) throw new Error(err);
+      }
+
+      const resolvedCategory =
+        category === "אחר" ? customCategory.trim() || "אחר" : category;
+
       const token = await getToken();
       const res = await authFetch(
         `/api/admin/gemach/tools/${encodeURIComponent(kind.kindId)}`,
@@ -151,12 +184,18 @@ export function ToolKindEditForm({
             gemachId,
             name,
             description,
-            category,
+            category: resolvedCategory,
             loanFeeMin: Number(loanFeeMin),
             loanFeeMax: Number(loanFeeMax),
             defaultLoanHours: defaultLoanHours.trim() === "" ? null : Number(defaultLoanHours),
             maxLoanHours: maxLoanHours.trim() === "" ? null : Number(maxLoanHours),
             adminNotes: adminNotes.trim() || null,
+            location: location.trim() || null,
+            brand: brand.trim() || null,
+            supplier: supplier.trim() || null,
+            purpose: purpose.trim() || null,
+            productAge: productAge.trim() === "" ? null : Number(productAge),
+            imageUrls: galleryUrls.length ? galleryUrls : null,
             ...(imageToSave !== undefined ? { imageUrl: imageToSave } : {}),
           }),
         }
@@ -280,6 +319,112 @@ export function ToolKindEditForm({
           </div>
 
           <div>
+            <label htmlFor="location" className="mb-1.5 block text-sm font-semibold text-stone-800">
+              מיקום איסוף / אחסון
+            </label>
+            <input
+              id="location"
+              type="text"
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+              placeholder={
+                gemachDefaultLocation
+                  ? `ריק = ${gemachDefaultLocation}`
+                  : "לדוגמה: מחסן קרem, רח' …"
+              }
+              className="w-full rounded-xl border border-[var(--border)] px-4 py-3 text-sm focus:border-kerem-500 focus:outline-none focus:ring-2 focus:ring-kerem-200"
+            />
+            {gemachDefaultLocation && !location.trim() && (
+              <p className="mt-1 text-xs text-[var(--muted)]">
+                ברירת מחדל מהגמ״ח: {gemachDefaultLocation}
+              </p>
+            )}
+          </div>
+
+          <fieldset className="space-y-3 rounded-xl border border-sky-200 bg-sky-50/30 p-4">
+            <legend className="px-1 text-sm font-bold text-stone-900">
+              📋 פרטי עמוד הכלי (לשואלים)
+            </legend>
+            <p className="text-xs text-[var(--muted)]">
+              השדות האלה מוצגים בעמוד הפרטים של הכלי בקטלוג.
+            </p>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label htmlFor="brand" className="mb-1.5 block text-sm font-semibold text-stone-800">
+                  מותג
+                </label>
+                <input
+                  id="brand"
+                  type="text"
+                  value={brand}
+                  onChange={(e) => setBrand(e.target.value)}
+                  placeholder="לדוגמה: Bosch"
+                  className="w-full rounded-xl border border-[var(--border)] px-4 py-3 text-sm focus:border-kerem-500 focus:outline-none focus:ring-2 focus:ring-kerem-200"
+                />
+              </div>
+              <div>
+                <label htmlFor="supplier" className="mb-1.5 block text-sm font-semibold text-stone-800">
+                  ספק
+                </label>
+                <input
+                  id="supplier"
+                  type="text"
+                  value={supplier}
+                  onChange={(e) => setSupplier(e.target.value)}
+                  placeholder="מי סיפק / תרם את הכלי"
+                  className="w-full rounded-xl border border-[var(--border)] px-4 py-3 text-sm focus:border-kerem-500 focus:outline-none focus:ring-2 focus:ring-kerem-200"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label htmlFor="purpose" className="mb-1.5 block text-sm font-semibold text-stone-800">
+                ייעוד / שימוש מומלץ
+              </label>
+              <textarea
+                id="purpose"
+                rows={2}
+                value={purpose}
+                onChange={(e) => setPurpose(e.target.value)}
+                placeholder="למשל: אירועים, עבודות גינה, שיפוץ…"
+                className="w-full rounded-xl border border-[var(--border)] px-4 py-3 text-sm focus:border-kerem-500 focus:outline-none focus:ring-2 focus:ring-kerem-200"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="productAge" className="mb-1.5 block text-sm font-semibold text-stone-800">
+                גיל המוצר (שנים, משוער)
+              </label>
+              <input
+                id="productAge"
+                type="number"
+                min={0}
+                max={100}
+                value={productAge}
+                onChange={(e) => setProductAge(e.target.value)}
+                placeholder="לדוגמה: 3"
+                className="w-full max-w-[8rem] rounded-xl border border-[var(--border)] px-4 py-3 text-sm focus:border-kerem-500 focus:outline-none focus:ring-2 focus:ring-kerem-200"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="extraImageUrls" className="mb-1.5 block text-sm font-semibold text-stone-800">
+                תמונות נוספות (קישור HTTPS, שורה לכל תמונה)
+              </label>
+              <textarea
+                id="extraImageUrls"
+                rows={3}
+                dir="ltr"
+                value={extraImageUrls}
+                onChange={(e) => setExtraImageUrls(e.target.value)}
+                placeholder={"https://...\nhttps://..."}
+                className="w-full rounded-xl border border-[var(--border)] px-4 py-3 font-mono text-sm focus:border-kerem-500 focus:outline-none focus:ring-2 focus:ring-kerem-200"
+              />
+            </div>
+          </fieldset>
+
+          <div>
             <label htmlFor="adminNotes" className="mb-1.5 block text-sm font-semibold text-stone-800">
               הערות מנהל (פנימי)
             </label>
@@ -308,11 +453,27 @@ export function ToolKindEditForm({
                   {cat}
                 </option>
               ))}
-              {!TOOL_CATEGORIES.includes(category as (typeof TOOL_CATEGORIES)[number]) && (
-                <option value={category}>{category}</option>
-              )}
             </select>
+            {category === "אחר" && (
+              <input
+                type="text"
+                value={customCategory}
+                onChange={(e) => setCustomCategory(e.target.value)}
+                placeholder="שם קטגוריה מותאם (למשל: ציוד לאירועים)"
+                className="mt-2 w-full rounded-xl border border-[var(--border)] px-4 py-3 text-sm focus:border-kerem-500 focus:outline-none focus:ring-2 focus:ring-kerem-200"
+              />
+            )}
           </div>
+
+          {isFree && (
+            <Alert variant="info">הגמ״ח במודל חינם — לא ייגבו דמי השאלה על כלי זה.</Alert>
+          )}
+
+          {kind.pricingMode === "maintenance_only" && (
+            <Alert variant="info">
+              מודל תחזוקה בלבד — דמי השאלה לפי הגדרת הגמ״ח, לא לפי כלי.
+            </Alert>
+          )}
 
           {showFees && (
             <div className="grid grid-cols-2 gap-3">

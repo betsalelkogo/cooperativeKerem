@@ -135,7 +135,7 @@ export default function GemachAdminDashboardPage() {
       <AdminDashboardView
         data={data}
         title="לוח בקרה — גמ״ח"
-        description="סקירה של הכלים, השאלות והשמירות של הגמ״ח שלך."
+        description="סקירה של הכלים, השאלות והשריונים של הגמ״ח שלך."
         editableTools={data.gemach?.active !== false}
         gemachId={gemachId}
         getToken={getIdToken}

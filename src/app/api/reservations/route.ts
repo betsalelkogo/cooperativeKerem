@@ -6,10 +6,10 @@ import {
   getToolById,
   getGemachById,
   updateToolStatus,
-  resolveReservationFee,
+  pickAvailableToolUnits,
   pickAvailableToolUnit,
 } from "@/lib/firestore/repository";
-import { resolveGemachReservationMode } from "@/lib/gemach";
+import { resolveGemachReservationMode, resolveTotalReservationFee } from "@/lib/gemach";
 import {
   computeFixedHoursReservation,
   validateDateRangeReservation,
@@ -53,6 +53,7 @@ export async function POST(request: Request) {
     const {
       toolId,
       kindId,
+      quantity: quantityRaw,
       pickupDate,
       pickupTimeStart,
       pickupTimeEnd,
@@ -64,6 +65,7 @@ export async function POST(request: Request) {
     } = body as {
       toolId?: string;
       kindId?: string;
+      quantity?: number;
       pickupDate?: string;
       pickupTimeStart?: string;
       pickupTimeEnd?: string;
@@ -79,25 +81,37 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "נדרש מזהה כלי" }, { status: 400 });
     }
 
-    let tool = await pickAvailableToolUnit(catalogKey);
-    if (!tool) {
-      const direct = await getToolById(catalogKey);
-      if (direct?.status === "available") {
-        tool = direct;
+    const quantity = Math.min(Math.max(1, Number(quantityRaw) || 1), 500);
+
+    let units = await pickAvailableToolUnits(catalogKey, quantity);
+    if (units.length < quantity) {
+      const single = await pickAvailableToolUnit(catalogKey);
+      if (single && units.length === 0) {
+        units = [single];
       }
     }
 
-    if (!tool) {
+    if (units.length === 0) {
       return NextResponse.json({ error: "אין יחידה זמינה מסוג זה כרגע" }, { status: 409 });
     }
 
+    if (units.length < quantity) {
+      return NextResponse.json(
+        {
+          error: `רק ${units.length} יחידות זמינות — נסו כמות קטנה יותר`,
+        },
+        { status: 409 }
+      );
+    }
+
+    const tool = units[0];
     const gemach = await getGemachById(tool.gemachId);
     if (!gemach) {
       return NextResponse.json({ error: "גמ״ח לא נמצא" }, { status: 404 });
     }
 
     if (!gemach.active) {
-      return NextResponse.json({ error: "הגמ״ח סגור — לא ניתן לשמור כלים" }, { status: 403 });
+      return NextResponse.json({ error: "הגמ״ח סגור — לא ניתן לשריין כלים" }, { status: 403 });
     }
 
     const mode = resolveGemachReservationMode(gemach);
@@ -155,11 +169,22 @@ export async function POST(request: Request) {
       };
     }
 
-    const feeAmount = resolveReservationFee(gemach, tool);
+    const { feeAmount, cooperativeFeeAmount } = resolveTotalReservationFee(
+      gemach,
+      tool,
+      units.length
+    );
+    const kindIdResolved = tool.kindId ?? tool.id;
+    const toolIds = units.map((u) => u.id);
+    const groupId = toolIds.length > 1 ? `grp-${Date.now()}` : undefined;
 
     const reservation = await createReservation({
       memberId,
-      toolId: tool.id,
+      toolId: toolIds[0],
+      kindId: kindIdResolved,
+      quantity: toolIds.length,
+      toolIds,
+      groupId,
       pickupDate: schedule.pickupDate,
       pickupTimeStart: schedule.pickupTimeStart,
       pickupTimeEnd: schedule.pickupTimeEnd,
@@ -169,9 +194,10 @@ export async function POST(request: Request) {
       loanDurationHours: schedule.loanDurationHours,
       status: "confirmed",
       feeAmount,
+      cooperativeFeeAmount,
     });
 
-    await updateToolStatus(tool.id, "reserved");
+    await Promise.all(toolIds.map((id) => updateToolStatus(id, "reserved")));
 
     return NextResponse.json(reservation, { status: 201 });
   } catch {

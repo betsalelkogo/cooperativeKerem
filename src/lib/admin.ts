@@ -3,7 +3,14 @@ import type { Member, MemberRole } from "@/lib/types";
 export const DEFAULT_MEMBER_ROLE: MemberRole = "MEMBER";
 
 export function normalizeMemberRole(value: unknown): MemberRole {
-  if (value === "ADMIN" || value === "GEMACH_ADMIN") return value;
+  if (
+    value === "ADMIN" ||
+    value === "GEMACH_ADMIN" ||
+    value === "BOARD" ||
+    value === "DISPUTE_RESOLVER"
+  ) {
+    return value;
+  }
   return "MEMBER";
 }
 
@@ -52,7 +59,19 @@ export function canAdminGemach(
 }
 
 export function isAdminMember(member: { role: MemberRole }): boolean {
-  return member.role === "ADMIN" || member.role === "GEMACH_ADMIN";
+  return (
+    member.role === "ADMIN" ||
+    member.role === "GEMACH_ADMIN" ||
+    member.role === "BOARD"
+  );
+}
+
+export function isBoardMember(member: { role: MemberRole }): boolean {
+  return member.role === "BOARD" || member.role === "ADMIN";
+}
+
+export function isDisputeResolver(member: { role: MemberRole }): boolean {
+  return member.role === "DISPUTE_RESOLVER" || member.role === "ADMIN";
 }
 
 export function canAccessAdminPath(
@@ -61,6 +80,12 @@ export function canAccessAdminPath(
 ): boolean {
   if (pathname.startsWith("/admin/gemach")) {
     return isPlatformAdmin(member) || isGemachScopedAdmin(member);
+  }
+  if (pathname.startsWith("/admin/board") || pathname.startsWith("/admin/finance")) {
+    return isBoardMember(member);
+  }
+  if (pathname.startsWith("/admin/disputes")) {
+    return isDisputeResolver(member) || isBoardMember(member);
   }
   return isPlatformAdmin(member);
 }

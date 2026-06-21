@@ -88,14 +88,14 @@ export default function MyLoansContent() {
             <span className="mb-4 inline-block text-5xl">🔧</span>
             <p className="text-lg font-semibold text-stone-800">אין השאלות עדיין</p>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              השאלה מתחילה אחרי שמירה ולקיחה מהשמירות שלי.
+              השאלה מתחילה אחרי שריון ולקיחה מהשריונים שלי.
             </p>
             <div className="mt-6 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
               <Link
                 href="/my-reservations"
                 className="inline-flex items-center gap-2 rounded-xl border border-kerem-200 bg-kerem-50 px-5 py-2.5 text-sm font-semibold text-kerem-800 transition hover:bg-kerem-100"
               >
-                לשמירות שלי
+                לשריונים שלי
               </Link>
               <Link
                 href="/tools"
@@ -142,9 +142,9 @@ export default function MyLoansContent() {
       )}
 
       <p className="mt-8 text-center text-sm text-[var(--muted)]">
-        יש שמירה שטרם לקחתם?{" "}
+        יש שריון שטרם לקחתם?{" "}
         <Link href="/my-reservations" className="font-semibold text-kerem-700 underline">
-          עברו לשמירות שלי
+          עברו לשריונים שלי
         </Link>
       </p>
     </div>

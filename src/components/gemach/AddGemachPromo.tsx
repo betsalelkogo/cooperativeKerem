@@ -17,7 +17,7 @@ export function AddGemachPromo() {
         <div>
           <p className="text-lg font-bold text-stone-900">יש לכם גמ״ח קהילתי?</p>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            הוסיפו אותו לפלטפורמת כרם רעים — כלים, שמירות ולוח בקרה משלכם.
+            הוסיפו אותו לפלטפורמת כרם רעים — כלים, שריונים ולוח בקרה משלכם.
           </p>
         </div>
         <Link

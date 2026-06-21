@@ -23,6 +23,11 @@ export async function POST(request: Request) {
       kindId,
       defaultLoanHours,
       maxLoanHours,
+      location,
+      brand,
+      supplier,
+      purpose,
+      productAge,
     } = body as {
       gemachId?: string;
       name?: string;
@@ -34,6 +39,11 @@ export async function POST(request: Request) {
       kindId?: string;
       defaultLoanHours?: number;
       maxLoanHours?: number;
+      location?: string;
+      brand?: string;
+      supplier?: string;
+      purpose?: string;
+      productAge?: number;
     };
 
     const gemachId = resolveGemachAdminScope(auth.member, requestedGemachId ?? null);
@@ -64,6 +74,11 @@ export async function POST(request: Request) {
       defaultLoanHours:
         defaultLoanHours !== undefined ? Number(defaultLoanHours) : undefined,
       maxLoanHours: maxLoanHours !== undefined ? Number(maxLoanHours) : undefined,
+      location: location?.trim() || undefined,
+      brand: brand?.trim() || undefined,
+      supplier: supplier?.trim() || undefined,
+      purpose: purpose?.trim() || undefined,
+      productAge: productAge !== undefined ? Number(productAge) : undefined,
       createdBy: auth.uid,
     });
 

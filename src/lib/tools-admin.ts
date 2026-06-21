@@ -7,8 +7,13 @@ export const TOOL_CATEGORIES = [
   "גישה",
   "תינוקות וילדים",
   "גינון",
+  "ריהוט ואירועים",
+  "כיסאות ושולחנות",
   "אחר",
 ] as const;
+
+/** Max physical units per tool kind (e.g. 150 chairs as one catalog row). */
+export const MAX_TOOL_UNITS = 500;
 
 export const DEFAULT_SAFETY_RULES: SafetyRule[] = [
   { id: "sr-default-1", text: "קראתי את הוראות השימוש" },
@@ -56,8 +61,8 @@ export function validateToolInput(params: {
     return "יש לבחור קטגוריה";
   }
   const qty = Number(params.quantity);
-  if (!Number.isFinite(qty) || qty < 1 || qty > 50) {
-    return "כמות יחידות חייבת להיות בין 1 ל-50";
+  if (!Number.isFinite(qty) || qty < 1 || qty > MAX_TOOL_UNITS) {
+    return `כמות יחידות חייבת להיות בין 1 ל-${MAX_TOOL_UNITS}`;
   }
   return null;
 }

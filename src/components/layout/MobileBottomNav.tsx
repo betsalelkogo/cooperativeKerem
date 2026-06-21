@@ -10,7 +10,7 @@ const baseTabs = [
   { href: "/tools", label: "כלים", icon: "🔧", match: (p: string) => p.startsWith("/tools") },
   {
     href: "/my-reservations",
-    label: "שמירות",
+    label: "שריונים",
     icon: "📅",
     match: (p: string) => p.startsWith("/my-reservations"),
   },
