@@ -1,11 +1,12 @@
 import type { Reservation } from "@/lib/types";
+import { formatReservationDateTimeHe, reservationDateTime } from "@/lib/israel-time";
 
 /** Hours after scheduled pickup start before a no-show reservation is cancelled. */
 export const PICKUP_NO_SHOW_HOURS = 2;
 
 export function reservationPickupStart(reservation: Reservation): Date {
   const time = reservation.pickupTimeStart ?? "00:00";
-  return new Date(`${reservation.pickupDate}T${time}:00`);
+  return reservationDateTime(reservation.pickupDate, time);
 }
 
 /** Last moment the borrower may pick up before the reservation is auto-cancelled. */

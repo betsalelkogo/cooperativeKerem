@@ -1,4 +1,5 @@
 import type { Gemach, Tool } from "@/lib/types";
+import { reservationDateTime } from "@/lib/israel-time";
 import {
   resolveToolDefaultLoanHours,
   resolveToolMaxLoanHours,
@@ -33,8 +34,8 @@ export function addHoursToTime(start: string, hours: number): string {
 }
 
 function addDaysToDate(dateStr: string, days: number): string {
-  const d = new Date(`${dateStr}T00:00:00`);
-  d.setDate(d.getDate() + days);
+  const d = reservationDateTime(dateStr, "00:00");
+  d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().split("T")[0];
 }
 
@@ -116,7 +117,7 @@ export function validateFixedHoursReservation(
     return `משך ההשאלה חייב להיות בין ${minH} ל-${maxH} שעות`;
   }
 
-  const start = new Date(`${pickupDate}T${pickupTimeStart}:00`);
+  const start = reservationDateTime(pickupDate, pickupTimeStart);
   if (Number.isNaN(start.getTime())) {
     return "תאריך או שעה לא תקינים";
   }
@@ -182,7 +183,7 @@ export function validateDateRangeReservation(input: {
     }
   }
 
-  const start = new Date(`${input.pickupDate}T${input.pickupTimeStart}:00`);
+  const start = reservationDateTime(input.pickupDate, input.pickupTimeStart);
   if (!Number.isNaN(start.getTime()) && start.getTime() < Date.now()) {
     return "לא ניתן לשמור לעבר — בחרו זמן עתידי";
   }

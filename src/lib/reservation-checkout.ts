@@ -4,6 +4,7 @@ import {
   reservationCheckoutDeadline,
   reservationPickupStart,
 } from "@/lib/reservation-expiry";
+import { formatReservationDateTimeHe } from "@/lib/israel-time";
 
 export function reservationPickupWindowStart(reservation: Reservation, now = new Date()): Date {
   return reservationPickupStart(reservation);
@@ -39,15 +40,9 @@ export function canStartCheckout(
   const windowEnd = reservationPickupWindowEnd(reservation);
 
   if (now.getTime() < windowStart.getTime()) {
-    const startLabel = windowStart.toLocaleString("he-IL", {
-      day: "numeric",
-      month: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
     return {
       allowed: false,
-      reason: `ניתן להתחיל לקיחה החל מ-${startLabel}`,
+      reason: `ניתן להתחיל לקיחה החל מ-${formatReservationDateTimeHe(windowStart)}`,
     };
   }
 

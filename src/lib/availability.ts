@@ -1,4 +1,5 @@
 import type { Loan, Reservation, Tool } from "@/lib/types";
+import { reservationDateTime } from "@/lib/israel-time";
 
 export interface ReservationWindow {
   pickupDate: string;
@@ -9,12 +10,12 @@ export interface ReservationWindow {
 
 function windowStartMs(w: ReservationWindow): number {
   const t = w.pickupTimeStart ?? "00:00";
-  return new Date(`${w.pickupDate}T${t}:00`).getTime();
+  return reservationDateTime(w.pickupDate, t).getTime();
 }
 
 function windowEndMs(w: ReservationWindow): number {
   const t = w.returnTimeEnd ?? "23:59";
-  return new Date(`${w.returnDate}T${t}:00`).getTime();
+  return reservationDateTime(w.returnDate, t).getTime();
 }
 
 function windowsOverlap(a: ReservationWindow, b: ReservationWindow): boolean {

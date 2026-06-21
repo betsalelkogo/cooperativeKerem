@@ -1,4 +1,5 @@
 import type { Reservation } from "@/lib/types";
+import { reservationDateTime } from "@/lib/israel-time";
 import { parseTimeToMinutes } from "@/lib/reservation-times";
 
 export function getLateFeePerHour(): number {
@@ -13,7 +14,7 @@ export function scheduledReturnAt(reservation: Pick<
   "returnDate" | "returnTimeEnd" | "returnTimeStart"
 >): Date {
   const time = reservation.returnTimeEnd ?? reservation.returnTimeStart ?? "23:59";
-  return new Date(`${reservation.returnDate}T${time}:00`);
+  return reservationDateTime(reservation.returnDate, time);
 }
 
 export function computeLateness(
