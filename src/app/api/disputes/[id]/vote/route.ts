@@ -5,7 +5,7 @@ import {
   submitMediatorDecision,
   getMemberById,
 } from "@/lib/firestore/repository";
-import { isDisputeResolver } from "@/lib/admin";
+import { canVoteOnDispute } from "@/lib/admin";
 import type { MediatorDecision } from "@/lib/types";
 
 export async function POST(
@@ -19,8 +19,8 @@ export async function POST(
     }
 
     const member = await getMemberById(memberId);
-    if (!member || !isDisputeResolver(member)) {
-      return NextResponse.json({ error: "אין הרשאה" }, { status: 403 });
+    if (!member) {
+      return NextResponse.json({ error: "משתמש לא נמצא" }, { status: 403 });
     }
 
     const { id } = await params;
@@ -38,6 +38,10 @@ export async function POST(
     const dispute = await getDisputeById(id);
     if (!dispute) {
       return NextResponse.json({ error: "המחלוקת לא נמצאה" }, { status: 404 });
+    }
+
+    if (!canVoteOnDispute(member, dispute)) {
+      return NextResponse.json({ error: "אין הרשאה" }, { status: 403 });
     }
 
     const updated = await submitMediatorDecision({

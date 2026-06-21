@@ -2,6 +2,8 @@ import { FieldValue, type DocumentData } from "firebase-admin/firestore";
 import { getAdminDb, omitUndefined } from "@/lib/firebase/admin-app";
 import type {
   AdminDashboardData,
+  AdminDisputeDetail,
+  AdminDisputeSummary,
   AdminMemberHistory,
   AdminMemberSummary,
   BoardDashboardData,
@@ -83,7 +85,7 @@ import {
   DEFAULT_SAFETY_RULES,
   validateToolInput,
 } from "@/lib/tools-admin";
-import { pickRandomMediators } from "@/lib/disputes";
+import { disputeProgressLabel, isDisputeOpen, pickRandomMediators } from "@/lib/disputes";
 import { countUnitsAvailableInWindow } from "@/lib/availability";
 import { isReservationNoShowExpired } from "@/lib/reservation-expiry";
 import type { DefectCategory } from "@/lib/types";
@@ -2445,6 +2447,161 @@ export async function getDisputeById(id: string): Promise<Dispute | null> {
   const snap = await getAdminDb().collection("disputes").doc(id).get();
   if (!snap.exists) return null;
   return disputeFromDoc(snap.id, snap.data()!);
+}
+
+function filterDisputesForViewer(
+  disputes: Dispute[],
+  viewerId: string,
+  viewAll: boolean
+): Dispute[] {
+  if (viewAll) return disputes;
+  return disputes.filter((d) => d.mediatorIds.includes(viewerId));
+}
+
+export async function listDisputesForAdmin(params: {
+  viewerId: string;
+  viewAll: boolean;
+}): Promise<AdminDisputeSummary[]> {
+  const [disputes, tools, members] = await Promise.all([
+    getAllDisputes(),
+    getAllTools(),
+    listMembers(),
+  ]);
+  const toolMap = new Map(tools.map((t) => [t.id, t]));
+  const memberMap = new Map(members.map((m) => [m.id, m]));
+
+  return filterDisputesForViewer(disputes, params.viewerId, params.viewAll)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .map((d) => ({
+      id: d.id,
+      toolName: toolMap.get(d.toolId)?.name ?? d.toolId,
+      memberName: memberMap.get(d.memberId)?.name ?? d.memberId,
+      status: d.status,
+      progressLabel: disputeProgressLabel(d),
+      createdAt: d.createdAt,
+      isOpen: isDisputeOpen(d.status),
+    }));
+}
+
+function buildDisputeMediators(
+  dispute: Dispute,
+  memberMap: Map<string, { name: string }>,
+  viewerId: string,
+  showAllVotes: boolean
+): AdminDisputeDetail["mediators"] {
+  const resolved = !isDisputeOpen(dispute.status);
+  return dispute.mediatorIds.map((id) => {
+    const decision = dispute.mediatorDecisions?.[id];
+    const showDecision = resolved || showAllVotes || id === viewerId;
+    return {
+      id,
+      name: memberMap.get(id)?.name ?? id,
+      ...(showDecision && decision ? { decision } : {}),
+    };
+  });
+}
+
+export async function getDisputeDetailForAdmin(params: {
+  disputeId: string;
+  viewerId: string;
+  viewAll: boolean;
+  canVote: boolean;
+  canAssignMediators: boolean;
+}): Promise<AdminDisputeDetail | null> {
+  const dispute = await getDisputeById(params.disputeId);
+  if (!dispute) return null;
+
+  if (
+    !params.viewAll &&
+    !dispute.mediatorIds.includes(params.viewerId)
+  ) {
+    return null;
+  }
+
+  const [tool, member, loan] = await Promise.all([
+    getToolById(dispute.toolId),
+    getMemberById(dispute.memberId),
+    getLoanById(dispute.loanId),
+  ]);
+  const members = await listMembers();
+  const memberMap = new Map(members.map((m) => [m.id, m]));
+
+  return {
+    id: dispute.id,
+    loanId: dispute.loanId,
+    toolId: dispute.toolId,
+    toolName: tool?.name ?? dispute.toolId,
+    memberId: dispute.memberId,
+    memberName: member?.name ?? dispute.memberId,
+    memberEmail: member?.email ?? "",
+    gemachId: dispute.gemachId,
+    status: dispute.status,
+    progressLabel: disputeProgressLabel(dispute),
+    defect: dispute.defect,
+    damageAmount: dispute.damageAmount,
+    mediators: buildDisputeMediators(
+      dispute,
+      memberMap,
+      params.viewerId,
+      params.viewAll
+    ),
+    createdAt: dispute.createdAt,
+    resolvedAt: dispute.resolvedAt,
+    canVote: params.canVote,
+    canAssignMediators: params.canAssignMediators,
+    myDecision: dispute.mediatorDecisions?.[params.viewerId],
+    loan: {
+      checkoutPhotoUrl: loan?.checkoutPhotoUrl,
+      returnPhotoUrl: loan?.returnPhotoUrl,
+      checkoutConditionNotes: loan?.checkoutConditionNotes,
+      returnConditionNotes: loan?.returnConditionNotes,
+      checkedOutAt: loan?.checkedOutAt,
+      returnedAt: loan?.returnedAt,
+    },
+  };
+}
+
+export async function updateDisputeMediators(
+  disputeId: string,
+  mediatorIds: string[]
+): Promise<Dispute> {
+  const db = getAdminDb();
+  const ref = db.collection("disputes").doc(disputeId);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error("המחלוקת לא נמצאה");
+
+  const dispute = disputeFromDoc(snap.id, snap.data()!);
+  const unique = [
+    ...new Set(
+      mediatorIds.filter(
+        (id) => typeof id === "string" && id.trim() && id !== dispute.memberId
+      )
+    ),
+  ];
+
+  if (unique.length === 0) {
+    throw new Error("נדרש לפחות מיישב אחד");
+  }
+  if (unique.length > 3) {
+    throw new Error("ניתן לשבץ עד 3 מיישבים");
+  }
+
+  for (const id of unique) {
+    const member = await getMemberById(id);
+    if (!member) throw new Error(`חבר לא נמצא: ${id}`);
+  }
+
+  const status: DisputeStatus =
+    unique.length > 0 ? "mediators_assigned" : "new";
+
+  await ref.update({
+    mediatorIds: unique,
+    status,
+    mediatorDecisions: FieldValue.delete(),
+  });
+
+  const updated = await ref.get();
+  return disputeFromDoc(updated.id, updated.data()!);
 }
 
 export async function submitMediatorDecision(params: {

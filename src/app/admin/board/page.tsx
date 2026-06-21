@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
@@ -73,13 +74,18 @@ export default function BoardLogisticsPage() {
           ) : (
             <ul className="divide-y divide-[var(--border)]">
               {recentDisputes.map((d) => (
-                <li key={d.id} className="flex justify-between gap-4 py-3 text-sm">
-                  <span>
-                    {d.toolName} · {d.memberName}
-                  </span>
-                  <span className="text-[var(--muted)]">
-                    {DISPUTE_STATUS_LABELS[d.status]}
-                  </span>
+                <li key={d.id} className="py-3 text-sm">
+                  <Link
+                    href={`/admin/disputes?id=${encodeURIComponent(d.id)}`}
+                    className="flex justify-between gap-4 transition hover:text-kerem-800"
+                  >
+                    <span>
+                      {d.toolName} · {d.memberName}
+                    </span>
+                    <span className="text-[var(--muted)]">
+                      {DISPUTE_STATUS_LABELS[d.status]}
+                    </span>
+                  </Link>
                 </li>
               ))}
             </ul>

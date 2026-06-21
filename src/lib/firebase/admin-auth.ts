@@ -4,6 +4,8 @@ import { getMemberById } from "@/lib/firestore/repository";
 import {
   canAdminGemach,
   isAdminMember,
+  isBoardMember,
+  isDisputeResolver,
   isGemachAdmin,
   isPlatformAdmin,
 } from "@/lib/admin";
@@ -46,6 +48,23 @@ export async function requirePlatformAdmin(
 
   if (!isPlatformAdmin(auth.member)) {
     return NextResponse.json({ error: "גישה למנהל פלטפורמה בלבד" }, { status: 403 });
+  }
+
+  return auth;
+}
+
+export async function requireDisputeViewer(
+  request: Request
+): Promise<{ uid: string; member: Member } | NextResponse> {
+  const auth = await requireAuthenticatedMember(request);
+  if (auth instanceof NextResponse) return auth;
+
+  if (
+    !isPlatformAdmin(auth.member) &&
+    !isBoardMember(auth.member) &&
+    !isDisputeResolver(auth.member)
+  ) {
+    return NextResponse.json({ error: "אין הרשאה" }, { status: 403 });
   }
 
   return auth;

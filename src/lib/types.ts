@@ -258,6 +258,52 @@ export interface Dispute {
   createdAt: string;
 }
 
+export interface AdminDisputeSummary {
+  id: string;
+  toolName: string;
+  memberName: string;
+  status: DisputeStatus;
+  progressLabel: string;
+  createdAt: string;
+  isOpen: boolean;
+}
+
+export interface AdminDisputeMediator {
+  id: string;
+  name: string;
+  /** Visible after resolution or for own vote during deliberation. */
+  decision?: MediatorDecision;
+}
+
+export interface AdminDisputeDetail {
+  id: string;
+  loanId: string;
+  toolId: string;
+  toolName: string;
+  memberId: string;
+  memberName: string;
+  memberEmail: string;
+  gemachId: string;
+  status: DisputeStatus;
+  progressLabel: string;
+  defect: DefectRecord;
+  damageAmount?: number;
+  mediators: AdminDisputeMediator[];
+  createdAt: string;
+  resolvedAt?: string;
+  canVote: boolean;
+  canAssignMediators: boolean;
+  myDecision?: MediatorDecision;
+  loan: {
+    checkoutPhotoUrl?: string;
+    returnPhotoUrl?: string;
+    checkoutConditionNotes?: string;
+    returnConditionNotes?: string;
+    checkedOutAt?: string;
+    returnedAt?: string;
+  };
+}
+
 export interface LateReturnFee {
   id: string;
   loanId: string;

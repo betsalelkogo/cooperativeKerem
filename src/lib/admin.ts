@@ -1,4 +1,5 @@
 import type { Member, MemberRole } from "@/lib/types";
+import { isDisputeOpen } from "@/lib/disputes";
 
 export const DEFAULT_MEMBER_ROLE: MemberRole = "MEMBER";
 
@@ -72,6 +73,27 @@ export function isBoardMember(member: { role: MemberRole }): boolean {
 
 export function isDisputeResolver(member: { role: MemberRole }): boolean {
   return member.role === "DISPUTE_RESOLVER" || member.role === "ADMIN";
+}
+
+export function canViewDisputesAdmin(member: { role: MemberRole }): boolean {
+  return (
+    isPlatformAdmin(member) ||
+    isBoardMember(member) ||
+    isDisputeResolver(member)
+  );
+}
+
+export function canAssignDisputeMediators(member: { role: MemberRole }): boolean {
+  return isPlatformAdmin(member);
+}
+
+export function canVoteOnDispute(
+  member: { id: string; role: MemberRole },
+  dispute: { mediatorIds: string[]; status: import("@/lib/types").DisputeStatus }
+): boolean {
+  if (!dispute.mediatorIds.includes(member.id)) return false;
+  if (!isDisputeOpen(dispute.status)) return false;
+  return isDisputeResolver(member) || isBoardMember(member);
 }
 
 export function canAccessAdminPath(

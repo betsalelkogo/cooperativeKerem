@@ -3,10 +3,21 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthProvider";
-import { isPlatformAdmin, isGemachScopedAdmin, hasOwnedGemachim } from "@/lib/admin";
+import {
+  isPlatformAdmin,
+  isGemachScopedAdmin,
+  hasOwnedGemachim,
+  isBoardMember,
+} from "@/lib/admin";
 import { cn } from "@/lib/cn";
 import { useSelectedGemachId } from "@/hooks/useSelectedGemachId";
 import { GemachSelector } from "@/components/admin/GemachSelector";
+
+const disputesTab = {
+  href: "/admin/disputes",
+  label: "מחלוקות",
+  match: (p: string) => p.startsWith("/admin/disputes"),
+};
 
 const platformTabs = [
   { href: "/admin", label: "לוח בקרה", match: (p: string) => p === "/admin" },
@@ -14,6 +25,13 @@ const platformTabs = [
   { href: "/admin/pots", label: "קופות", match: (p: string) => p.startsWith("/admin/pots") },
   { href: "/admin/board", label: "לוגיסטיקה", match: (p: string) => p.startsWith("/admin/board") },
   { href: "/admin/finance", label: "כספים", match: (p: string) => p.startsWith("/admin/finance") },
+  disputesTab,
+];
+
+const boardTabs = [
+  { href: "/admin/board", label: "לוגיסטיקה", match: (p: string) => p.startsWith("/admin/board") },
+  { href: "/admin/finance", label: "כספים", match: (p: string) => p.startsWith("/admin/finance") },
+  disputesTab,
 ];
 
 const gemachTabPaths = [
@@ -42,16 +60,27 @@ export function AdminNav() {
 
   const isGemachRoute = pathname.startsWith("/admin/gemach");
   const showPlatform = member && isPlatformAdmin(member) && !isGemachRoute;
+  const showBoard =
+    member && isBoardMember(member) && !isPlatformAdmin(member) && !isGemachRoute;
+  const showDisputeResolverOnly =
+    member &&
+    member.role === "DISPUTE_RESOLVER" &&
+    !isBoardMember(member) &&
+    !isPlatformAdmin(member);
   const showGemach =
     member &&
     isGemachScopedAdmin(member) &&
-    (isGemachRoute || !isPlatformAdmin(member));
+    (isGemachRoute || (!isPlatformAdmin(member) && !showBoard && !showDisputeResolverOnly));
 
   const tabs: { href: string; label: string; match: (p: string) => boolean }[] = showPlatform
     ? platformTabs
-    : showGemach
-      ? gemachTabPaths.map((tab) => ({ ...tab, href: hrefWithGemachId(tab.path) }))
-      : platformTabs;
+    : showBoard
+      ? boardTabs
+      : showDisputeResolverOnly
+        ? [disputesTab]
+        : showGemach
+          ? gemachTabPaths.map((tab) => ({ ...tab, href: hrefWithGemachId(tab.path) }))
+          : platformTabs;
 
   return (
     <>

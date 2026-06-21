@@ -1,5 +1,15 @@
 import type { Dispute, DisputeStatus, MediatorDecision } from "@/lib/types";
 
+const OPEN_DISPUTE_STATUSES: DisputeStatus[] = [
+  "new",
+  "mediators_assigned",
+  "deliberating",
+];
+
+export function isDisputeOpen(status: DisputeStatus): boolean {
+  return OPEN_DISPUTE_STATUSES.includes(status);
+}
+
 export const DISPUTE_STATUS_LABELS: Record<DisputeStatus, string> = {
   new: "חדשה",
   mediators_assigned: "נבחרו מיישבים",
@@ -18,6 +28,12 @@ export function disputeProgressLabel(dispute: Dispute): string {
   if (dispute.status === "deliberating") return `${decided} מתוך ${total} מיישבים הכריעו`;
   return DISPUTE_STATUS_LABELS[dispute.status];
 }
+
+export const MEDIATOR_DECISION_LABELS: Record<MediatorDecision, string> = {
+  charge_member: "חייב חבר",
+  waive_member: "פטור חבר",
+  abstain: "נמנע",
+};
 
 export function tallyMediatorVotes(
   decisions: Record<string, MediatorDecision>
