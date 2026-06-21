@@ -42,7 +42,7 @@ export default function PlatformEditToolPage() {
       }
     }
     if (kindId) load();
-  }, [kindId, getIdToken]);
+  }, [kindId, gemachId, getIdToken]);
 
   if (loading) {
     return (

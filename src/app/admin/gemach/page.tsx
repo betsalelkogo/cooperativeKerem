@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
@@ -35,15 +35,7 @@ export default function GemachAdminDashboardPage() {
     }
   }, []);
 
-  useEffect(() => {
-    if (!gemachId) {
-      setLoading(false);
-      return;
-    }
-    loadDashboard();
-  }, [gemachId, getIdToken]);
-
-  async function loadDashboard() {
+  const loadDashboard = useCallback(async () => {
     if (!gemachId) return;
     setLoading(true);
     try {
@@ -63,7 +55,15 @@ export default function GemachAdminDashboardPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [gemachId, getIdToken]);
+
+  useEffect(() => {
+    if (!gemachId) {
+      setLoading(false);
+      return;
+    }
+    loadDashboard();
+  }, [gemachId, loadDashboard]);
 
   if (!gemachId && !loading) {
     return (

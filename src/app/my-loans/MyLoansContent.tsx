@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -24,7 +24,7 @@ export default function MyLoansContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  async function loadLoans() {
+  const loadLoans = useCallback(async () => {
     const token = await getIdToken();
     if (!token) return;
 
@@ -34,7 +34,7 @@ export default function MyLoansContent() {
       throw new Error(data.error ?? "שגיאה בטעינת השאלות");
     }
     setLoans(await res.json());
-  }
+  }, [getIdToken]);
 
   useEffect(() => {
     if (!user) return;
@@ -48,7 +48,7 @@ export default function MyLoansContent() {
       }
     }
     load();
-  }, [user, getIdToken]);
+  }, [user, loadLoans]);
 
   if (loading) return <ActivityLoading />;
 

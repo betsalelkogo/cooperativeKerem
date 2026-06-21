@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -24,7 +24,7 @@ export default function MyReservationsContent() {
   const [error, setError] = useState("");
   const [cancellingId, setCancellingId] = useState<string | null>(null);
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
     const token = await getIdToken();
     if (!token) return;
 
@@ -34,7 +34,7 @@ export default function MyReservationsContent() {
       throw new Error(data.error ?? "שגיאה בטעינת שמירות");
     }
     setReservations(await res.json());
-  }
+  }, [getIdToken]);
 
   useEffect(() => {
     if (!user) return;
@@ -48,7 +48,7 @@ export default function MyReservationsContent() {
       }
     }
     load();
-  }, [user, getIdToken]);
+  }, [user, loadData]);
 
   async function handleCancelReservation(reservationId: string) {
     const confirmed = window.confirm(

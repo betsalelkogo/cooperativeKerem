@@ -233,7 +233,7 @@ export default function AdminMembersPage() {
                             ` · לקיחה: ${formatDateHe(loan.checkedOutAt, true)}`}
                           {loan.returnedAt &&
                             ` · החזרה: ${formatDateHe(loan.returnedAt, true)}`}
-                          {loan.additionalPhotoCount > 0 &&
+                          {(loan.additionalPhotoCount ?? 0) > 0 &&
                             ` · ${loan.additionalPhotoCount} צילומים נוספים`}
                         </p>
                         {(loan.checkoutPhotoUrl || loan.returnPhotoUrl) && (
