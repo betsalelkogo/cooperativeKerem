@@ -1280,6 +1280,8 @@ export async function getAdminDashboard(options?: {
         status: loan.status,
         checkedOutAt: loan.checkedOutAt,
         dueReturnDate: loan.dueReturnDate,
+        checkoutPhotoUrl: loan.checkoutPhotoUrl,
+        returnPhotoUrl: loan.returnPhotoUrl,
       };
     }),
     problemReports,
@@ -1351,6 +1353,9 @@ export async function getMemberHistory(memberId: string): Promise<AdminMemberHis
       checkedOutAt: loan.checkedOutAt,
       dueReturnDate: loan.dueReturnDate,
       returnedAt: loan.returnedAt,
+      checkoutPhotoUrl: loan.checkoutPhotoUrl,
+      returnPhotoUrl: loan.returnPhotoUrl,
+      additionalPhotoCount: loan.additionalPhotoUrls?.length ?? 0,
     })),
     reservations: sortedReservations.map((reservation) => ({
       id: reservation.id,
@@ -1412,6 +1417,7 @@ export async function createLoanFromCheckout(params: {
   checkoutPhotoUrl: string;
   checkoutConditionNotes?: string;
   checkoutItemsChecked?: string[];
+  loanId?: string;
 }): Promise<Loan> {
   const payment =
     params.reservation.feeAmount > 0
@@ -1423,7 +1429,7 @@ export async function createLoanFromCheckout(params: {
 
   const db = getAdminDb();
   const split = splitPayment(params.reservation.feeAmount);
-  const loanId = newId("loan");
+  const loanId = params.loanId ?? newId("loan");
   const txnId = newId("txn");
 
   const loan: Loan = {

@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Alert } from "@/components/ui/Alert";
 import { authFetch } from "@/lib/api-client";
-import { PLATFORM_GEMACH_ID } from "@/lib/gemach";
-import type { AdminDashboardToolKindRow } from "@/lib/types";
+import { buildGemachFilterOptions, PLATFORM_GEMACH_ID } from "@/lib/gemach";
+import type { AdminDashboardToolKindRow, Gemach } from "@/lib/types";
 
 interface AdminToolKindsTableProps {
   tools: AdminDashboardToolKindRow[];
@@ -15,6 +15,7 @@ interface AdminToolKindsTableProps {
   /** When set, edit/status actions only appear for this gemach's tools. */
   cooperativeOnly?: boolean;
   gemachId?: string;
+  gemachim?: Gemach[];
   getToken: () => Promise<string | null>;
   onUpdated?: () => void;
 }
@@ -25,12 +26,39 @@ export function AdminToolKindsTable({
   editable = false,
   cooperativeOnly = false,
   gemachId,
+  gemachim = [],
   getToken,
   onUpdated,
 }: AdminToolKindsTableProps) {
   const [expandedKind, setExpandedKind] = useState<string | null>(null);
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [selectedGemachId, setSelectedGemachId] = useState("");
+
+  const filterOptions = useMemo(
+    () =>
+      showGemachColumn
+        ? buildGemachFilterOptions(
+            tools.map((t) => ({
+              gemachId: t.gemachId,
+              gemachName: t.gemachName,
+              isPartnerGemach: t.gemachId !== PLATFORM_GEMACH_ID,
+            })),
+            gemachim
+          )
+        : [],
+    [tools, gemachim, showGemachColumn]
+  );
+
+  const filteredTools =
+    !showGemachColumn || selectedGemachId === ""
+      ? tools
+      : tools.filter((t) => t.gemachId === selectedGemachId);
+
+  const selectedHasNoTools =
+    selectedGemachId !== "" &&
+    filteredTools.length === 0 &&
+    filterOptions.some((o) => o.gemachId === selectedGemachId);
 
   async function updateKindStatus(kindId: string, status: "available" | "disabled" | "maintenance") {
     if (!gemachId) return;
@@ -84,6 +112,39 @@ export function AdminToolKindsTable({
         </Alert>
       )}
       <h2 className="mb-4 text-lg font-bold text-stone-900">כלים — מצב נוכחי</h2>
+      {showGemachColumn && filterOptions.length > 1 && (
+        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div className="flex-1 sm:max-w-xs">
+            <label
+              htmlFor="admin-tools-gemach-filter"
+              className="mb-1.5 block text-sm font-bold text-stone-900"
+            >
+              סינון לפי גמ״ח
+            </label>
+            <select
+              id="admin-tools-gemach-filter"
+              value={selectedGemachId}
+              onChange={(e) => {
+                setSelectedGemachId(e.target.value);
+                setExpandedKind(null);
+              }}
+              className="w-full rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm font-medium text-stone-800 focus:border-kerem-500 focus:outline-none focus:ring-2 focus:ring-kerem-200"
+            >
+              <option value="">כל הגמ״חים</option>
+              {filterOptions.map((option) => (
+                <option key={option.gemachId} value={option.gemachId}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          {selectedGemachId !== "" && (
+            <p className="text-sm text-[var(--muted)]">
+              מציג {filteredTools.length} מתוך {tools.length} סוגי כלים
+            </p>
+          )}
+        </div>
+      )}
       <div className="overflow-x-auto rounded-xl border border-[var(--border)] bg-white shadow-sm">
         <table className="w-full min-w-[640px] text-sm">
           <thead>
@@ -110,8 +171,26 @@ export function AdminToolKindsTable({
                   אין כלים במערכת
                 </td>
               </tr>
+            ) : selectedHasNoTools ? (
+              <tr>
+                <td
+                  colSpan={(showGemachColumn ? 5 : 4) + (editable ? 1 : 0)}
+                  className="px-4 py-8 text-center text-[var(--muted)]"
+                >
+                  לגמ״ח זה עדיין לא נוספו כלים.
+                </td>
+              </tr>
+            ) : filteredTools.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={(showGemachColumn ? 5 : 4) + (editable ? 1 : 0)}
+                  className="px-4 py-8 text-center text-[var(--muted)]"
+                >
+                  אין כלים התואמים את הסינון.
+                </td>
+              </tr>
             ) : (
-              tools.map((tool) => {
+              filteredTools.map((tool) => {
                 const isExpanded = expandedKind === tool.kindId;
                 const busy = loadingKey?.startsWith(tool.kindId);
                 const canEdit =

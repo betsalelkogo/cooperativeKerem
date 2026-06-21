@@ -27,6 +27,38 @@ export function gemachFilterLabel(gemach: Pick<Gemach, "id" | "name" | "isPlatfo
   return gemach.name;
 }
 
+export interface GemachFilterOption {
+  gemachId: string;
+  label: string;
+}
+
+/** Build gemach filter dropdown options (catalog + admin tools tables). */
+export function buildGemachFilterOptions(
+  rows: Array<{ gemachId: string; gemachName?: string; isPartnerGemach?: boolean }>,
+  gemachim: Gemach[] = []
+): GemachFilterOption[] {
+  const byId = new Map<string, GemachFilterOption>();
+
+  for (const gemach of gemachim) {
+    byId.set(gemach.id, { gemachId: gemach.id, label: gemachFilterLabel(gemach) });
+  }
+
+  for (const row of rows) {
+    if (byId.has(row.gemachId)) continue;
+    const isPlatform = row.gemachId === PLATFORM_GEMACH_ID || !row.isPartnerGemach;
+    byId.set(row.gemachId, {
+      gemachId: row.gemachId,
+      label: isPlatform ? COOPERATIVE_FILTER_LABEL : (row.gemachName ?? row.gemachId),
+    });
+  }
+
+  return [...byId.values()].sort((a, b) => {
+    if (a.label === COOPERATIVE_FILTER_LABEL) return -1;
+    if (b.label === COOPERATIVE_FILTER_LABEL) return 1;
+    return a.label.localeCompare(b.label, "he");
+  });
+}
+
 export function normalizeGemachId(value: unknown): string {
   return typeof value === "string" && value ? value : PLATFORM_GEMACH_ID;
 }

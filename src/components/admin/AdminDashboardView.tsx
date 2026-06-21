@@ -12,6 +12,7 @@ import { gemachPricingModeLabels } from "@/lib/gemach";
 import { formatNIS } from "@/lib/pots";
 import { AdminToolKindsTable } from "@/components/admin/AdminToolKindsTable";
 import { ProblemReportsPanel } from "@/components/admin/ProblemReportsPanel";
+import { LoanPhotoThumb } from "@/components/admin/LoanPhotoThumb";
 import type { AdminDashboardData } from "@/lib/types";
 
 function StatCard({ label, value, accent }: { label: string; value: number; accent?: string }) {
@@ -237,6 +238,7 @@ export function AdminDashboardView({
         editable={editableTools}
         cooperativeOnly={cooperativeOnly}
         gemachId={gemachId}
+        gemachim={data.gemachim}
         getToken={getToken ?? (async () => null)}
         onUpdated={onToolsUpdated ?? onRefresh}
       />
@@ -303,6 +305,16 @@ export function AdminDashboardView({
                     <span className="block">לקיחה בפועל: {formatDateTime(loan.checkedOutAt)}</span>
                     <span className="block">החזרה מתוכננת: {formatDay(loan.dueReturnDate)}</span>
                   </p>
+                  {(loan.checkoutPhotoUrl || loan.returnPhotoUrl) && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {loan.checkoutPhotoUrl && (
+                        <LoanPhotoThumb url={loan.checkoutPhotoUrl} label="לקיחה" />
+                      )}
+                      {loan.returnPhotoUrl && (
+                        <LoanPhotoThumb url={loan.returnPhotoUrl} label="החזרה" />
+                      )}
+                    </div>
+                  )}
                 </CardBody>
               </Card>
             ))}

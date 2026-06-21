@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getUidFromRequest } from "@/lib/firebase/admin";
-import { completeLoanReturn, getLoanById, getMemberById } from "@/lib/firestore/repository";
+import { completeLoanReturn, getLoanById } from "@/lib/firestore/repository";
 import {
   isCloudinaryConfigured,
   cloudinaryNotConfiguredMessage,
@@ -52,11 +52,8 @@ export async function POST(request: Request) {
     }
 
     const buffer = await readImageUpload(photo);
-    const member = await getMemberById(loan.memberId);
-    const memberName =
-      member?.name ?? member?.email?.split("@")[0] ?? loan.memberId.slice(0, 8);
     const returnPhotoUrl = await uploadLoanReturnPhoto({
-      memberName,
+      loanId,
       buffer,
     });
 

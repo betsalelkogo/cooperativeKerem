@@ -234,6 +234,8 @@ export interface AdminDashboardLoan {
   status: LoanStatus;
   checkedOutAt?: string;
   dueReturnDate?: string;
+  checkoutPhotoUrl?: string;
+  returnPhotoUrl?: string;
 }
 
 export interface AdminDashboardReservation {
@@ -368,6 +370,9 @@ export interface AdminMemberHistory {
     checkedOutAt?: string;
     dueReturnDate?: string;
     returnedAt?: string;
+    checkoutPhotoUrl?: string;
+    returnPhotoUrl?: string;
+    additionalPhotoCount?: number;
   }>;
   reservations: Array<{
     id: string;

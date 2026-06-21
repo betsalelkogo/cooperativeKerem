@@ -4,7 +4,6 @@ import {
   createLoanFromCheckout,
   getReservationById,
   getToolById,
-  getMemberById,
 } from "@/lib/firestore/repository";
 import {
   isCloudinaryConfigured,
@@ -61,10 +60,9 @@ export async function POST(request: Request) {
     }
 
     const buffer = await readImageUpload(photo);
-    const member = await getMemberById(memberId);
-    const memberName = member?.name ?? member?.email?.split("@")[0] ?? "user";
+    const loanId = `loan-${Date.now()}`;
     const checkoutPhotoUrl = await uploadLoanCheckoutPhoto({
-      memberName,
+      loanId,
       buffer,
     });
 
@@ -73,6 +71,7 @@ export async function POST(request: Request) {
       checkoutPhotoUrl,
       checkoutConditionNotes: checkoutConditionNotes ?? undefined,
       checkoutItemsChecked,
+      loanId,
     });
 
     return NextResponse.json(loan, { status: 201 });

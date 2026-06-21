@@ -74,28 +74,6 @@ export async function readImageUpload(file: File): Promise<Buffer> {
   return Buffer.from(await file.arrayBuffer());
 }
 
-function loanPhotoDate(at: Date): string {
-  return at.toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
-}
-
-/** `{userName}_{YYYY-MM-DD}_loan` or `_return` — for tracking in Cloudinary. */
-export function buildLoanPhotoPublicId(
-  memberName: string,
-  suffix: "loan" | "return",
-  at: Date = new Date()
-): string {
-  const date = loanPhotoDate(at);
-  const name = memberName
-    .trim()
-    .replace(/\s+/g, "_")
-    .replace(/[/\\?#%]/g, "_")
-    .replace(/_+/g, "_")
-    .replace(/^_|_$/g, "");
-
-  const safeName = name || "user";
-  return `${safeName}_${date}_${suffix}`;
-}
-
 export async function uploadToolKindImage(params: {
   gemachId: string;
   kindId: string;
@@ -110,28 +88,26 @@ export async function uploadToolKindImage(params: {
 }
 
 export async function uploadLoanCheckoutPhoto(params: {
-  memberName: string;
+  loanId: string;
   buffer: Buffer;
-  at?: Date;
 }): Promise<string> {
   return uploadCloudinaryImage({
     folder: "kerem/loans",
-    publicId: buildLoanPhotoPublicId(params.memberName, "loan", params.at),
+    publicId: `${sanitizePublicId(params.loanId)}/checkout`,
     buffer: params.buffer,
-    overwrite: false,
+    overwrite: true,
   });
 }
 
 export async function uploadLoanReturnPhoto(params: {
-  memberName: string;
+  loanId: string;
   buffer: Buffer;
-  at?: Date;
 }): Promise<string> {
   return uploadCloudinaryImage({
     folder: "kerem/loans",
-    publicId: buildLoanPhotoPublicId(params.memberName, "return", params.at),
+    publicId: `${sanitizePublicId(params.loanId)}/return`,
     buffer: params.buffer,
-    overwrite: false,
+    overwrite: true,
   });
 }
 

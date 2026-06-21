@@ -8,6 +8,7 @@ import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
 import { loanStatusLabels, reservationStatusLabels } from "@/lib/labels";
 import { formatDateHe } from "@/lib/dates";
+import { LoanPhotoThumb } from "@/components/admin/LoanPhotoThumb";
 import type { AdminMemberHistory, AdminMemberSummary, MemberRole } from "@/lib/types";
 
 const roleLabels: Record<MemberRole, string> = {
@@ -232,7 +233,19 @@ export default function AdminMembersPage() {
                             ` · לקיחה: ${formatDateHe(loan.checkedOutAt, true)}`}
                           {loan.returnedAt &&
                             ` · החזרה: ${formatDateHe(loan.returnedAt, true)}`}
+                          {loan.additionalPhotoCount > 0 &&
+                            ` · ${loan.additionalPhotoCount} צילומים נוספים`}
                         </p>
+                        {(loan.checkoutPhotoUrl || loan.returnPhotoUrl) && (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {loan.checkoutPhotoUrl && (
+                              <LoanPhotoThumb url={loan.checkoutPhotoUrl} label="לקיחה" />
+                            )}
+                            {loan.returnPhotoUrl && (
+                              <LoanPhotoThumb url={loan.returnPhotoUrl} label="החזרה" />
+                            )}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

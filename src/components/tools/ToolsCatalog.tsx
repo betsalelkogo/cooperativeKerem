@@ -2,45 +2,8 @@
 
 import { useMemo, useState } from "react";
 import type { Gemach, ToolKindWithAvailability } from "@/lib/types";
-import { COOPERATIVE_FILTER_LABEL, gemachFilterLabel } from "@/lib/gemach";
+import { buildGemachFilterOptions } from "@/lib/gemach";
 import { ToolCard } from "@/components/tools/ToolCard";
-
-interface GemachFilterOption {
-  gemachId: string;
-  label: string;
-}
-
-function buildFilterOptions(
-  kinds: ToolKindWithAvailability[],
-  gemachim: Gemach[]
-): GemachFilterOption[] {
-  const byId = new Map<string, GemachFilterOption>();
-
-  for (const gemach of gemachim) {
-    if (!gemach.active) continue;
-    byId.set(gemach.id, {
-      gemachId: gemach.id,
-      label: gemachFilterLabel(gemach),
-    });
-  }
-
-  for (const kind of kinds) {
-    if (byId.has(kind.gemachId)) continue;
-    const isPlatform = !kind.isPartnerGemach;
-    byId.set(kind.gemachId, {
-      gemachId: kind.gemachId,
-      label: isPlatform
-        ? COOPERATIVE_FILTER_LABEL
-        : (kind.gemachName ?? kind.gemachId),
-    });
-  }
-
-  return [...byId.values()].sort((a, b) => {
-    if (a.label === COOPERATIVE_FILTER_LABEL) return -1;
-    if (b.label === COOPERATIVE_FILTER_LABEL) return 1;
-    return a.label.localeCompare(b.label, "he");
-  });
-}
 
 interface ToolsCatalogProps {
   kinds: ToolKindWithAvailability[];
@@ -49,7 +12,7 @@ interface ToolsCatalogProps {
 
 export function ToolsCatalog({ kinds, gemachim = [] }: ToolsCatalogProps) {
   const filterOptions = useMemo(
-    () => buildFilterOptions(kinds, gemachim),
+    () => buildGemachFilterOptions(kinds, gemachim.filter((g) => g.active)),
     [kinds, gemachim]
   );
   const [selectedGemachId, setSelectedGemachId] = useState("");
