@@ -18,3 +18,6 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "שגיאת שרת" }, { status: 500 });
   }
 }
+
+
+
