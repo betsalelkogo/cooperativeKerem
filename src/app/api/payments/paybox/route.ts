@@ -11,6 +11,7 @@ import {
   markPaymentPaid,
   getAdminDb,
 } from "@/lib/firestore/repository";
+import type { MemberPayment } from "@/lib/types";
 import { createGrowPaymentLink } from "@/lib/paybox/grow";
 import { isGrowConfigured } from "@/lib/paybox/config";
 import { partnerUsesOwnPaybox, resolveCheckoutPayboxUrl } from "@/lib/paybox/gemach-paybox";
@@ -105,11 +106,33 @@ export async function POST(request: Request) {
     let growPaymentUrl: string | undefined;
     let provider: "paybox_group" | "grow" = "paybox_group";
 
-    const payment = await createMemberPayment({
-      reservation,
-      payboxGroupUrl: groupUrl,
-      provider,
-    });
+    // A member may have already applied internal balance to this reservation.
+    // Reuse that pending payment and only charge the uncovered remainder.
+    const pending = await getPendingPaymentForReservation(reservationId);
+    const creditApplied = pending?.creditApplied ?? 0;
+    const remaining = Math.max(0, reservation.feeAmount - creditApplied);
+
+    if (remaining <= 0) {
+      const settled = pending
+        ? await markPaymentPaid(pending.id)
+        : await getPaidPaymentForReservation(reservationId);
+      return NextResponse.json(settled);
+    }
+
+    let payment: MemberPayment;
+    if (pending) {
+      await getAdminDb()
+        .collection("payments")
+        .doc(pending.id)
+        .update({ payboxGroupUrl: groupUrl, provider });
+      payment = { ...pending, payboxGroupUrl: groupUrl, provider };
+    } else {
+      payment = await createMemberPayment({
+        reservation,
+        payboxGroupUrl: groupUrl,
+        provider,
+      });
+    }
 
     const useGrow =
       !partnerUsesOwnPaybox(gemach) && isGrowConfigured() && fullName && phone;
@@ -117,7 +140,7 @@ export async function POST(request: Request) {
     if (useGrow) {
       const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
       const grow = await createGrowPaymentLink({
-        amount: reservation.feeAmount,
+        amount: remaining,
         title: `דמי השאלה — ${tool?.name ?? "כלי"}`,
         productName: tool?.name ?? "השאלת כלי",
         fullName,

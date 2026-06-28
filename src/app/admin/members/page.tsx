@@ -8,8 +8,14 @@ import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
 import { loanStatusLabels, reservationStatusLabels } from "@/lib/labels";
 import { formatDateHe } from "@/lib/dates";
+import { formatNIS } from "@/lib/pots";
 import { LoanPhotoThumb } from "@/components/admin/LoanPhotoThumb";
-import type { AdminMemberHistory, AdminMemberSummary, MemberRole } from "@/lib/types";
+import type {
+  AdminMemberHistory,
+  AdminMemberSummary,
+  CreditLedgerReason,
+  MemberRole,
+} from "@/lib/types";
 
 const roleLabels: Record<MemberRole, string> = {
   ADMIN: "מנהל פלטפורמה",
@@ -17,6 +23,13 @@ const roleLabels: Record<MemberRole, string> = {
   BOARD: "דירקטוריון",
   DISPUTE_RESOLVER: "מיישב מחלוקות",
   MEMBER: "חבר",
+};
+
+const creditReasonLabels: Record<CreditLedgerReason, string> = {
+  manual_adjustment: "עדכון ידני",
+  tool_sale: "מכירת כלי לקואופרטיב",
+  refund: "החזר",
+  payment_debit: "תשלום מהיתרה",
 };
 
 export default function AdminMembersPage() {
@@ -28,6 +41,11 @@ export default function AdminMembersPage() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState("");
   const [roleUpdating, setRoleUpdating] = useState(false);
+  const [creditAmount, setCreditAmount] = useState("");
+  const [creditSign, setCreditSign] = useState<"add" | "subtract">("add");
+  const [creditReason, setCreditReason] = useState<CreditLedgerReason>("manual_adjustment");
+  const [creditNote, setCreditNote] = useState("");
+  const [creditUpdating, setCreditUpdating] = useState(false);
 
   useEffect(() => {
     async function loadMembers() {
@@ -72,6 +90,53 @@ export default function AdminMembersPage() {
       setError(err instanceof Error ? err.message : "שגיאה");
     } finally {
       setLoadingDetail(false);
+    }
+  }
+
+  async function adjustCredit(memberId: string) {
+    const magnitude = Number(creditAmount);
+    if (!Number.isFinite(magnitude) || magnitude <= 0) {
+      setError("יש להזין סכום חיובי");
+      return;
+    }
+    const delta = creditSign === "subtract" ? -magnitude : magnitude;
+
+    setCreditUpdating(true);
+    setError("");
+    try {
+      const token = await getIdToken();
+      const res = await authFetch(
+        `/api/admin/members/${encodeURIComponent(memberId)}/credit`,
+        {
+          method: "POST",
+          token,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ delta, note: creditNote, reason: creditReason }),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "עדכון היתרה נכשל");
+
+      setSelected((prev) =>
+        prev
+          ? {
+              ...prev,
+              member: { ...prev.member, creditBalance: data.creditBalance },
+              creditLedger: data.ledger ?? prev.creditLedger,
+            }
+          : prev
+      );
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.id === memberId ? { ...m, creditBalance: data.creditBalance } : m
+        )
+      );
+      setCreditAmount("");
+      setCreditNote("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "שגיאה");
+    } finally {
+      setCreditUpdating(false);
     }
   }
 
@@ -212,6 +277,111 @@ export default function AdminMembersPage() {
                       </button>
                     )}
                   </div>
+                </CardBody>
+              </Card>
+
+              <Card className="border-kerem-200">
+                <CardBody className="py-4">
+                  <div className="flex items-baseline justify-between">
+                    <h3 className="font-bold text-stone-900">יתרה פנימית</h3>
+                    <span className="text-2xl font-extrabold text-kerem-800">
+                      {formatNIS(selected.member.creditBalance)}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-[var(--muted)]">
+                    יתרה לשימוש בתשלום דמי השאלה. ניתן לעדכון על ידי מנהל פלטפורמה בלבד
+                    (למשל הוספת קרדיט עבור מכירת כלי לקואופרטיב).
+                  </p>
+
+                  <div className="mt-4 grid gap-2 sm:grid-cols-[auto,1fr]">
+                    <div className="flex gap-2">
+                      <select
+                        value={creditSign}
+                        onChange={(e) =>
+                          setCreditSign(e.target.value as "add" | "subtract")
+                        }
+                        className="rounded-xl border border-[var(--border)] bg-white px-3 py-2 text-sm"
+                      >
+                        <option value="add">הוספה +</option>
+                        <option value="subtract">הפחתה −</option>
+                      </select>
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        inputMode="decimal"
+                        value={creditAmount}
+                        onChange={(e) => setCreditAmount(e.target.value)}
+                        placeholder="סכום ₪"
+                        className="w-28 rounded-xl border border-[var(--border)] px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <select
+                      value={creditReason}
+                      onChange={(e) =>
+                        setCreditReason(e.target.value as CreditLedgerReason)
+                      }
+                      className="rounded-xl border border-[var(--border)] bg-white px-3 py-2 text-sm"
+                    >
+                      <option value="manual_adjustment">עדכון ידני</option>
+                      <option value="tool_sale">מכירת כלי לקואופרטיב</option>
+                      <option value="refund">החזר</option>
+                    </select>
+                  </div>
+                  <input
+                    type="text"
+                    value={creditNote}
+                    onChange={(e) => setCreditNote(e.target.value)}
+                    placeholder="הערה (למשל: הערת שווי מקדחה ₪300)"
+                    className="mt-2 w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm"
+                  />
+                  <button
+                    type="button"
+                    disabled={creditUpdating}
+                    onClick={() => adjustCredit(selected.member.id)}
+                    className="mt-3 rounded-lg bg-kerem-700 px-4 py-2 text-sm font-semibold text-white hover:bg-kerem-800 disabled:opacity-50"
+                  >
+                    {creditUpdating ? "מעדכן…" : "עדכון יתרה"}
+                  </button>
+
+                  {selected.creditLedger.length > 0 && (
+                    <div className="mt-4">
+                      <h4 className="mb-1 text-xs font-bold text-stone-700">
+                        תנועות אחרונות
+                      </h4>
+                      <div className="max-h-48 space-y-1 overflow-y-auto">
+                        {selected.creditLedger.map((entry) => (
+                          <div
+                            key={entry.id}
+                            className="flex items-center justify-between rounded-lg border border-[var(--border)] bg-white px-3 py-1.5 text-xs"
+                          >
+                            <div>
+                              <span className="font-medium text-stone-800">
+                                {creditReasonLabels[entry.reason]}
+                              </span>
+                              {entry.note && (
+                                <span className="text-[var(--muted)]"> · {entry.note}</span>
+                              )}
+                              <span className="block text-[var(--muted)]">
+                                {formatDateHe(entry.createdAt, true)} · יתרה:{" "}
+                                {formatNIS(entry.balanceAfter)}
+                              </span>
+                            </div>
+                            <span
+                              className={
+                                entry.delta >= 0
+                                  ? "font-bold text-emerald-700"
+                                  : "font-bold text-red-700"
+                              }
+                            >
+                              {entry.delta >= 0 ? "+" : "−"}
+                              {formatNIS(Math.abs(entry.delta))}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </CardBody>
               </Card>
 

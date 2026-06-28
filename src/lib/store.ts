@@ -59,6 +59,7 @@ export const mockMember: Member = {
   email: "member@example.com",
   hasPaymentMethod: true,
   role: "MEMBER",
+  creditBalance: 0,
 };
 
 export const mockReservations: Reservation[] = [];

@@ -13,6 +13,7 @@ export async function upsertMemberFromUser(user: User): Promise<Member> {
       email: user.email ?? "",
       hasPaymentMethod: false,
       role: DEFAULT_MEMBER_ROLE,
+      creditBalance: 0,
     };
   }
 
@@ -47,6 +48,10 @@ export async function upsertMemberFromUser(user: User): Promise<Member> {
     hasPaymentMethod: memberData.hasPaymentMethod,
     role,
     gemachAdminIds,
+    creditBalance:
+      existing.exists() && typeof existing.data().creditBalance === "number"
+        ? (existing.data().creditBalance as number)
+        : 0,
   };
 }
 
@@ -65,5 +70,6 @@ export async function getMember(uid: string): Promise<Member | null> {
     hasPaymentMethod: (data.hasPaymentMethod as boolean) ?? false,
     role: roleFromMemberData(data),
     gemachAdminIds: gemachAdminIdsFromData(data),
+    creditBalance: typeof data.creditBalance === "number" ? data.creditBalance : 0,
   };
 }

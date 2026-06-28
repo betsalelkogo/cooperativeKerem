@@ -7,6 +7,7 @@ import type {
   AdminMemberHistory,
   AdminMemberSummary,
   BoardDashboardData,
+  CreditLedgerEntry,
   DefectRecord,
   Dispute,
   DisputeStatus,
@@ -1368,6 +1369,11 @@ export async function getAllLoans(): Promise<Loan[]> {
 
 // ─── Members ───────────────────────────────────────────────────────────────
 
+function memberCreditBalance(data: DocumentData): number {
+  const value = data.creditBalance;
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
 function memberFromDoc(id: string, data: DocumentData): Member {
   return {
     id,
@@ -1376,6 +1382,7 @@ function memberFromDoc(id: string, data: DocumentData): Member {
     hasPaymentMethod: (data.hasPaymentMethod as boolean) ?? false,
     role: roleFromMemberData(data),
     gemachAdminIds: gemachAdminIdsFromData(data),
+    creditBalance: memberCreditBalance(data),
   };
 }
 
@@ -1422,6 +1429,7 @@ export async function syncMemberFromAuth(params: {
       : false,
     role,
     gemachAdminIds: existing.exists ? gemachAdminIdsFromData(existingData ?? {}) : [],
+    creditBalance: existing.exists ? memberCreditBalance(existingData ?? {}) : 0,
   };
 }
 
@@ -1637,6 +1645,7 @@ export async function listMembers(query?: string): Promise<AdminMemberSummary[]>
       email: m.email,
       role: m.role,
       gemachAdminIds: m.gemachAdminIds,
+      creditBalance: m.creditBalance,
     }));
 }
 
@@ -1663,6 +1672,8 @@ export async function getMemberHistory(memberId: string): Promise<AdminMemberHis
     (a, b) => b.createdAt.localeCompare(a.createdAt)
   );
 
+  const creditLedger = await getMemberCreditLedger(memberId);
+
   return {
     member: {
       id: member.id,
@@ -1670,7 +1681,9 @@ export async function getMemberHistory(memberId: string): Promise<AdminMemberHis
       email: member.email,
       role: member.role,
       gemachAdminIds: member.gemachAdminIds,
+      creditBalance: member.creditBalance,
     },
+    creditLedger,
     loans: sortedLoans.map((loan) => ({
       id: loan.id,
       toolId: loan.toolId,
@@ -1721,7 +1734,211 @@ export async function updateMemberRole(
     email: member.email,
     role: member.role,
     gemachAdminIds: member.gemachAdminIds,
+    creditBalance: member.creditBalance,
   };
+}
+
+// ─── Internal credit balance ─────────────────────────────────────────────────
+
+function creditLedgerFromDoc(id: string, data: DocumentData): CreditLedgerEntry {
+  return {
+    id,
+    memberId: (data.memberId as string) ?? "",
+    delta: typeof data.delta === "number" ? data.delta : 0,
+    balanceAfter: typeof data.balanceAfter === "number" ? data.balanceAfter : 0,
+    reason: (data.reason as CreditLedgerEntry["reason"]) ?? "manual_adjustment",
+    note: typeof data.note === "string" ? data.note : undefined,
+    reservationId: typeof data.reservationId === "string" ? data.reservationId : undefined,
+    createdBy: (data.createdBy as string) ?? "",
+    createdAt: data.createdAt ? tsToIso(data.createdAt) : new Date().toISOString(),
+  };
+}
+
+export async function getMemberCreditLedger(
+  memberId: string,
+  limit = 50
+): Promise<CreditLedgerEntry[]> {
+  const snap = await getAdminDb()
+    .collection("credit_ledger")
+    .where("memberId", "==", memberId)
+    .get();
+
+  return snap.docs
+    .map((d) => creditLedgerFromDoc(d.id, d.data()))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, limit);
+}
+
+/**
+ * Apply a manual balance adjustment (platform admin only). Runs in a
+ * transaction so concurrent edits cannot corrupt the balance, and records
+ * every change in the credit ledger. Balance may not drop below zero.
+ */
+export async function adjustMemberCredit(params: {
+  memberId: string;
+  delta: number;
+  reason: CreditLedgerEntry["reason"];
+  note?: string;
+  createdBy: string;
+}): Promise<{ balance: number; entry: CreditLedgerEntry }> {
+  const { memberId, delta, reason, note, createdBy } = params;
+  if (!Number.isFinite(delta) || delta === 0) {
+    throw new Error("סכום העדכון אינו תקין");
+  }
+
+  const db = getAdminDb();
+  const memberRef = db.collection("members").doc(memberId);
+  const ledgerRef = db.collection("credit_ledger").doc(newId("cl"));
+
+  const balanceAfter = await db.runTransaction(async (txn) => {
+    const snap = await txn.get(memberRef);
+    if (!snap.exists) throw new Error("משתמש לא נמצא");
+
+    const current = memberCreditBalance(snap.data() ?? {});
+    const next = Math.round((current + delta) * 100) / 100;
+    if (next < 0) {
+      throw new Error("היתרה אינה יכולה לרדת מתחת לאפס");
+    }
+
+    txn.set(
+      memberRef,
+      { creditBalance: next, updatedAt: FieldValue.serverTimestamp() },
+      { merge: true }
+    );
+    txn.set(
+      ledgerRef,
+      omitUndefined({
+        id: ledgerRef.id,
+        memberId,
+        delta,
+        balanceAfter: next,
+        reason,
+        note,
+        createdBy,
+        createdAt: FieldValue.serverTimestamp(),
+      })
+    );
+
+    return next;
+  });
+
+  const entry = creditLedgerFromDoc(
+    ledgerRef.id,
+    (await ledgerRef.get()).data() ?? {}
+  );
+  return { balance: balanceAfter, entry };
+}
+
+/**
+ * Apply the member's internal balance toward a reservation's loan fee.
+ * Debits up to the available balance (partial allowed), records a ledger
+ * entry, and updates/creates the reservation payment. Idempotent: a payment
+ * that already has credit applied is returned unchanged.
+ */
+export async function applyCreditToReservationPayment(params: {
+  reservation: Reservation;
+  memberId: string;
+}): Promise<{
+  payment: MemberPayment;
+  creditApplied: number;
+  remaining: number;
+  paid: boolean;
+}> {
+  const { reservation, memberId } = params;
+  const fee = reservation.feeAmount;
+
+  const existingPaid = await getPaidPaymentForReservation(reservation.id);
+  if (existingPaid) {
+    return {
+      payment: existingPaid,
+      creditApplied: existingPaid.creditApplied ?? 0,
+      remaining: 0,
+      paid: true,
+    };
+  }
+
+  const db = getAdminDb();
+  const memberRef = db.collection("members").doc(memberId);
+  const pending = await getPendingPaymentForReservation(reservation.id);
+  const paymentId = pending?.id ?? newId("pay");
+  const paymentRef = db.collection("payments").doc(paymentId);
+  const ledgerRef = db.collection("credit_ledger").doc(newId("cl"));
+
+  await db.runTransaction(async (txn) => {
+    const memberSnap = await txn.get(memberRef);
+    const balance = memberCreditBalance(memberSnap.data() ?? {});
+    const paySnap = await txn.get(paymentRef);
+    const alreadyApplied =
+      paySnap.exists && typeof paySnap.data()?.creditApplied === "number"
+        ? (paySnap.data()!.creditApplied as number)
+        : 0;
+
+    if (alreadyApplied > 0) {
+      return; // idempotent — credit already applied to this payment
+    }
+
+    const creditApply = Math.min(balance, fee);
+    if (creditApply <= 0) {
+      throw new Error("אין יתרה זמינה לשימוש");
+    }
+
+    const balanceAfter = Math.round((balance - creditApply) * 100) / 100;
+    const remaining = Math.max(0, Math.round((fee - creditApply) * 100) / 100);
+    const paid = remaining <= 0;
+
+    txn.set(
+      memberRef,
+      { creditBalance: balanceAfter, updatedAt: FieldValue.serverTimestamp() },
+      { merge: true }
+    );
+    txn.set(ledgerRef, {
+      id: ledgerRef.id,
+      memberId,
+      delta: -creditApply,
+      balanceAfter,
+      reason: "payment_debit",
+      note: `תשלום מהיתרה הפנימית — השאלה ${reservation.id}`,
+      reservationId: reservation.id,
+      createdBy: memberId,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+
+    if (paySnap.exists) {
+      txn.update(
+        paymentRef,
+        omitUndefined({
+          creditApplied: creditApply,
+          ...(paid
+            ? {
+                status: "paid",
+                provider: "credit",
+                paidAt: FieldValue.serverTimestamp(),
+              }
+            : {}),
+        })
+      );
+    } else {
+      txn.set(paymentRef, {
+        id: paymentId,
+        reservationId: reservation.id,
+        memberId,
+        toolId: reservation.toolId,
+        amount: fee,
+        creditApplied: creditApply,
+        status: paid ? "paid" : "pending",
+        provider: paid ? "credit" : "paybox_group",
+        payboxGroupUrl: "",
+        createdAt: FieldValue.serverTimestamp(),
+        ...(paid ? { paidAt: FieldValue.serverTimestamp() } : {}),
+      });
+    }
+  });
+
+  const payment = await getPaymentById(paymentId);
+  if (!payment) throw new Error("התשלום לא נמצא");
+  const creditApplied = payment.creditApplied ?? 0;
+  const remaining = Math.max(0, Math.round((fee - creditApplied) * 100) / 100);
+  return { payment, creditApplied, remaining, paid: remaining <= 0 };
 }
 
 export async function getPotsOverviewForGemach(gemachId: string) {

@@ -369,6 +369,31 @@ export interface Member {
   role: MemberRole;
   /** Gemach IDs this member can admin (when role is GEMACH_ADMIN). */
   gemachAdminIds?: string[];
+  /** Internal usable balance (₪) — set manually by platform admins only. */
+  creditBalance: number;
+}
+
+export type CreditLedgerReason =
+  | "manual_adjustment"
+  | "tool_sale"
+  | "payment_debit"
+  | "refund";
+
+/** Audit entry for every change to a member's internal balance. */
+export interface CreditLedgerEntry {
+  id: string;
+  memberId: string;
+  /** Signed change in ₪ (positive = credit, negative = debit). */
+  delta: number;
+  /** Member balance after this entry was applied. */
+  balanceAfter: number;
+  reason: CreditLedgerReason;
+  note?: string;
+  /** Linked reservation for payment debits. */
+  reservationId?: string;
+  /** UID of the actor (platform admin for manual entries, member for debits). */
+  createdBy: string;
+  createdAt: string;
 }
 
 export interface AdminDashboardLoan {
@@ -513,10 +538,14 @@ export interface AdminMemberSummary {
   email: string;
   role: MemberRole;
   gemachAdminIds?: string[];
+  /** Internal usable balance (₪). */
+  creditBalance: number;
 }
 
 export interface AdminMemberHistory {
   member: AdminMemberSummary;
+  /** Recent internal-balance ledger entries (newest first). */
+  creditLedger: CreditLedgerEntry[];
   loans: Array<{
     id: string;
     toolId: string;
@@ -561,7 +590,7 @@ export interface PayboxSettings {
 }
 
 export type PaymentStatus = "pending" | "paid" | "failed";
-export type PaymentProvider = "paybox_group" | "grow";
+export type PaymentProvider = "paybox_group" | "grow" | "credit";
 
 export interface MemberPayment {
   id: string;
@@ -573,6 +602,8 @@ export interface MemberPayment {
   provider: PaymentProvider;
   payboxGroupUrl: string;
   growPaymentUrl?: string;
+  /** Portion of `amount` covered by the member's internal balance (₪). */
+  creditApplied?: number;
   createdAt: string;
   paidAt?: string;
 }

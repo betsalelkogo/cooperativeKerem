@@ -18,14 +18,14 @@ import { BackLink, PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
-import { useSelectedGemachId } from "@/hooks/useSelectedGemachId";
+import { useAdminGemachId } from "@/hooks/useAdminGemachId";
 import { withGemachIdQuery } from "@/lib/gemach-selection";
 import type { Gemach } from "@/lib/types";
 
 export default function AddGemachToolPage() {
   const router = useRouter();
-  const { member, getIdToken } = useAuth();
-  const { gemachId, hrefWithGemachId } = useSelectedGemachId();
+  const { getIdToken } = useAuth();
+  const { gemachId, isPlatformCoopEdit, hrefWithGemachId } = useAdminGemachId();
   const [justCreated, setJustCreated] = useState(false);
 
   useEffect(() => {
@@ -137,7 +137,11 @@ export default function AddGemachToolPage() {
         }
       }
 
-      router.push(withGemachIdQuery(`/admin/gemach?toolsAdded=${data.tools.length}`, gemachId));
+      router.push(
+        isPlatformCoopEdit
+          ? "/admin"
+          : withGemachIdQuery(`/admin/gemach?toolsAdded=${data.tools.length}`, gemachId)
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "משהו השתבש");
     } finally {
@@ -164,10 +168,12 @@ export default function AddGemachToolPage() {
 
   return (
     <div className="mx-auto max-w-lg">
-      <BackLink href={hrefWithGemachId("/admin/gemach")}>חזרה ללוח הבקרה</BackLink>
+      <BackLink href={isPlatformCoopEdit ? "/admin" : hrefWithGemachId("/admin/gemach")}>
+        {isPlatformCoopEdit ? "חזרה ללוח פלטפורמה" : "חזרה ללוח הבקרה"}
+      </BackLink>
 
       <PageHeader
-        title="הוספת כלי לגמ״ח"
+        title={isPlatformCoopEdit ? "הוספת כלי לקואופרטיב" : "הוספת כלי לגמ״ח"}
         description={
           gemach
             ? `${gemach.name} · ${gemachPricingModeLabels[gemach.pricingMode]}`

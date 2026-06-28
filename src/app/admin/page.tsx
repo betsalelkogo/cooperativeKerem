@@ -57,6 +57,12 @@ export default function AdminDashboardPage() {
           </Link>
         )}
         <Link
+          href={`/admin/gemach/tools/new?gemachId=${PLATFORM_GEMACH_ID}`}
+          className="rounded-xl bg-kerem-700 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:bg-kerem-800"
+        >
+          {"+ הוסף כלי לקואופרטיב"}
+        </Link>
+        <Link
           href="/gemach/new"
           className="rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:bg-amber-700"
         >

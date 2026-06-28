@@ -7,14 +7,23 @@ service cloud.firestore {
       allow create: if request.auth != null && request.auth.uid == userId
         && (!('role' in request.resource.data) || request.resource.data.role == "MEMBER")
         && (!('isAdmin' in request.resource.data) || request.resource.data.isAdmin == false)
-        && (!('gemachAdminIds' in request.resource.data));
+        && (!('gemachAdminIds' in request.resource.data))
+        && (!('creditBalance' in request.resource.data) || request.resource.data.creditBalance == 0);
       allow update: if request.auth != null && request.auth.uid == userId
         && (!('role' in request.resource.data)
             || request.resource.data.role == resource.data.get('role', "MEMBER"))
         && (!('isAdmin' in request.resource.data)
             || request.resource.data.isAdmin == resource.data.get('isAdmin', false))
         && (!('gemachAdminIds' in request.resource.data)
-            || request.resource.data.gemachAdminIds == resource.data.get('gemachAdminIds', []));
+            || request.resource.data.gemachAdminIds == resource.data.get('gemachAdminIds', []))
+        && (!('creditBalance' in request.resource.data)
+            || request.resource.data.creditBalance == resource.data.get('creditBalance', 0));
+    }
+
+    match /credit_ledger/{entryId} {
+      allow read: if request.auth != null
+        && resource.data.memberId == request.auth.uid;
+      allow write: if false;
     }
 
     match /gemachim/{gemachId} {

@@ -25,7 +25,7 @@ export function PayboxPaymentStep({
   toolName,
   onPaid,
 }: PayboxPaymentStepProps) {
-  const { user, member, getIdToken } = useAuth();
+  const { user, member, getIdToken, refreshMember } = useAuth();
   const [payment, setPayment] = useState<MemberPayment | null>(null);
   const [loading, setLoading] = useState(true);
   const [confirming, setConfirming] = useState(false);
@@ -33,6 +33,12 @@ export function PayboxPaymentStep({
   const [returnedToSite, setReturnedToSite] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
+  const [creditApplied, setCreditApplied] = useState(0);
+  const [applyingCredit, setApplyingCredit] = useState(false);
+
+  const balance = member?.creditBalance ?? 0;
+  const remaining = Math.max(0, Math.round((amount - creditApplied) * 100) / 100);
+  const hasPayUrl = Boolean(payment?.growPaymentUrl || payment?.payboxGroupUrl);
 
   const checkoutUrl =
     typeof window !== "undefined"
@@ -58,6 +64,7 @@ export function PayboxPaymentStep({
       }
       if (data.payment) {
         setPayment(data.payment);
+        setCreditApplied(data.payment.creditApplied ?? 0);
         if (sessionStorage.getItem(RETURN_KEY(reservationId))) {
           setOpenedPaybox(true);
         }
@@ -113,6 +120,37 @@ export function PayboxPaymentStep({
       setError(err instanceof Error ? err.message : "משהו השתבש");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function applyCredit() {
+    setApplyingCredit(true);
+    setError("");
+    try {
+      const token = await getIdToken();
+      const res = await authFetch("/api/payments/credit", {
+        method: "POST",
+        token,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reservationId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error ?? "השימוש ביתרה נכשל");
+      }
+
+      setCreditApplied(data.creditApplied ?? 0);
+      if (data.payment) setPayment(data.payment);
+      await refreshMember();
+
+      if (data.paid) {
+        sessionStorage.removeItem(RETURN_KEY(reservationId));
+        onPaid();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "משהו השתבש");
+    } finally {
+      setApplyingCredit(false);
     }
   }
 
@@ -190,9 +228,41 @@ export function PayboxPaymentStep({
             <p className="mt-2 text-sm text-[var(--muted)]">
               {toolName} · {formatNIS(amount)} · קבוצת «קאופורטיב טסט»
             </p>
+            {creditApplied > 0 && (
+              <p className="mt-1 text-sm font-semibold text-emerald-700">
+                שולם {formatNIS(creditApplied)} מהיתרה הפנימית · נותר לתשלום{" "}
+                {formatNIS(remaining)}
+              </p>
+            )}
           </div>
 
-          {!payment ? (
+          {creditApplied === 0 && balance > 0 && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+              <p className="text-sm font-semibold text-emerald-900">
+                יתרה פנימית זמינה: {formatNIS(balance)}
+              </p>
+              <p className="mt-1 text-xs text-emerald-800">
+                {balance >= amount
+                  ? "ניתן לשלם את כל דמי ההשאלה מהיתרה."
+                  : `ניתן לשלם ${formatNIS(balance)} מהיתרה — היתרה (${formatNIS(
+                      amount - balance
+                    )}) תשולם ב-PayBox.`}
+              </p>
+              <Button
+                type="button"
+                onClick={applyCredit}
+                disabled={applyingCredit}
+                className="mt-3 w-full bg-emerald-600 hover:bg-emerald-700"
+                size="lg"
+              >
+                {applyingCredit
+                  ? "מחיל יתרה…"
+                  : `שלם ${formatNIS(Math.min(balance, amount))} מהיתרה`}
+              </Button>
+            </div>
+          )}
+
+          {remaining <= 0 ? null : !hasPayUrl ? (
             <Button
               type="button"
               onClick={createPayment}
@@ -200,14 +270,16 @@ export function PayboxPaymentStep({
               className="w-full"
               size="lg"
             >
-              {loading ? "מכין תשלום…" : "המשך לתשלום ב-PayBox"}
+              {loading
+                ? "מכין תשלום…"
+                : `המשך לתשלום ${formatNIS(remaining)} ב-PayBox`}
             </Button>
           ) : (
             <div className="space-y-4">
               <ol className="space-y-2 rounded-xl bg-warm-50 p-4 text-sm leading-relaxed text-stone-700 ring-1 ring-[var(--border)]">
                 <li>
                   <span className="font-bold text-kerem-800">1.</span> לחצו «פתיחת PayBox»
-                  ושלמו {formatNIS(amount)} בקבוצה
+                  ושלמו {formatNIS(remaining)} בקבוצה
                 </li>
                 <li>
                   <span className="font-bold text-kerem-800">2.</span> חזרו לדפדפן — כרטיסייה
@@ -225,7 +297,7 @@ export function PayboxPaymentStep({
                 className="w-full bg-[#5C4DFF] hover:bg-[#4a3de6]"
                 size="lg"
               >
-                פתיחת PayBox לתשלום {formatNIS(amount)}
+                פתיחת PayBox לתשלום {formatNIS(remaining)}
               </Button>
 
               {openedPaybox && (

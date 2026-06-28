@@ -74,6 +74,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 email: firebaseUser.email ?? "",
                 hasPaymentMethod: false,
                 role: DEFAULT_MEMBER_ROLE,
+                creditBalance: 0,
               });
             }
           } else {
