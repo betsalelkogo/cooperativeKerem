@@ -209,6 +209,133 @@ export function LoanCard({ loan, tool, getToken, onPhotoAdded }: LoanCardProps) 
   );
 }
 
+interface LoanGroupCardProps {
+  items: LoanWithTool[];
+  getToken?: () => Promise<string | null>;
+  onPhotoAdded?: () => void;
+}
+
+/** Renders one or more identical loaned units as a single card with a count. */
+export function LoanGroupCard({ items, getToken, onPhotoAdded }: LoanGroupCardProps) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  if (items.length === 0) return null;
+
+  const { loan, tool } = items[0];
+  // A booking may be a single loan doc with a quantity, or (legacy) several docs.
+  const docCount = items.length;
+  const count = items.reduce((sum, i) => sum + (i.loan.quantity ?? 1), 0);
+  const loanIds = items.map((i) => i.loan.id);
+  const extraPhotos = items.reduce(
+    (sum, i) => sum + (i.loan.additionalPhotoUrls?.length ?? 0),
+    0
+  );
+
+  const returnHref =
+    docCount > 1
+      ? `/return/${loan.id}?loanIds=${encodeURIComponent(loanIds.join(","))}`
+      : `/return/${loan.id}`;
+
+  async function handleExtraPhoto(file: File) {
+    if (!getToken) return;
+    setUploading(true);
+    try {
+      const token = await getToken();
+      if (!token) return;
+      const compressed = await compressImageFile(file);
+      const formData = new FormData();
+      formData.append("photo", compressed, "photo.jpg");
+      const res = await authFetch(`/api/loans/${loan.id}/photos`, {
+        method: "POST",
+        token,
+        body: formData,
+      });
+      if (res.ok) onPhotoAdded?.();
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <Card className="transition hover:shadow-md">
+      <CardBody className="flex flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-4">
+          <span className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-warm-100 text-2xl">
+            🔧
+            {count > 1 && (
+              <span className="absolute -left-2 -top-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-kerem-700 px-1.5 text-xs font-bold text-white shadow">
+                ×{count}
+              </span>
+            )}
+          </span>
+          <div>
+            <p className="font-bold text-stone-900">
+              {tool?.name ?? loan.toolId}
+              {count > 1 && (
+                <span className="mr-2 text-sm font-semibold text-kerem-700">
+                  {" "}
+                  ({count} יחידות)
+                </span>
+              )}
+            </p>
+            <p className="text-sm text-[var(--muted)]">{loanStatusLabels[loan.status]}</p>
+            {loan.checkedOutAt && (
+              <p className="text-xs text-[var(--muted)]">
+                נלקח: {formatActivityDate(loan.checkedOutAt)}
+              </p>
+            )}
+            {loan.dueReturnDate && (
+              <p className="text-xs text-[var(--muted)]">
+                החזרה מתוכננת: {formatDateHe(loan.dueReturnDate)}
+              </p>
+            )}
+            {extraPhotos > 0 && (
+              <p className="text-xs text-sky-700">{extraPhotos} צילומים נוספים בתיעוד</p>
+            )}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {tool && <StatusBadge status={tool.status} />}
+          {loan.status === "active" && docCount === 1 && getToken && (
+            <>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void handleExtraPhoto(file);
+                  e.target.value = "";
+                }}
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={uploading}
+                onClick={() => fileRef.current?.click()}
+              >
+                {uploading ? "מעלה…" : "צילום נוסף"}
+              </Button>
+            </>
+          )}
+          {loan.status === "active" && (
+            <Link
+              href={returnHref}
+              className="rounded-xl bg-kerem-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-kerem-800"
+            >
+              {count > 1 ? `החזרה וסגירה (${count})` : "החזרה וסגירה"}
+            </Link>
+          )}
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
 export function ActivityLoading() {
   return (
     <div className="flex justify-center py-20">

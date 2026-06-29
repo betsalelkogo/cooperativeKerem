@@ -10,9 +10,24 @@ import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
 import {
   ActivityLoading,
-  LoanCard,
+  LoanGroupCard,
   type LoanWithTool,
 } from "@/components/my-activity/ActivityCards";
+
+/**
+ * Group loans by booking. A multi-unit loan is now a single document (carrying
+ * `quantity`); legacy data stored one doc per unit linked by `groupId`.
+ */
+function groupLoans(items: LoanWithTool[]): LoanWithTool[][] {
+  const groups = new Map<string, LoanWithTool[]>();
+  for (const item of items) {
+    const key = item.loan.groupId ?? item.loan.id;
+    const existing = groups.get(key);
+    if (existing) existing.push(item);
+    else groups.set(key, [item]);
+  }
+  return [...groups.values()];
+}
 
 export default function MyLoansContent() {
   const { getIdToken, user } = useAuth();
@@ -54,6 +69,8 @@ export default function MyLoansContent() {
 
   const activeLoans = loans.filter(({ loan }) => loan.status === "active");
   const pastLoans = loans.filter(({ loan }) => loan.status !== "active");
+  const activeGroups = groupLoans(activeLoans);
+  const pastGroups = groupLoans(pastLoans);
 
   return (
     <div>
@@ -108,15 +125,14 @@ export default function MyLoansContent() {
         </Card>
       ) : (
         <>
-          {activeLoans.length > 0 && (
+          {activeGroups.length > 0 && (
             <section className="mb-8">
               <h2 className="mb-3 text-base font-bold text-stone-900">השאלות פעילות</h2>
               <ul className="space-y-4">
-                {activeLoans.map(({ loan, tool }) => (
-                  <li key={loan.id}>
-                    <LoanCard
-                      loan={loan}
-                      tool={tool}
+                {activeGroups.map((group) => (
+                  <li key={group[0].loan.id}>
+                    <LoanGroupCard
+                      items={group}
                       getToken={getIdToken}
                       onPhotoAdded={loadLoans}
                     />
@@ -126,13 +142,13 @@ export default function MyLoansContent() {
             </section>
           )}
 
-          {pastLoans.length > 0 && (
+          {pastGroups.length > 0 && (
             <section>
               <h2 className="mb-3 text-base font-bold text-stone-900">היסטוריה</h2>
               <ul className="space-y-4">
-                {pastLoans.map(({ loan, tool }) => (
-                  <li key={loan.id}>
-                    <LoanCard loan={loan} tool={tool} />
+                {pastGroups.map((group) => (
+                  <li key={group[0].loan.id}>
+                    <LoanGroupCard items={group} />
                   </li>
                 ))}
               </ul>

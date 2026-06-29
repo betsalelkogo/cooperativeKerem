@@ -62,6 +62,21 @@ export function reservationDateTime(dateStr: string, timeStr = "00:00"): Date {
   return new Date(guess);
 }
 
+/** Current Israel wall-clock as a date string + minutes-since-midnight + HH:mm. */
+export function israelNowParts(now = new Date()): {
+  date: string;
+  minutes: number;
+  time: string;
+} {
+  const p = wallClockParts(now);
+  const date = `${String(p.year).padStart(4, "0")}-${String(p.month).padStart(2, "0")}-${String(
+    p.day
+  ).padStart(2, "0")}`;
+  const minutes = p.hour * 60 + p.minute;
+  const time = `${String(p.hour).padStart(2, "0")}:${String(p.minute).padStart(2, "0")}`;
+  return { date, minutes, time };
+}
+
 export function formatReservationDateTimeHe(date: Date): string {
   return date.toLocaleString("he-IL", {
     timeZone: COOP_TIMEZONE,

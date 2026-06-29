@@ -9,13 +9,19 @@ import {
   pickAvailableToolUnits,
   pickAvailableToolUnit,
 } from "@/lib/firestore/repository";
-import { resolveGemachReservationMode, resolveTotalReservationFee } from "@/lib/gemach";
+import {
+  resolveGemachReservationMode,
+  resolveTotalReservationFee,
+  resolveToolDefaultLoanHours,
+} from "@/lib/gemach";
 import {
   computeFixedHoursReservation,
+  minutesToTime,
   validateDateRangeReservation,
   validateFixedHoursReservation,
 } from "@/lib/reservation-times";
 import type { ReservationSchedule } from "@/lib/reservation-times";
+import { israelNowParts } from "@/lib/israel-time";
 
 export async function GET(request: Request) {
   try {
@@ -62,6 +68,7 @@ export async function POST(request: Request) {
       returnTimeEnd,
       loanDurationHours,
       date,
+      immediate,
     } = body as {
       toolId?: string;
       kindId?: string;
@@ -74,6 +81,7 @@ export async function POST(request: Request) {
       returnTimeEnd?: string;
       loanDurationHours?: number;
       date?: string;
+      immediate?: boolean;
     };
 
     const catalogKey = kindId ?? toolId;
@@ -117,7 +125,14 @@ export async function POST(request: Request) {
     const mode = resolveGemachReservationMode(gemach);
     let schedule: ReservationSchedule;
 
-    if (mode === "fixed_hours") {
+    if (immediate) {
+      // Walk-in loan: book "now" so checkout can start immediately. Start a few
+      // minutes in the past to keep the pickup window open; duration = default.
+      const { date: todayIL, minutes } = israelNowParts();
+      const startTime = minutesToTime(Math.max(0, minutes - 5));
+      const hours = resolveToolDefaultLoanHours(tool, gemach);
+      schedule = computeFixedHoursReservation(todayIL, startTime, hours);
+    } else if (mode === "fixed_hours") {
       const resolvedPickup = pickupDate ?? date;
       if (!resolvedPickup || !pickupTimeStart) {
         return NextResponse.json(

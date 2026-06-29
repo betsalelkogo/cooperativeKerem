@@ -1,4 +1,4 @@
-import type { FundSplit } from "./types";
+import type { DevicePot, FundSplit, Tool } from "./types";
 
 const DEFAULT_OPERATIONS_PERCENT = 18;
 
@@ -25,4 +25,46 @@ export function splitPayment(amount: number, operationsPercent = getOperationsPe
 
 export function formatNIS(amount: number): string {
   return `₪${amount.toLocaleString("he-IL")}`;
+}
+
+export interface PotKindRow {
+  kindId: string;
+  name: string;
+  category: string;
+  /** Combined balance across all units of this kind (₪). */
+  balance: number;
+  /** Number of physical units sharing this kind. */
+  units: number;
+  loanFeeMin: number;
+}
+
+/** Aggregate per-unit device pots into one row per tool kind. */
+export function groupPotsByKind(tools: Tool[], devicePots: DevicePot[]): PotKindRow[] {
+  const balanceByTool = new Map<string, number>();
+  for (const pot of devicePots) {
+    const key = pot.toolId ?? (pot as { id?: string }).id;
+    if (key) balanceByTool.set(key, (balanceByTool.get(key) ?? 0) + (pot.balance ?? 0));
+  }
+
+  const rows = new Map<string, PotKindRow>();
+  for (const tool of tools) {
+    const kindId = tool.kindId ?? tool.id;
+    const balance = balanceByTool.get(tool.id) ?? 0;
+    const existing = rows.get(kindId);
+    if (existing) {
+      existing.balance += balance;
+      existing.units += 1;
+    } else {
+      rows.set(kindId, {
+        kindId,
+        name: tool.name,
+        category: tool.category,
+        balance,
+        units: 1,
+        loanFeeMin: tool.loanFeeMin,
+      });
+    }
+  }
+
+  return [...rows.values()];
 }

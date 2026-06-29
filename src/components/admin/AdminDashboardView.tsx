@@ -13,7 +13,36 @@ import { formatNIS } from "@/lib/pots";
 import { AdminToolKindsTable } from "@/components/admin/AdminToolKindsTable";
 import { ProblemReportsPanel } from "@/components/admin/ProblemReportsPanel";
 import { LoanPhotoThumb } from "@/components/admin/LoanPhotoThumb";
-import type { AdminDashboardData } from "@/lib/types";
+import type { AdminDashboardData, AdminDashboardLoan } from "@/lib/types";
+
+/**
+ * Group active loans by booking. New multi-unit loans are a single doc (with a
+ * `quantity`), while legacy data stored one doc per unit linked by `groupId`.
+ */
+function groupAdminLoans(loans: AdminDashboardLoan[]): AdminDashboardLoan[][] {
+  const groups = new Map<string, AdminDashboardLoan[]>();
+  for (const loan of loans) {
+    const key = loan.groupId ?? loan.id;
+    const existing = groups.get(key);
+    if (existing) existing.push(loan);
+    else groups.set(key, [loan]);
+  }
+  return [...groups.values()];
+}
+
+/** Number of physical units represented by a group of loan docs. */
+function loanGroupUnits(group: AdminDashboardLoan[]): number {
+  return group.reduce((sum, loan) => sum + (loan.quantity ?? 1), 0);
+}
+
+function CountBadge({ count }: { count: number }) {
+  if (count <= 1) return null;
+  return (
+    <span className="mr-2 rounded-full bg-kerem-100 px-2 py-0.5 text-xs font-bold text-kerem-800">
+      ×{count}
+    </span>
+  );
+}
 
 function StatCard({ label, value, accent }: { label: string; value: number; accent?: string }) {
   return (
@@ -253,27 +282,38 @@ export function AdminDashboardView({
           </Card>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
-            {data.activeReservations.map((reservation) => (
-              <Card key={reservation.id}>
-                <CardBody className="py-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-bold text-stone-900">{reservation.toolName}</p>
-                      <p className="mt-1 text-sm text-stone-700">{reservation.memberName}</p>
-                      <p className="text-xs text-[var(--muted)]">{reservation.memberEmail}</p>
+            {data.activeReservations.map((reservation) => {
+              const units = reservation.quantity ?? 1;
+              return (
+                <Card key={reservation.id}>
+                  <CardBody className="py-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-bold text-stone-900">
+                          {reservation.toolName}
+                          <CountBadge count={units} />
+                          {units > 1 && (
+                            <span className="mr-1 text-sm font-semibold text-kerem-700">
+                              ({units} יחידות)
+                            </span>
+                          )}
+                        </p>
+                        <p className="mt-1 text-sm text-stone-700">{reservation.memberName}</p>
+                        <p className="text-xs text-[var(--muted)]">{reservation.memberEmail}</p>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-800 ring-1 ring-inset ring-amber-200">
+                        {reservationStatusLabels[reservation.status]}
+                      </span>
                     </div>
-                    <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-800 ring-1 ring-inset ring-amber-200">
-                      {reservationStatusLabels[reservation.status]}
-                    </span>
-                  </div>
-                  <p className="mt-3 space-y-1 text-xs text-[var(--muted)]">
-                    <span className="block">נשמר: {formatDateTime(reservation.createdAt)}</span>
-                    <span className="block">איסוף מתוכנן: {formatDay(reservation.pickupDate)}</span>
-                    <span className="block">החזרה מתוכננת: {formatDay(reservation.returnDate)}</span>
-                  </p>
-                </CardBody>
-              </Card>
-            ))}
+                    <p className="mt-3 space-y-1 text-xs text-[var(--muted)]">
+                      <span className="block">נשמר: {formatDateTime(reservation.createdAt)}</span>
+                      <span className="block">איסוף מתוכנן: {formatDay(reservation.pickupDate)}</span>
+                      <span className="block">החזרה מתוכננת: {formatDay(reservation.returnDate)}</span>
+                    </p>
+                  </CardBody>
+                </Card>
+              );
+            })}
           </div>
         )}
       </section>
@@ -288,36 +328,53 @@ export function AdminDashboardView({
           </Card>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
-            {data.activeLoans.map((loan) => (
-              <Card key={loan.id}>
-                <CardBody className="py-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-bold text-stone-900">{loan.toolName}</p>
-                      <p className="mt-1 text-sm text-stone-700">{loan.memberName}</p>
-                      <p className="text-xs text-[var(--muted)]">{loan.memberEmail}</p>
+            {groupAdminLoans(data.activeLoans).map((group) => {
+              const loan = group[0];
+              const units = loanGroupUnits(group);
+              const photos = group.filter((l) => l.checkoutPhotoUrl || l.returnPhotoUrl);
+              return (
+                <Card key={loan.id}>
+                  <CardBody className="py-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-bold text-stone-900">
+                          {loan.toolName}
+                          <CountBadge count={units} />
+                          {units > 1 && (
+                            <span className="mr-1 text-sm font-semibold text-kerem-700">
+                              ({units} יחידות)
+                            </span>
+                          )}
+                        </p>
+                        <p className="mt-1 text-sm text-stone-700">{loan.memberName}</p>
+                        <p className="text-xs text-[var(--muted)]">{loan.memberEmail}</p>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-violet-100 px-2.5 py-1 text-xs font-bold text-violet-800 ring-1 ring-inset ring-violet-200">
+                        {loanStatusLabels[loan.status]}
+                      </span>
                     </div>
-                    <span className="shrink-0 rounded-full bg-violet-100 px-2.5 py-1 text-xs font-bold text-violet-800 ring-1 ring-inset ring-violet-200">
-                      {loanStatusLabels[loan.status]}
-                    </span>
-                  </div>
-                  <p className="mt-3 space-y-1 text-xs text-[var(--muted)]">
-                    <span className="block">לקיחה בפועל: {formatDateTime(loan.checkedOutAt)}</span>
-                    <span className="block">החזרה מתוכננת: {formatDay(loan.dueReturnDate)}</span>
-                  </p>
-                  {(loan.checkoutPhotoUrl || loan.returnPhotoUrl) && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {loan.checkoutPhotoUrl && (
-                        <LoanPhotoThumb url={loan.checkoutPhotoUrl} label="לקיחה" />
-                      )}
-                      {loan.returnPhotoUrl && (
-                        <LoanPhotoThumb url={loan.returnPhotoUrl} label="החזרה" />
-                      )}
-                    </div>
-                  )}
-                </CardBody>
-              </Card>
-            ))}
+                    <p className="mt-3 space-y-1 text-xs text-[var(--muted)]">
+                      <span className="block">לקיחה בפועל: {formatDateTime(loan.checkedOutAt)}</span>
+                      <span className="block">החזרה מתוכננת: {formatDay(loan.dueReturnDate)}</span>
+                    </p>
+                    {photos.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {photos.map((l) => (
+                          <div key={l.id} className="flex gap-2">
+                            {l.checkoutPhotoUrl && (
+                              <LoanPhotoThumb url={l.checkoutPhotoUrl} label="לקיחה" />
+                            )}
+                            {l.returnPhotoUrl && (
+                              <LoanPhotoThumb url={l.returnPhotoUrl} label="החזרה" />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardBody>
+                </Card>
+              );
+            })}
           </div>
         )}
       </section>

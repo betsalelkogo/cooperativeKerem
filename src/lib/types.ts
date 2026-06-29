@@ -181,6 +181,10 @@ export interface Loan {
   reservationId: string;
   memberId: string;
   toolId: string;
+  /** All physical units covered by this loan (multi-unit booking). Defaults to [toolId]. */
+  toolIds?: string[];
+  /** Number of units in this loan (defaults to 1). */
+  quantity?: number;
   status: LoanStatus;
   safetyAcknowledged: boolean;
   checkoutPhotoUrl?: string;
@@ -408,6 +412,10 @@ export interface AdminDashboardLoan {
   dueReturnDate?: string;
   checkoutPhotoUrl?: string;
   returnPhotoUrl?: string;
+  /** Links loans created together in one checkout (booking). */
+  groupId?: string;
+  /** Number of units in this loan (defaults to 1). */
+  quantity?: number;
 }
 
 export interface AdminDashboardReservation {
@@ -421,6 +429,8 @@ export interface AdminDashboardReservation {
   pickupDate: string;
   returnDate: string;
   createdAt: string;
+  /** Number of units in this booking. */
+  quantity?: number;
 }
 
 export interface AdminMaintenanceReport {

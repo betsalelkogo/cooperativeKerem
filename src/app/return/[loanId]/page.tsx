@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { ItemChecklist, ConditionNotes } from "@/components/loan/ItemChecklist";
 import { PhotoCapture } from "@/components/loan/PhotoCapture";
 import { QrScanner } from "@/components/loan/QrScanner";
@@ -28,8 +28,16 @@ function initialStep(hasItems: boolean): Step {
 
 export default function ReturnPage() {
   const params = useParams<{ loanId: string }>();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const { getIdToken } = useAuth();
+
+  const loanIds = useMemo(() => {
+    const raw = searchParams.get("loanIds");
+    const ids = raw ? raw.split(",").map((s) => s.trim()).filter(Boolean) : [];
+    return ids.length > 0 ? ids : [params.loanId];
+  }, [searchParams, params.loanId]);
+  const groupCount = loanIds.length;
 
   const [loan, setLoan] = useState<Loan | null>(null);
   const [tool, setTool] = useState<Tool | null>(null);
@@ -94,6 +102,9 @@ export default function ReturnPage() {
       const compressed = await compressImageFile(photoFile);
       const formData = new FormData();
       formData.append("loanId", loan.id);
+      if (groupCount > 1) {
+        formData.append("loanIds", JSON.stringify(loanIds));
+      }
       formData.append("photo", compressed, "return.jpg");
       formData.append("returnConditionNotes", conditionNotes);
       formData.append("returnItemsChecked", JSON.stringify(checkedItems));
@@ -195,12 +206,22 @@ export default function ReturnPage() {
   ];
 
   const stepIndex = steps.findIndex((s) => s.key === step);
+  // A single multi-unit loan carries its own quantity; legacy bookings span docs.
+  const displayCount = Math.max(groupCount, loan.quantity ?? 1);
 
   return (
     <div className="mx-auto max-w-lg">
       <PageHeader
-        title={`סגירת השאלה: ${tool.name}`}
-        description="ההשאלה נשארת פעילה עד שתשלימו את טופס ההחזרה — צ׳ק-ליסט, מצב הכלי וצילום."
+        title={
+          displayCount > 1
+            ? `סגירת השאלה: ${tool.name} (${displayCount} יחידות)`
+            : `סגירת השאלה: ${tool.name}`
+        }
+        description={
+          displayCount > 1
+            ? "סגירת כל היחידות יחד — צ׳ק-ליסט, מצב הכלי וצילום אחד שמשותף לכולן."
+            : "ההשאלה נשארת פעילה עד שתשלימו את טופס ההחזרה — צ׳ק-ליסט, מצב הכלי וצילום."
+        }
       />
 
       <Alert variant="info" className="mb-4">

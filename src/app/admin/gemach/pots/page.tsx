@@ -7,7 +7,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Alert } from "@/components/ui/Alert";
 import { PayboxPayoutPanel } from "@/components/admin/PayboxPayoutPanel";
-import { formatNIS, splitPayment } from "@/lib/pots";
+import { formatNIS, groupPotsByKind, splitPayment } from "@/lib/pots";
 import type { Gemach, Tool } from "@/lib/types";
 import type { DevicePot } from "@/lib/types";
 import { useSelectedGemachId } from "@/hooks/useSelectedGemachId";
@@ -90,29 +90,32 @@ export default function GemachAdminPotsPage() {
         <p className="text-[var(--muted)]">אין כלים בגמ״ח זה.</p>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {data.tools.map((tool) => {
-            const pot = data.devicePots.find(
-              (p) => p.toolId === tool.id || (p as { id?: string }).id === tool.id
-            );
-            const balance = pot?.balance ?? 0;
-            const split = splitPayment(tool.loanFeeMin, data.operationsPercent);
+          {groupPotsByKind(data.tools, data.devicePots).map((row) => {
+            const split = splitPayment(row.loanFeeMin, data.operationsPercent);
             return (
-              <Card key={tool.id} className="transition hover:shadow-md">
+              <Card key={row.kindId} className="transition hover:shadow-md">
                 <CardBody>
                   <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
-                    {tool.category}
+                    {row.category}
                   </p>
-                  <h3 className="mt-1 font-bold text-stone-900">{tool.name}</h3>
-                  <p className="mt-3 text-3xl font-bold text-kerem-700">{formatNIS(balance)}</p>
+                  <h3 className="mt-1 font-bold text-stone-900">
+                    {row.name}
+                    {row.units > 1 && (
+                      <span className="mr-2 rounded-full bg-kerem-100 px-2 py-0.5 text-xs font-bold text-kerem-800">
+                        {row.units} יחידות
+                      </span>
+                    )}
+                  </h3>
+                  <p className="mt-3 text-3xl font-bold text-kerem-700">{formatNIS(row.balance)}</p>
                   <div className="mt-4 space-y-1 border-t border-[var(--border)] pt-3 text-xs text-[var(--muted)]">
                     <p>
-                      לכלי:{" "}
+                      לכלי (ליחידה):{" "}
                       <span className="font-semibold text-stone-700">
                         {formatNIS(split.deviceAmount)}
                       </span>
                     </p>
                     <p>
-                      לתפעול:{" "}
+                      לתפעול (ליחידה):{" "}
                       <span className="font-semibold text-stone-700">
                         {formatNIS(split.operationsAmount)}
                       </span>

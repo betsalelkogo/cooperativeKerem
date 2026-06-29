@@ -3,6 +3,7 @@ import type { ToolKindWithAvailability } from "@/lib/types";
 import { inventoryLabel } from "@/lib/tool-kinds";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Card, CardBody, CardFooter } from "@/components/ui/Card";
+import { InstantLoanButton } from "@/components/tools/InstantLoanButton";
 import { cn } from "@/lib/cn";
 
 const categoryMeta: Record<string, { icon: string; gradient: string }> = {
@@ -112,13 +113,18 @@ export function ToolCard({ kind }: { kind: ToolKindWithAvailability }) {
           </p>
         </div>
         {kind.availableUnits > 0 ? (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
             <Link
               href={`/tools/${kind.catalogId}`}
               className="rounded-xl border border-[var(--border)] bg-white px-3 py-2 text-sm font-semibold text-stone-700 transition hover:bg-warm-50"
             >
               פרטים
             </Link>
+            <InstantLoanButton
+              kindId={kind.catalogId}
+              availableUnits={kind.availableUnits}
+              compact
+            />
             <Link
               href={`/tools/${kind.catalogId}/reserve`}
               className="rounded-xl bg-kerem-700 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-kerem-700/20 transition hover:bg-kerem-800 group-hover:shadow-lg"

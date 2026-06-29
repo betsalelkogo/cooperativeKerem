@@ -188,6 +188,12 @@ function loanFromDoc(id: string, data: DocumentData): Loan {
   if (typeof data.dueReturnDate === "string") loan.dueReturnDate = data.dueReturnDate;
   if (typeof data.dueReturnTimeEnd === "string") loan.dueReturnTimeEnd = data.dueReturnTimeEnd;
   if (typeof data.groupId === "string") loan.groupId = data.groupId;
+  if (Array.isArray(data.toolIds) && data.toolIds.length) {
+    loan.toolIds = data.toolIds as string[];
+  }
+  if (typeof data.quantity === "number" && data.quantity > 0) {
+    loan.quantity = data.quantity;
+  }
   if (typeof data.disputeId === "string") loan.disputeId = data.disputeId;
   if (data.returnOk === true) loan.returnOk = true;
   loan.checkoutDefect = parseDefectRecord(data.checkoutDefect);
@@ -217,9 +223,12 @@ function buildActiveHolders(loans: Loan[], reservations: Reservation[]) {
 
   const loanByTool = new Map<string, Loan>();
   for (const loan of activeLoans) {
-    const existing = loanByTool.get(loan.toolId);
-    if (!existing || loanPriority[loan.status] > loanPriority[existing.status]) {
-      loanByTool.set(loan.toolId, loan);
+    const ids = loan.toolIds?.length ? loan.toolIds : loan.toolId ? [loan.toolId] : [];
+    for (const toolId of ids) {
+      const existing = loanByTool.get(toolId);
+      if (!existing || loanPriority[loan.status] > loanPriority[existing.status]) {
+        loanByTool.set(toolId, loan);
+      }
     }
   }
 
@@ -849,14 +858,18 @@ export async function getToolKindWithAvailability(
 
 function computeToolKindStats(units: Tool[], loans: Loan[]): ToolKindStats {
   const unitIds = new Set(units.map((u) => u.id));
-  const kindLoans = loans.filter((l) => unitIds.has(l.toolId));
+  const kindLoans = loans.filter(
+    (l) =>
+      unitIds.has(l.toolId) || (l.toolIds?.some((id) => unitIds.has(id)) ?? false)
+  );
   const activeLoans = kindLoans.filter(
     (l) => l.status === "active" || l.status === "return_pending" || l.status === "checkout_pending"
   );
   const borrowers = new Set(kindLoans.map((l) => l.memberId));
+  const unitsOf = (l: Loan) => l.quantity ?? l.toolIds?.length ?? 1;
   return {
-    totalLoans: kindLoans.length,
-    activeLoans: activeLoans.length,
+    totalLoans: kindLoans.reduce((sum, l) => sum + unitsOf(l), 0),
+    activeLoans: activeLoans.reduce((sum, l) => sum + unitsOf(l), 0),
     uniqueBorrowers: borrowers.size,
   };
 }
@@ -1599,6 +1612,7 @@ export async function getAdminDashboard(options?: {
         pickupDate: reservation.pickupDate,
         returnDate: reservation.returnDate,
         createdAt: reservation.createdAt,
+        quantity: reservation.quantity ?? reservation.toolIds?.length ?? 1,
       };
     }),
     activeLoans: activeLoans.map((loan) => {
@@ -1616,6 +1630,8 @@ export async function getAdminDashboard(options?: {
         dueReturnDate: loan.dueReturnDate,
         checkoutPhotoUrl: loan.checkoutPhotoUrl,
         returnPhotoUrl: loan.returnPhotoUrl,
+        quantity: loan.quantity ?? loan.toolIds?.length ?? 1,
+        ...(loan.groupId ? { groupId: loan.groupId } : {}),
       };
     }),
     problemReports,
@@ -1974,54 +1990,52 @@ export async function createLoanFromCheckout(params: {
   const db = getAdminDb();
   const split = splitPayment(params.reservation.feeAmount);
   const toolIds = reservationToolIds(params.reservation);
-  const groupId = toolIds.length > 1 ? newId("grp") : undefined;
-  const perUnitDevice = toolIds.length > 0 ? split.deviceAmount / toolIds.length : 0;
+  const quantity = toolIds.length;
+  const perUnitDevice = quantity > 0 ? split.deviceAmount / quantity : 0;
+  const loanId = params.loanId ?? newId("loan");
   const txnId = newId("txn");
 
   const transaction: Transaction = {
     id: txnId,
     memberId: params.reservation.memberId,
     toolId: toolIds[0],
-    loanId: params.loanId ?? newId("loan"),
+    loanId,
     amount: split.totalAmount,
     operationsAmount: split.operationsAmount,
     deviceAmount: split.deviceAmount,
     createdAt: new Date().toISOString(),
   };
 
-  const loans: Loan[] = [];
+  // One loan document represents the whole booking; quantity / toolIds capture
+  // the individual physical units that were taken out together.
+  const loan: Loan = {
+    id: loanId,
+    reservationId: params.reservation.id,
+    memberId: params.reservation.memberId,
+    toolId: toolIds[0],
+    toolIds,
+    quantity,
+    status: "active",
+    safetyAcknowledged: true,
+    checkoutPhotoUrl: params.checkoutPhotoUrl,
+    checkoutConditionNotes: params.checkoutConditionNotes?.trim() || undefined,
+    checkoutItemsChecked: params.checkoutItemsChecked?.length
+      ? params.checkoutItemsChecked
+      : undefined,
+    checkoutDefect: params.checkoutDefect,
+    checkedOutAt: new Date().toISOString(),
+    dueReturnDate: params.reservation.returnDate || undefined,
+    dueReturnTimeEnd:
+      params.reservation.returnTimeEnd ?? params.reservation.returnTimeStart,
+  };
+
   const batch = db.batch();
+  batch.set(db.collection("loans").doc(loanId), {
+    ...omitUndefined(loan as unknown as Record<string, unknown>),
+    checkedOutAt: FieldValue.serverTimestamp(),
+  });
 
-  for (let i = 0; i < toolIds.length; i++) {
-    const toolId = toolIds[i];
-    const loanId =
-      i === 0 && params.loanId ? params.loanId : i === 0 ? transaction.loanId : newId("loan");
-
-    const loan: Loan = {
-      id: loanId,
-      reservationId: params.reservation.id,
-      memberId: params.reservation.memberId,
-      toolId,
-      status: "active",
-      safetyAcknowledged: true,
-      checkoutPhotoUrl: params.checkoutPhotoUrl,
-      checkoutConditionNotes: params.checkoutConditionNotes?.trim() || undefined,
-      checkoutItemsChecked: params.checkoutItemsChecked?.length
-        ? params.checkoutItemsChecked
-        : undefined,
-      checkoutDefect: params.checkoutDefect,
-      checkedOutAt: new Date().toISOString(),
-      dueReturnDate: params.reservation.returnDate || undefined,
-      dueReturnTimeEnd:
-        params.reservation.returnTimeEnd ?? params.reservation.returnTimeStart,
-      ...(groupId ? { groupId } : {}),
-    };
-
-    loans.push(loan);
-    batch.set(db.collection("loans").doc(loanId), {
-      ...omitUndefined(loan as unknown as Record<string, unknown>),
-      checkedOutAt: FieldValue.serverTimestamp(),
-    });
+  for (const toolId of toolIds) {
     batch.update(db.collection("tools").doc(toolId), { status: "on_loan" });
     batch.set(
       db.collection("device_pots").doc(toolId),
@@ -2053,7 +2067,7 @@ export async function createLoanFromCheckout(params: {
   );
 
   await batch.commit();
-  return { loan: loans[0], loans };
+  return { loan, loans: [loan] };
 }
 
 export async function completeLoanReturn(
@@ -2087,7 +2101,10 @@ export async function completeLoanReturn(
     returnDefect: params.returnDefect ?? null,
     returnedAt: FieldValue.serverTimestamp(),
   });
-  batch.update(db.collection("tools").doc(loan.toolId), { status: toolStatus });
+  const loanToolIds = loan.toolIds?.length ? loan.toolIds : [loan.toolId];
+  for (const toolId of loanToolIds) {
+    batch.update(db.collection("tools").doc(toolId), { status: toolStatus });
+  }
 
   let lateFee: LateReturnFee | null = null;
   let dispute: Dispute | undefined;
