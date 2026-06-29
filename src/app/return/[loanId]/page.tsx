@@ -41,6 +41,7 @@ export default function ReturnPage() {
 
   const [loan, setLoan] = useState<Loan | null>(null);
   const [tool, setTool] = useState<Tool | null>(null);
+  const [donation, setDonation] = useState<{ name: string; donationUrl: string } | null>(null);
   const [loadError, setLoadError] = useState("");
   const [step, setStep] = useState<Step>("condition");
   const [photoFile, setPhotoFile] = useState<File | null>(null);
@@ -70,6 +71,9 @@ export default function ReturnPage() {
         const data = await res.json();
         setLoan(data.loan);
         setTool(data.tool);
+        if (data.gemach?.donationUrl) {
+          setDonation({ name: data.gemach.name, donationUrl: data.gemach.donationUrl });
+        }
         setStep(initialStep((data.tool?.includedItems?.length ?? 0) > 0));
       } catch (err) {
         setLoadError(err instanceof Error ? err.message : "שגיאה בטעינה");
@@ -138,7 +142,10 @@ export default function ReturnPage() {
       }
 
       setStep("done");
-      setTimeout(() => router.push("/my-loans?returned=1"), 2000);
+      // Keep the donation prompt on screen; otherwise return to the loans list.
+      if (!donation) {
+        setTimeout(() => router.push("/my-loans?returned=1"), 2000);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "משהו השתבש");
     } finally {
@@ -359,6 +366,35 @@ export default function ReturnPage() {
               <p className="mt-2 text-[var(--muted)]">תודה שהחזרתם את הכלי.</p>
             </CardBody>
           </Card>
+
+          {donation && (
+            <Card className="border-rose-200 bg-rose-50">
+              <CardBody className="py-6 text-center">
+                <p className="text-2xl">❤️</p>
+                <p className="mt-2 font-bold text-rose-900">
+                  רוצים לתמוך ב{donation.name}?
+                </p>
+                <p className="mt-1 text-sm text-rose-800">
+                  הגמ״ח פועל בזכות תרומות הקהילה. כל סכום עוזר להחזיק ולחדש את הכלים.
+                </p>
+                <a
+                  href={donation.donationUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-4 inline-flex w-full items-center justify-center rounded-xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-700"
+                >
+                  תרומה לגמ״ח דרך PayBox
+                </a>
+                <button
+                  type="button"
+                  onClick={() => router.push("/my-loans?returned=1")}
+                  className="mt-3 w-full rounded-xl px-4 py-2 text-sm font-semibold text-stone-600 transition hover:text-stone-900"
+                >
+                  אולי בפעם אחרת — סיום
+                </button>
+              </CardBody>
+            </Card>
+          )}
         </div>
       )}
 

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getUidFromRequest } from "@/lib/firebase/admin";
-import { getLoanById, getToolById } from "@/lib/firestore/repository";
+import { getGemachById, getLoanById, getToolById } from "@/lib/firestore/repository";
 
 export async function GET(
   request: Request,
@@ -20,7 +20,18 @@ export async function GET(
     }
 
     const tool = await getToolById(loan.toolId);
-    return NextResponse.json({ loan, tool });
+    const gemach = tool ? await getGemachById(tool.gemachId) : null;
+    return NextResponse.json({
+      loan,
+      tool,
+      gemach: gemach
+        ? {
+            id: gemach.id,
+            name: gemach.name,
+            donationUrl: gemach.payboxGroupUrl ?? null,
+          }
+        : null,
+    });
   } catch {
     return NextResponse.json({ error: "שגיאת שרת" }, { status: 500 });
   }

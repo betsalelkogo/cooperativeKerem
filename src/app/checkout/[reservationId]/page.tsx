@@ -221,7 +221,7 @@ export default function CheckoutPage() {
             className="w-full"
             size="lg"
           >
-            {loading ? "מפעיל השאלה…" : "הפעלת השאלה ושחרור הכלי"}
+            {loading ? "מפעיל השאלה…" : "הפעלת השאלה ולקיחת הכלי"}
           </Button>
         </div>
       )}
