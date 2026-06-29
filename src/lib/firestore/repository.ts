@@ -656,6 +656,7 @@ export async function getToolKindForAdmin(
     purpose: representative.purpose,
     productAge: representative.productAge,
     adminNotes: representative.adminNotes,
+    safetyRules: representative.safetyRules,
     gemachLocation: gemach.location,
   };
 }
@@ -678,6 +679,7 @@ export async function updateToolKindDetails(params: {
   purpose?: string | null;
   productAge?: number | null;
   adminNotes?: string | null;
+  safetyRules?: SafetyRule[] | null;
 }): Promise<{ updated: number }> {
   const gemach = await getGemachById(params.gemachId);
   if (!gemach) {
@@ -757,6 +759,11 @@ export async function updateToolKindDetails(params: {
       update.imageUrls = FieldValue.delete();
     } else if (params.imageUrls !== undefined) {
       update.imageUrls = params.imageUrls.length ? params.imageUrls : FieldValue.delete();
+    }
+
+    // Explicit array (incl. empty) is saved; empty disables the safety step.
+    if (params.safetyRules !== undefined) {
+      update.safetyRules = params.safetyRules ?? [];
     }
 
     if (params.location === null) {
@@ -1056,9 +1063,9 @@ export async function createToolsForGemach(params: {
 
   const fees = resolveToolFees(gemach, params.loanFeeMin, params.loanFeeMax);
   const kindId = kindIdForTool(params.gemachId, params.name, params.kindId);
-  const safetyRules = params.safetyRules?.length
-    ? params.safetyRules
-    : DEFAULT_SAFETY_RULES;
+  // An explicit array (even empty) is respected; omitting it keeps the default.
+  const safetyRules =
+    params.safetyRules !== undefined ? params.safetyRules : DEFAULT_SAFETY_RULES;
 
   const db = getAdminDb();
   const batch = db.batch();

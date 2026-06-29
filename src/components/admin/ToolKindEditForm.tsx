@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { authFetch } from "@/lib/api-client";
 import { compressImageFile } from "@/lib/compress-image";
 import { gemachPricingModeLabels, MAX_LOAN_HOURS_CAP } from "@/lib/gemach";
-import { TOOL_CATEGORIES } from "@/lib/tools-admin";
+import { TOOL_CATEGORIES, parseSafetyRules, safetyRulesToText } from "@/lib/tools-admin";
 import { resolveToolImageUrl, validateToolImageUrl } from "@/lib/tool-image";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -47,6 +47,9 @@ export function ToolKindEditForm({
     kind.maxLoanHours !== undefined ? String(kind.maxLoanHours) : ""
   );
   const [adminNotes, setAdminNotes] = useState(kind.adminNotes ?? "");
+  const [safetyRulesText, setSafetyRulesText] = useState(
+    safetyRulesToText(kind.safetyRules)
+  );
   const [location, setLocation] = useState(kind.location ?? "");
   const [brand, setBrand] = useState(kind.brand ?? "");
   const [supplier, setSupplier] = useState(kind.supplier ?? "");
@@ -195,6 +198,7 @@ export function ToolKindEditForm({
             supplier: supplier.trim() || null,
             purpose: purpose.trim() || null,
             productAge: productAge.trim() === "" ? null : Number(productAge),
+            safetyRules: parseSafetyRules(safetyRulesText),
             imageUrls: galleryUrls.length ? galleryUrls : null,
             ...(imageToSave !== undefined ? { imageUrl: imageToSave } : {}),
           }),
@@ -436,6 +440,27 @@ export function ToolKindEditForm({
               placeholder="הערות פנימיות — לא מוצגות לשואלים"
               className="w-full rounded-xl border border-[var(--border)] bg-amber-50/40 px-4 py-3 text-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
             />
+          </div>
+
+          <div>
+            <label
+              htmlFor="safetyRules"
+              className="mb-1.5 block text-sm font-semibold text-stone-800"
+            >
+              הוראות בטיחות (אופציונלי)
+            </label>
+            <textarea
+              id="safetyRules"
+              rows={3}
+              value={safetyRulesText}
+              onChange={(e) => setSafetyRulesText(e.target.value)}
+              placeholder={"שורה לכל הוראה, למשל:\nיש להרכיב משקפי מגן\nלנתק מהחשמל לפני החלפת דיסק"}
+              className="w-full rounded-xl border border-[var(--border)] px-4 py-3 text-sm focus:border-kerem-500 focus:outline-none focus:ring-2 focus:ring-kerem-200"
+            />
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              השואל יאשר את ההוראות לפני לקיחת הכלי. אפשר להשאיר ריק — אז לא יוצג שלב בטיחות.
+              {kind.totalUnits > 1 && ` השינוי יחול על כל ${kind.totalUnits} היחידות.`}
+            </p>
           </div>
 
           <div>

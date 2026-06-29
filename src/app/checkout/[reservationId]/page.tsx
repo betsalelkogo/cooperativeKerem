@@ -21,14 +21,15 @@ import type { Reservation, Tool } from "@/lib/types";
 
 type Step = "payment" | "qr" | "items" | "safety" | "condition" | "photo" | "done";
 
-function stepAfterPayment(hasItems: boolean): Step {
+function stepAfterPayment(hasItems: boolean, hasSafety: boolean): Step {
   if (REQUIRE_QR_SCAN) return "qr";
   if (hasItems) return "items";
-  return "safety";
+  return hasSafety ? "safety" : "condition";
 }
 
-function stepAfterQr(hasItems: boolean): Step {
-  return hasItems ? "items" : "safety";
+function stepAfterQr(hasItems: boolean, hasSafety: boolean): Step {
+  if (hasItems) return "items";
+  return hasSafety ? "safety" : "condition";
 }
 
 export default function CheckoutPage() {
@@ -48,6 +49,7 @@ export default function CheckoutPage() {
 
   const includedItems = tool?.includedItems ?? [];
   const hasItems = includedItems.length > 0;
+  const hasSafety = (tool?.safetyRules?.length ?? 0) > 0;
 
   useEffect(() => {
     async function load() {
@@ -72,12 +74,14 @@ export default function CheckoutPage() {
         setReservation(data.reservation);
         setTool(data.tool);
 
+        const toolHasItems = (data.tool?.includedItems?.length ?? 0) > 0;
+        const toolHasSafety = (data.tool?.safetyRules?.length ?? 0) > 0;
         if (data.reservation.feeAmount === 0) {
-          setStep(stepAfterPayment((data.tool?.includedItems?.length ?? 0) > 0));
+          setStep(stepAfterPayment(toolHasItems, toolHasSafety));
         } else if (paymentRes.ok) {
           const paymentData = await paymentRes.json();
           if (paymentData.paid) {
-            setStep(stepAfterPayment((data.tool?.includedItems?.length ?? 0) > 0));
+            setStep(stepAfterPayment(toolHasItems, toolHasSafety));
           }
         }
       } catch (err) {
@@ -90,7 +94,7 @@ export default function CheckoutPage() {
   function handleQrScan(code: string) {
     if (!tool) return;
     if (code === tool.qrCode) {
-      setStep(stepAfterQr(hasItems));
+      setStep(stepAfterQr(hasItems, hasSafety));
       setError("");
     } else {
       setError("קוד ה-QR לא תואם לכלי זה. סרקו את המדבקה הנכונה.");
@@ -142,7 +146,7 @@ export default function CheckoutPage() {
 
   const baseSteps = [
     ...(hasItems ? [{ key: "items", label: "מה בערכה" }] : []),
-    { key: "safety", label: "בטיחות" },
+    ...(hasSafety ? [{ key: "safety", label: "בטיחות" }] : []),
     { key: "condition", label: "מצב הכלי" },
     { key: "photo", label: "צילום" },
     { key: "done", label: "סיום" },
@@ -174,7 +178,7 @@ export default function CheckoutPage() {
           reservationId={reservation.id}
           amount={reservation.feeAmount}
           toolName={tool.name}
-          onPaid={() => setStep(stepAfterPayment(hasItems))}
+          onPaid={() => setStep(stepAfterPayment(hasItems, hasSafety))}
         />
       )}
 
@@ -188,7 +192,7 @@ export default function CheckoutPage() {
           confirmLabel="כל הפריטים נמצאים — המשך"
           onComplete={(ids) => {
             setCheckedItems(ids);
-            setStep("safety");
+            setStep(hasSafety ? "safety" : "condition");
           }}
         />
       )}

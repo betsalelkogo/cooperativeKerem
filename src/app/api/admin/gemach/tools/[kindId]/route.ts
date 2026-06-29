@@ -12,6 +12,7 @@ import {
 import { isPlatformAdmin } from "@/lib/admin";
 import { isPlatformGemach } from "@/lib/gemach";
 import { resolveToolImageUrl } from "@/lib/tool-image";
+import { sanitizeSafetyRules } from "@/lib/tools-admin";
 
 export async function GET(
   request: Request,
@@ -70,6 +71,7 @@ export async function PATCH(
       purpose,
       productAge,
       imageUrls,
+      safetyRules,
     } = body as {
       gemachId?: string;
       name?: string;
@@ -87,6 +89,7 @@ export async function PATCH(
       purpose?: string | null;
       productAge?: number | null;
       imageUrls?: string[] | null;
+      safetyRules?: unknown;
     };
 
     const gemachId = resolveGemachAdminScope(adminAuth.member, requestedGemachId ?? null);
@@ -169,6 +172,7 @@ export async function PATCH(
             ? Number(productAge)
             : undefined,
       imageUrls: imageUrls === null ? null : imageUrls,
+      safetyRules: safetyRules === undefined ? undefined : (sanitizeSafetyRules(safetyRules) ?? []),
     });
 
     return NextResponse.json(result);

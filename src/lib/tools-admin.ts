@@ -20,6 +20,31 @@ export const DEFAULT_SAFETY_RULES: SafetyRule[] = [
   { id: "sr-default-2", text: "אשתמש בכלי בזהירות ואחזיר אותו במצב תקין" },
 ];
 
+/** Parse a newline-separated textarea into safety rules. Empty input = no rules. */
+export function parseSafetyRules(text: string): SafetyRule[] {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line, i) => ({ id: `sr-${i + 1}`, text: line }));
+}
+
+/** Render safety rules as newline-separated text for editing. */
+export function safetyRulesToText(rules: SafetyRule[] | undefined): string {
+  return (rules ?? []).map((rule) => rule.text).join("\n");
+}
+
+/** Normalize safety rules coming from an API request (drops blanks, re-ids). */
+export function sanitizeSafetyRules(input: unknown): SafetyRule[] | undefined {
+  if (!Array.isArray(input)) return undefined;
+  return input
+    .map((rule) => ({
+      text: String((rule as { text?: unknown })?.text ?? "").trim(),
+    }))
+    .filter((rule) => rule.text)
+    .map((rule, i) => ({ id: `sr-${i + 1}`, text: rule.text }));
+}
+
 export function kindIdForTool(gemachId: string, name: string, explicit?: string): string {
   if (explicit?.trim()) return slugifyGemachId(explicit) || explicit.trim();
   const slug = slugifyGemachId(name);

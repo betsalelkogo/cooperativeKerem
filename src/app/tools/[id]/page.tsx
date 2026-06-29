@@ -140,22 +140,24 @@ export default async function ToolDetailPage({
             )}
           </div>
 
-          <div className="mb-6">
-            <h2 className="mb-3 flex items-center gap-2 font-bold text-stone-900">
-              <span>⚠️</span> כללי בטיחות
-            </h2>
-            <ul className="space-y-2">
-              {kind.safetyRules.map((rule) => (
-                <li
-                  key={rule.id}
-                  className="flex items-start gap-2 rounded-lg bg-warm-50 px-3 py-2 text-sm text-stone-700"
-                >
-                  <span className="mt-0.5 text-kerem-600">•</span>
-                  {rule.text}
-                </li>
-              ))}
-            </ul>
-          </div>
+          {kind.safetyRules.length > 0 && (
+            <div className="mb-6">
+              <h2 className="mb-3 flex items-center gap-2 font-bold text-stone-900">
+                <span>⚠️</span> כללי בטיחות
+              </h2>
+              <ul className="space-y-2">
+                {kind.safetyRules.map((rule) => (
+                  <li
+                    key={rule.id}
+                    className="flex items-start gap-2 rounded-lg bg-warm-50 px-3 py-2 text-sm text-stone-700"
+                  >
+                    <span className="mt-0.5 text-kerem-600">•</span>
+                    {rule.text}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div className="flex flex-wrap gap-3">
             {kind.availableUnits > 0 && (

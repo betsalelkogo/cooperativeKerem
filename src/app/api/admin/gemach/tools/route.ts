@@ -4,7 +4,7 @@ import {
   resolveGemachAdminScope,
 } from "@/lib/firebase/admin-auth";
 import { createToolsForGemach, getGemachById } from "@/lib/firestore/repository";
-import { validateToolInput } from "@/lib/tools-admin";
+import { sanitizeSafetyRules, validateToolInput } from "@/lib/tools-admin";
 
 export async function POST(request: Request) {
   const auth = await requireAdmin(request);
@@ -28,6 +28,7 @@ export async function POST(request: Request) {
       supplier,
       purpose,
       productAge,
+      safetyRules,
     } = body as {
       gemachId?: string;
       name?: string;
@@ -44,6 +45,7 @@ export async function POST(request: Request) {
       supplier?: string;
       purpose?: string;
       productAge?: number;
+      safetyRules?: unknown;
     };
 
     const gemachId = resolveGemachAdminScope(auth.member, requestedGemachId ?? null);
@@ -79,6 +81,7 @@ export async function POST(request: Request) {
       supplier: supplier?.trim() || undefined,
       purpose: purpose?.trim() || undefined,
       productAge: productAge !== undefined ? Number(productAge) : undefined,
+      safetyRules: sanitizeSafetyRules(safetyRules),
       createdBy: auth.uid,
     });
 

@@ -538,6 +538,8 @@ export interface AdminToolKindEdit {
   purpose?: string;
   productAge?: number;
   adminNotes?: string;
+  /** Custom safety instructions (empty = no safety step). */
+  safetyRules?: SafetyRule[];
   /** Gemach default location — shown when tool has no override. */
   gemachLocation?: string;
 }

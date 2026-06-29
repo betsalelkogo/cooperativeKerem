@@ -13,7 +13,7 @@ import {
   resolveGemachMaxLoanHours,
   MAX_LOAN_HOURS_CAP,
 } from "@/lib/gemach";
-import { MAX_TOOL_UNITS, TOOL_CATEGORIES } from "@/lib/tools-admin";
+import { MAX_TOOL_UNITS, TOOL_CATEGORIES, parseSafetyRules } from "@/lib/tools-admin";
 import { BackLink, PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -45,6 +45,7 @@ export default function AddGemachToolPage() {
   const [supplier, setSupplier] = useState("");
   const [purpose, setPurpose] = useState("");
   const [productAge, setProductAge] = useState("");
+  const [safetyRulesText, setSafetyRulesText] = useState("");
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -108,6 +109,7 @@ export default function AddGemachToolPage() {
           ...(supplier.trim() ? { supplier: supplier.trim() } : {}),
           ...(purpose.trim() ? { purpose: purpose.trim() } : {}),
           ...(productAge.trim() ? { productAge: Number(productAge) } : {}),
+          safetyRules: parseSafetyRules(safetyRulesText),
           ...(showLoanHours && defaultLoanHours.trim()
             ? { defaultLoanHours: Number(defaultLoanHours) }
             : {}),
@@ -302,6 +304,26 @@ export default function AddGemachToolPage() {
                 />
               </div>
             </fieldset>
+
+            <div>
+              <label
+                htmlFor="safetyRules"
+                className="mb-1.5 block text-sm font-semibold text-stone-800"
+              >
+                הוראות בטיחות (אופציונלי)
+              </label>
+              <textarea
+                id="safetyRules"
+                rows={3}
+                value={safetyRulesText}
+                onChange={(e) => setSafetyRulesText(e.target.value)}
+                placeholder={"שורה לכל הוראה, למשל:\nיש להרכיב משקפי מגן\nלנתק מהחשמל לפני החלפת דיסק"}
+                className="w-full rounded-xl border border-[var(--border)] px-4 py-3 text-sm focus:border-kerem-500 focus:outline-none focus:ring-2 focus:ring-kerem-200"
+              />
+              <p className="mt-1 text-xs text-[var(--muted)]">
+                השואל יאשר את ההוראות לפני לקיחת הכלי. אפשר להשאיר ריק — אז לא יוצג שלב בטיחות.
+              </p>
+            </div>
 
             <div>
               <label htmlFor="category" className="mb-1.5 block text-sm font-semibold text-stone-800">
