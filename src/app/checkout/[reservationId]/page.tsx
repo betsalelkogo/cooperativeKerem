@@ -17,6 +17,7 @@ import { authFetch } from "@/lib/api-client";
 import { compressImageFile } from "@/lib/compress-image";
 import { canStartCheckout } from "@/lib/reservation-checkout";
 import { REQUIRE_QR_SCAN } from "@/lib/features";
+import { PLATFORM_GEMACH_ID } from "@/lib/gemach";
 import type { Reservation, Tool } from "@/lib/types";
 
 type Step = "payment" | "qr" | "items" | "safety" | "condition" | "photo" | "done";
@@ -178,6 +179,7 @@ export default function CheckoutPage() {
           reservationId={reservation.id}
           amount={reservation.feeAmount}
           toolName={tool.name}
+          platform={tool.gemachId === PLATFORM_GEMACH_ID}
           onPaid={() => setStep(stepAfterPayment(hasItems, hasSafety))}
         />
       )}

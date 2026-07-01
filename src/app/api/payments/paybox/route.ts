@@ -15,6 +15,7 @@ import type { MemberPayment } from "@/lib/types";
 import { createGrowPaymentLink } from "@/lib/paybox/grow";
 import { isGrowConfigured } from "@/lib/paybox/config";
 import { partnerUsesOwnPaybox, resolveCheckoutPayboxUrl } from "@/lib/paybox/gemach-paybox";
+import { isPlatformGemach } from "@/lib/gemach";
 
 export async function GET(request: Request) {
   try {
@@ -95,6 +96,14 @@ export async function POST(request: Request) {
     const gemach = await getGemachById(tool.gemachId);
     if (!gemach) {
       return NextResponse.json({ error: "גמ״ח לא נמצא" }, { status: 404 });
+    }
+
+    // The cooperative accepts internal balance only — PayBox is disabled there.
+    if (isPlatformGemach(gemach)) {
+      return NextResponse.json(
+        { error: "בקואופרטיב התשלום מתבצע מהיתרה הפנימית בלבד" },
+        { status: 400 }
+      );
     }
 
     const payboxResolved = resolveCheckoutPayboxUrl(gemach, settings);

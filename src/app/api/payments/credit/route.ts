@@ -2,8 +2,11 @@ import { NextResponse } from "next/server";
 import { getUidFromRequest } from "@/lib/firebase/admin";
 import {
   applyCreditToReservationPayment,
+  getGemachById,
   getReservationById,
+  getToolById,
 } from "@/lib/firestore/repository";
+import { isPlatformGemach } from "@/lib/gemach";
 
 export async function POST(request: Request) {
   try {
@@ -27,6 +30,16 @@ export async function POST(request: Request) {
     }
     if (reservation.feeAmount <= 0) {
       return NextResponse.json({ error: "אין דמי השאלה לתשלום" }, { status: 400 });
+    }
+
+    // Internal balance may only be spent inside the cooperative, never at a gemach.
+    const tool = await getToolById(reservation.toolId);
+    const gemach = tool ? await getGemachById(tool.gemachId) : null;
+    if (!gemach || !isPlatformGemach(gemach)) {
+      return NextResponse.json(
+        { error: "תשלום מהיתרה הפנימית זמין רק בקואופרטיב" },
+        { status: 403 }
+      );
     }
 
     const result = await applyCreditToReservationPayment({ reservation, memberId });

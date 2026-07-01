@@ -15,6 +15,8 @@ interface PayboxPaymentStepProps {
   amount: number;
   toolName: string;
   onPaid: () => void;
+  /** Cooperative loans are paid from the internal balance only (no PayBox). */
+  platform?: boolean;
 }
 
 const RETURN_KEY = (id: string) => `kerem-paybox-return-${id}`;
@@ -24,6 +26,7 @@ export function PayboxPaymentStep({
   amount,
   toolName,
   onPaid,
+  platform = false,
 }: PayboxPaymentStepProps) {
   const { user, member, getIdToken, refreshMember } = useAuth();
   const [payment, setPayment] = useState<MemberPayment | null>(null);
@@ -236,33 +239,39 @@ export function PayboxPaymentStep({
             )}
           </div>
 
-          {creditApplied === 0 && balance > 0 && (
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-              <p className="text-sm font-semibold text-emerald-900">
-                יתרה פנימית זמינה: {formatNIS(balance)}
-              </p>
-              <p className="mt-1 text-xs text-emerald-800">
-                {balance >= amount
-                  ? "ניתן לשלם את כל דמי ההשאלה מהיתרה."
-                  : `ניתן לשלם ${formatNIS(balance)} מהיתרה — היתרה (${formatNIS(
-                      amount - balance
-                    )}) תשולם ב-PayBox.`}
-              </p>
-              <Button
-                type="button"
-                onClick={applyCredit}
-                disabled={applyingCredit}
-                className="mt-3 w-full bg-emerald-600 hover:bg-emerald-700"
-                size="lg"
-              >
-                {applyingCredit
-                  ? "מחיל יתרה…"
-                  : `שלם ${formatNIS(Math.min(balance, amount))} מהיתרה`}
-              </Button>
-            </div>
-          )}
+          {platform ? (
+            // ── Cooperative: internal balance only, no PayBox ──
+            <div className="space-y-3">
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <p className="text-sm font-semibold text-emerald-900">
+                  יתרה פנימית זמינה: {formatNIS(balance)}
+                </p>
+                <p className="mt-1 text-xs text-emerald-800">
+                  בקואופרטיב התשלום מתבצע מהיתרה הפנימית בלבד.
+                </p>
+              </div>
 
-          {remaining <= 0 ? null : !hasPayUrl ? (
+              {remaining <= 0 ? null : balance >= remaining ? (
+                <Button
+                  type="button"
+                  onClick={applyCredit}
+                  disabled={applyingCredit}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700"
+                  size="lg"
+                >
+                  {applyingCredit
+                    ? "מחיל יתרה…"
+                    : `שלם ${formatNIS(remaining)} מהיתרה והמשך ללקיחה`}
+                </Button>
+              ) : (
+                <Alert variant="error">
+                  אין מספיק יתרה פנימית לתשלום דמי ההשאלה. פנו למנהל הקואופרטיב להטענת
+                  יתרה.
+                </Alert>
+              )}
+            </div>
+          ) : remaining <= 0 ? null : !hasPayUrl ? (
+            // ── Gemach: PayBox only ──
             <Button
               type="button"
               onClick={createPayment}

@@ -5,15 +5,18 @@ import {
   getReservationsByMember,
   getToolById,
   getGemachById,
+  getMemberById,
   updateToolStatus,
   pickAvailableToolUnits,
   pickAvailableToolUnit,
 } from "@/lib/firestore/repository";
 import {
+  isPlatformGemach,
   resolveGemachReservationMode,
   resolveTotalReservationFee,
   resolveToolDefaultLoanHours,
 } from "@/lib/gemach";
+import { formatNIS } from "@/lib/pots";
 import {
   computeFixedHoursReservation,
   minutesToTime,
@@ -189,6 +192,25 @@ export async function POST(request: Request) {
       tool,
       units.length
     );
+
+    // Cooperative loans are paid from the internal balance only — block the
+    // booking up-front when the member can't cover the fee (no PayBox fallback).
+    if (isPlatformGemach(gemach) && feeAmount > 0) {
+      const member = await getMemberById(memberId);
+      const balance = member?.creditBalance ?? 0;
+      if (balance < feeAmount) {
+        return NextResponse.json(
+          {
+            error:
+              balance <= 0
+                ? "אין לך יתרה פנימית. בקואופרטיב ההשאלה מתבצעת מהיתרה בלבד — פנו למנהל להטענת יתרה."
+                : `היתרה הפנימית שלך (${formatNIS(balance)}) אינה מספיקה לדמי ההשאלה (${formatNIS(feeAmount)}).`,
+          },
+          { status: 402 }
+        );
+      }
+    }
+
     const kindIdResolved = tool.kindId ?? tool.id;
     const toolIds = units.map((u) => u.id);
     const groupId = toolIds.length > 1 ? `grp-${Date.now()}` : undefined;
