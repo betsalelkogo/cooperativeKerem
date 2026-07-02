@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthProvider";
 import { isAdminMember, isGemachAdmin, isPlatformAdmin } from "@/lib/admin";
+import { formatNIS } from "@/lib/pots";
 import { cn } from "@/lib/cn";
 import type { Member } from "@/lib/types";
 import { SiteLogo } from "@/components/layout/SiteLogo";
@@ -99,6 +100,15 @@ export function AuthNav() {
         </nav>
 
         <div className="flex items-center gap-2">
+          {user && member && (
+            <span
+              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-800"
+              title="היתרה הפנימית שלך"
+            >
+              <span aria-hidden>💰</span>
+              {formatNIS(member.creditBalance ?? 0)}
+            </span>
+          )}
           {loading ? (
             <div className="h-10 w-16 animate-pulse rounded-xl bg-warm-100" />
           ) : user ? (
