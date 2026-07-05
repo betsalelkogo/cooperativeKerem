@@ -235,7 +235,7 @@ export function PayboxPaymentStep({
             </p>
             {creditApplied > 0 && (
               <p className="mt-1 text-sm font-semibold text-emerald-700">
-                שולם {fmt(creditApplied)} מהיתרה הפנימית · נותר לתשלום{" "}
+                שולם {fmt(creditApplied)} מהיתרה · נותר לתשלום{" "}
                 {fmt(remaining)}
               </p>
             )}
@@ -246,10 +246,10 @@ export function PayboxPaymentStep({
             <div className="space-y-3">
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
                 <p className="text-sm font-semibold text-emerald-900">
-                  יתרה פנימית זמינה: {formatCredits(balance)}
+                  יתרה זמינה: {formatCredits(balance)}
                 </p>
                 <p className="mt-1 text-xs text-emerald-800">
-                  בקואופרטיב התשלום מתבצע מהיתרה הפנימית בלבד.
+                  בקואופרטיב התשלום מתבצע מהיתרה בלבד.
                 </p>
               </div>
 
@@ -267,7 +267,7 @@ export function PayboxPaymentStep({
                 </Button>
               ) : (
                 <Alert variant="error">
-                  אין מספיק יתרה פנימית לתשלום דמי ההשאלה. פנו למנהל הקואופרטיב להטענת
+                  אין מספיק יתרה לתשלום דמי ההשאלה. פנו למנהל הקואופרטיב להטענת
                   יתרה.
                 </Alert>
               )}

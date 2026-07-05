@@ -203,8 +203,8 @@ export async function POST(request: Request) {
           {
             error:
               balance <= 0
-                ? "אין לך יתרה פנימית. בקואופרטיב ההשאלה מתבצעת מהיתרה בלבד — פנו למנהל להטענת יתרה."
-                : `היתרה הפנימית שלך (${formatCredits(balance)}) אינה מספיקה לדמי ההשאלה (${formatCredits(feeAmount)}).`,
+                ? "אין לך יתרה. בקואופרטיב ההשאלה מתבצעת מהיתרה בלבד — פנו למנהל להטענת יתרה."
+                : `היתרה שלך (${formatCredits(balance)}) אינה מספיקה לדמי ההשאלה (${formatCredits(feeAmount)}).`,
           },
           { status: 402 }
         );

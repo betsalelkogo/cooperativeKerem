@@ -105,7 +105,7 @@ export function AuthNav() {
             <Link
               href="/account"
               className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-800 transition hover:bg-emerald-100"
-              title="העו״ש שלי — היתרה הפנימית"
+              title="העו״ש שלי — היתרה"
             >
               <span aria-hidden>💰</span>
               {formatCredits(member.creditBalance ?? 0)}

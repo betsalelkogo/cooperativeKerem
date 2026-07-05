@@ -1926,7 +1926,7 @@ export async function applyCreditToReservationPayment(params: {
       delta: -creditApply,
       balanceAfter,
       reason: "payment_debit",
-      note: `תשלום מהיתרה הפנימית — השאלה ${reservation.id}`,
+      note: `תשלום מהיתרה — השאלה ${reservation.id}`,
       reservationId: reservation.id,
       createdBy: memberId,
       createdAt: FieldValue.serverTimestamp(),
@@ -2083,7 +2083,7 @@ export async function transferCreditToMember(params: {
     const toBalance = memberCreditBalance(toData);
 
     if (fromBalance < amount) {
-      throw new Error("אין מספיק יתרה פנימית להעברה");
+      throw new Error("אין מספיק יתרה להעברה");
     }
 
     const fromName = (fromData.name as string) ?? "חבר/ה";
@@ -2112,7 +2112,7 @@ export async function transferCreditToMember(params: {
       delta: -amount,
       balanceAfter: fromAfter,
       reason: "peer_transfer_out",
-      note: `העברת קרדיט למשפחת ${toName}`,
+      note: `העברת קרדיט לחבר ${toName}`,
       peerLoanId: loanRef.id,
       createdBy: fromMemberId,
       createdAt: FieldValue.serverTimestamp(),
@@ -2123,7 +2123,7 @@ export async function transferCreditToMember(params: {
       delta: amount,
       balanceAfter: toAfter,
       reason: "peer_transfer_in",
-      note: `קבלת קרדיט ממשפחת ${fromName}`,
+      note: `קבלת קרדיט מחבר ${fromName}`,
       peerLoanId: loanRef.id,
       createdBy: fromMemberId,
       createdAt: FieldValue.serverTimestamp(),
@@ -2202,7 +2202,7 @@ export async function repayPeerCreditDebt(params: {
       delta: -totalRounded,
       balanceAfter: borrowerAfter,
       reason: "peer_repay_out",
-      note: `החזר חוב למשפחת ${lenderName}`,
+      note: `החזר חוב לחבר ${lenderName}`,
       createdBy: borrowerId,
       createdAt: FieldValue.serverTimestamp(),
     });
@@ -2212,7 +2212,7 @@ export async function repayPeerCreditDebt(params: {
       delta: totalRounded,
       balanceAfter: lenderAfter,
       reason: "peer_repay_in",
-      note: `קבלת החזר ממשפחת ${borrowerName}`,
+      note: `קבלת החזר מחבר ${borrowerName}`,
       createdBy: borrowerId,
       createdAt: FieldValue.serverTimestamp(),
     });

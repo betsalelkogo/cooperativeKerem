@@ -37,7 +37,7 @@ export async function POST(request: Request) {
     const gemach = tool ? await getGemachById(tool.gemachId) : null;
     if (!gemach || !isPlatformGemach(gemach)) {
       return NextResponse.json(
-        { error: "תשלום מהיתרה הפנימית זמין רק בקואופרטיב" },
+        { error: "תשלום מהיתרה זמין רק בקואופרטיב" },
         { status: 403 }
       );
     }

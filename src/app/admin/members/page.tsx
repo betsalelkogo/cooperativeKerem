@@ -287,7 +287,7 @@ export default function AdminMembersPage() {
               <Card className="border-kerem-200">
                 <CardBody className="py-4">
                   <div className="flex items-baseline justify-between">
-                    <h3 className="font-bold text-stone-900">יתרה פנימית</h3>
+                    <h3 className="font-bold text-stone-900">יתרה</h3>
                     <span className="text-2xl font-extrabold text-kerem-800">
                       {formatCredits(selected.member.creditBalance)}
                     </span>

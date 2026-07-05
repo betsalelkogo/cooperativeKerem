@@ -61,8 +61,16 @@ export default function AccountContent() {
   const [notice, setNotice] = useState("");
 
   const [toMemberId, setToMemberId] = useState("");
+  const [memberQuery, setMemberQuery] = useState("");
+  const [memberListOpen, setMemberListOpen] = useState(false);
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
+
+  const filteredMembers = useMemo(() => {
+    const q = memberQuery.trim().toLowerCase();
+    const list = q ? members.filter((m) => m.name.toLowerCase().includes(q)) : members;
+    return list.slice(0, 8);
+  }, [members, memberQuery]);
 
   const load = useCallback(async () => {
     const token = await getIdToken();
@@ -152,6 +160,7 @@ export default function AccountContent() {
     );
     setAmount("");
     setToMemberId("");
+    setMemberQuery("");
   }, [amount, toMemberId, getIdToken, runAction]);
 
   const handleRepay = useCallback(
@@ -176,12 +185,12 @@ export default function AccountContent() {
     <div className="mx-auto max-w-2xl">
       <PageHeader
         title="העו״ש שלי"
-        description="כל התנועות ביתרה הפנימית — טעינות קרדיט, תשלומים והלוואות בין חברים."
+        description="כל התנועות ביתרה — טעינות קרדיט, תשלומים והלוואות בין חברים."
       />
 
       <Card className="mb-6 border-emerald-200 bg-emerald-50 shadow-sm">
         <CardBody className="py-6 text-center">
-          <p className="text-sm font-semibold text-emerald-800">היתרה הפנימית שלך</p>
+          <p className="text-sm font-semibold text-emerald-800">היתרה שלך</p>
           <p className="mt-1 text-4xl font-bold text-emerald-900">{formatCredits(balance)}</p>
         </CardBody>
       </Card>
@@ -215,7 +224,7 @@ export default function AccountContent() {
                       <CardBody className="flex flex-wrap items-center justify-between gap-3 py-3">
                         <div>
                           <p className="font-semibold text-red-900">
-                            אתם חייבים {formatCredits(debt.total)} למשפחת {debt.counterpartyName}
+                            אתם חייבים {formatCredits(debt.total)} לחבר {debt.counterpartyName}
                           </p>
                           {!canRepay && (
                             <p className="mt-0.5 text-xs text-red-700">
@@ -248,7 +257,7 @@ export default function AccountContent() {
                   <Card key={debt.counterpartyId} className="border-emerald-200 bg-emerald-50">
                     <CardBody className="py-3">
                       <p className="font-semibold text-emerald-900">
-                        משפחת {debt.counterpartyName} חייבת לכם {formatCredits(debt.total)}
+                        החבר {debt.counterpartyName} חייב לכם {formatCredits(debt.total)}
                       </p>
                     </CardBody>
                   </Card>
@@ -269,22 +278,51 @@ export default function AccountContent() {
                   חבר נתקע בלי יתרה? העבירו לו קרדיט בלחיצת כפתור. המערכת תזכור את החוב
                   אוטומטית עד שיוחזר.
                 </p>
-                <div>
+                <div className="relative">
                   <label className="mb-1 block text-sm font-semibold text-stone-800">
                     למי להעביר
                   </label>
-                  <select
-                    value={toMemberId}
-                    onChange={(e) => setToMemberId(e.target.value)}
+                  <input
+                    type="text"
+                    value={memberQuery}
+                    onChange={(e) => {
+                      setMemberQuery(e.target.value);
+                      setToMemberId("");
+                      setMemberListOpen(true);
+                    }}
+                    onFocus={() => setMemberListOpen(true)}
+                    onBlur={() => setTimeout(() => setMemberListOpen(false), 150)}
+                    placeholder="הקלידו שם חבר לחיפוש…"
+                    autoComplete="off"
                     className="w-full rounded-xl border border-[var(--border)] bg-white px-3 py-2.5 text-sm focus:border-kerem-500 focus:outline-none focus:ring-2 focus:ring-kerem-200"
-                  >
-                    <option value="">בחרו משפחה…</option>
-                    {members.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.name}
-                      </option>
-                    ))}
-                  </select>
+                  />
+                  {memberListOpen && (
+                    <ul className="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded-xl border border-[var(--border)] bg-white py-1 shadow-lg">
+                      {filteredMembers.length === 0 ? (
+                        <li className="px-3 py-2 text-sm text-[var(--muted)]">לא נמצאו חברים</li>
+                      ) : (
+                        filteredMembers.map((m) => (
+                          <li key={m.id}>
+                            <button
+                              type="button"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                setToMemberId(m.id);
+                                setMemberQuery(m.name);
+                                setMemberListOpen(false);
+                              }}
+                              className={
+                                "flex w-full items-center px-3 py-2 text-right text-sm transition hover:bg-kerem-50 " +
+                                (m.id === toMemberId ? "bg-kerem-50 font-semibold text-kerem-800" : "text-stone-800")
+                              }
+                            >
+                              {m.name}
+                            </button>
+                          </li>
+                        ))
+                      )}
+                    </ul>
+                  )}
                 </div>
                 <div>
                   <label className="mb-1 block text-sm font-semibold text-stone-800">

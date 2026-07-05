@@ -101,7 +101,7 @@ export async function POST(request: Request) {
     // The cooperative accepts internal balance only — PayBox is disabled there.
     if (isPlatformGemach(gemach)) {
       return NextResponse.json(
-        { error: "בקואופרטיב התשלום מתבצע מהיתרה הפנימית בלבד" },
+        { error: "בקואופרטיב התשלום מתבצע מהיתרה בלבד" },
         { status: 400 }
       );
     }
