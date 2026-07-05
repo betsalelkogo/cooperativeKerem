@@ -8,7 +8,7 @@ import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
 import { loanStatusLabels, reservationStatusLabels } from "@/lib/labels";
 import { formatDateHe } from "@/lib/dates";
-import { formatNIS } from "@/lib/pots";
+import { formatCredits } from "@/lib/pots";
 import { LoanPhotoThumb } from "@/components/admin/LoanPhotoThumb";
 import type {
   AdminMemberHistory,
@@ -30,6 +30,10 @@ const creditReasonLabels: Record<CreditLedgerReason, string> = {
   tool_sale: "מכירת כלי לקואופרטיב",
   refund: "החזר",
   payment_debit: "תשלום מהיתרה",
+  peer_transfer_out: "העברת קרדיט לחבר",
+  peer_transfer_in: "קבלת קרדיט מחבר",
+  peer_repay_out: "החזר חוב לחבר",
+  peer_repay_in: "קבלת החזר חוב מחבר",
 };
 
 export default function AdminMembersPage() {
@@ -285,7 +289,7 @@ export default function AdminMembersPage() {
                   <div className="flex items-baseline justify-between">
                     <h3 className="font-bold text-stone-900">יתרה פנימית</h3>
                     <span className="text-2xl font-extrabold text-kerem-800">
-                      {formatNIS(selected.member.creditBalance)}
+                      {formatCredits(selected.member.creditBalance)}
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-[var(--muted)]">
@@ -312,7 +316,7 @@ export default function AdminMembersPage() {
                         inputMode="decimal"
                         value={creditAmount}
                         onChange={(e) => setCreditAmount(e.target.value)}
-                        placeholder="סכום ₪"
+                        placeholder="סכום שֶׁכֵּלִים"
                         className="w-28 rounded-xl border border-[var(--border)] px-3 py-2 text-sm"
                       />
                     </div>
@@ -364,7 +368,7 @@ export default function AdminMembersPage() {
                               )}
                               <span className="block text-[var(--muted)]">
                                 {formatDateHe(entry.createdAt, true)} · יתרה:{" "}
-                                {formatNIS(entry.balanceAfter)}
+                                {formatCredits(entry.balanceAfter)}
                               </span>
                             </div>
                             <span
@@ -375,7 +379,7 @@ export default function AdminMembersPage() {
                               }
                             >
                               {entry.delta >= 0 ? "+" : "−"}
-                              {formatNIS(Math.abs(entry.delta))}
+                              {formatCredits(Math.abs(entry.delta))}
                             </span>
                           </div>
                         ))}

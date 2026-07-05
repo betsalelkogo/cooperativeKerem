@@ -381,7 +381,15 @@ export type CreditLedgerReason =
   | "manual_adjustment"
   | "tool_sale"
   | "payment_debit"
-  | "refund";
+  | "refund"
+  /** Credit sent to another member (lender side, negative). */
+  | "peer_transfer_out"
+  /** Credit received from another member (borrower side, positive). */
+  | "peer_transfer_in"
+  /** Debt repayment sent back to the lender (borrower side, negative). */
+  | "peer_repay_out"
+  /** Debt repayment received (lender side, positive). */
+  | "peer_repay_in";
 
 /** Audit entry for every change to a member's internal balance. */
 export interface CreditLedgerEntry {
@@ -395,9 +403,37 @@ export interface CreditLedgerEntry {
   note?: string;
   /** Linked reservation for payment debits. */
   reservationId?: string;
+  /** Linked peer-loan for transfer / repayment entries. */
+  peerLoanId?: string;
   /** UID of the actor (platform admin for manual entries, member for debits). */
   createdBy: string;
   createdAt: string;
+}
+
+/**
+ * A peer-to-peer credit loan: one member ("lender") transferred credit to
+ * another ("borrower"). The borrower owes `outstanding` back to the lender.
+ */
+export interface PeerCreditLoan {
+  id: string;
+  lenderId: string;
+  lenderName: string;
+  borrowerId: string;
+  borrowerName: string;
+  /** Original amount transferred (₪). */
+  principal: number;
+  /** Amount still owed by the borrower to the lender (₪). */
+  outstanding: number;
+  status: "open" | "settled";
+  createdAt: string;
+  settledAt?: string;
+}
+
+/** Aggregated open debt to/from a single counterparty. */
+export interface PeerDebtSummary {
+  counterpartyId: string;
+  counterpartyName: string;
+  total: number;
 }
 
 export interface AdminDashboardLoan {

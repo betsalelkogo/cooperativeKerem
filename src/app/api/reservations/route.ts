@@ -16,7 +16,7 @@ import {
   resolveTotalReservationFee,
   resolveToolDefaultLoanHours,
 } from "@/lib/gemach";
-import { formatNIS } from "@/lib/pots";
+import { formatCredits } from "@/lib/pots";
 import {
   computeFixedHoursReservation,
   minutesToTime,
@@ -204,7 +204,7 @@ export async function POST(request: Request) {
             error:
               balance <= 0
                 ? "אין לך יתרה פנימית. בקואופרטיב ההשאלה מתבצעת מהיתרה בלבד — פנו למנהל להטענת יתרה."
-                : `היתרה הפנימית שלך (${formatNIS(balance)}) אינה מספיקה לדמי ההשאלה (${formatNIS(feeAmount)}).`,
+                : `היתרה הפנימית שלך (${formatCredits(balance)}) אינה מספיקה לדמי ההשאלה (${formatCredits(feeAmount)}).`,
           },
           { status: 402 }
         );

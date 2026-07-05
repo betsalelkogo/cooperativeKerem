@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatNIS } from "@/lib/pots";
+import { formatCredits, formatNIS } from "@/lib/pots";
 import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
 import { Card, CardBody } from "@/components/ui/Card";
@@ -41,6 +41,8 @@ export function PayboxPaymentStep({
 
   const balance = member?.creditBalance ?? 0;
   const remaining = Math.max(0, Math.round((amount - creditApplied) * 100) / 100);
+  // Cooperative loans are paid in the internal currency ("שכלים"); gemachim in ₪.
+  const fmt = platform ? formatCredits : formatNIS;
   const hasPayUrl = Boolean(payment?.growPaymentUrl || payment?.payboxGroupUrl);
 
   const checkoutUrl =
@@ -229,12 +231,12 @@ export function PayboxPaymentStep({
             </span>
             <h2 className="text-xl font-bold text-stone-900">תשלום דמי השאלה</h2>
             <p className="mt-2 text-sm text-[var(--muted)]">
-              {toolName} · {formatNIS(amount)} · קבוצת «קאופורטיב טסט»
+              {toolName} · {fmt(amount)} · קבוצת «קאופורטיב טסט»
             </p>
             {creditApplied > 0 && (
               <p className="mt-1 text-sm font-semibold text-emerald-700">
-                שולם {formatNIS(creditApplied)} מהיתרה הפנימית · נותר לתשלום{" "}
-                {formatNIS(remaining)}
+                שולם {fmt(creditApplied)} מהיתרה הפנימית · נותר לתשלום{" "}
+                {fmt(remaining)}
               </p>
             )}
           </div>
@@ -244,7 +246,7 @@ export function PayboxPaymentStep({
             <div className="space-y-3">
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
                 <p className="text-sm font-semibold text-emerald-900">
-                  יתרה פנימית זמינה: {formatNIS(balance)}
+                  יתרה פנימית זמינה: {formatCredits(balance)}
                 </p>
                 <p className="mt-1 text-xs text-emerald-800">
                   בקואופרטיב התשלום מתבצע מהיתרה הפנימית בלבד.
@@ -261,7 +263,7 @@ export function PayboxPaymentStep({
                 >
                   {applyingCredit
                     ? "מחיל יתרה…"
-                    : `שלם ${formatNIS(remaining)} מהיתרה והמשך ללקיחה`}
+                    : `שלם ${formatCredits(remaining)} מהיתרה והמשך ללקיחה`}
                 </Button>
               ) : (
                 <Alert variant="error">

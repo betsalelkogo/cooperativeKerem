@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthProvider";
 import { isAdminMember, isGemachAdmin, isPlatformAdmin } from "@/lib/admin";
-import { formatNIS } from "@/lib/pots";
+import { formatCredits } from "@/lib/pots";
 import { cn } from "@/lib/cn";
 import type { Member } from "@/lib/types";
 import { SiteLogo } from "@/components/layout/SiteLogo";
@@ -13,6 +13,7 @@ const baseNavItems = [
   { href: "/tools", label: "כלים" },
   { href: "/my-reservations", label: "שריונים" },
   { href: "/my-loans", label: "השאלות" },
+  { href: "/account", label: "עו״ש" },
 ];
 
 const platformAdminNavItems = [
@@ -101,13 +102,14 @@ export function AuthNav() {
 
         <div className="flex items-center gap-2">
           {user && member && (
-            <span
-              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-800"
-              title="היתרה הפנימית שלך"
+            <Link
+              href="/account"
+              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-800 transition hover:bg-emerald-100"
+              title="העו״ש שלי — היתרה הפנימית"
             >
               <span aria-hidden>💰</span>
-              {formatNIS(member.creditBalance ?? 0)}
-            </span>
+              {formatCredits(member.creditBalance ?? 0)}
+            </Link>
           )}
           {loading ? (
             <div className="h-10 w-16 animate-pulse rounded-xl bg-warm-100" />

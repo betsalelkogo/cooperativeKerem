@@ -8,6 +8,8 @@ import type {
   AdminMemberSummary,
   BoardDashboardData,
   CreditLedgerEntry,
+  PeerCreditLoan,
+  PeerDebtSummary,
   DefectRecord,
   Dispute,
   DisputeStatus,
@@ -141,7 +143,10 @@ function parseDefectRecord(value: unknown): DefectRecord | undefined {
 }
 
 function newId(prefix: string) {
-  return `${prefix}-${Date.now()}`;
+  // Timestamp keeps ids roughly sortable; the random suffix prevents
+  // collisions when several ids are minted within the same millisecond
+  // (e.g. the two ledger entries created for a peer credit transfer).
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function reservationToolIds(reservation: Reservation): string[] {
@@ -1772,6 +1777,7 @@ function creditLedgerFromDoc(id: string, data: DocumentData): CreditLedgerEntry 
     reason: (data.reason as CreditLedgerEntry["reason"]) ?? "manual_adjustment",
     note: typeof data.note === "string" ? data.note : undefined,
     reservationId: typeof data.reservationId === "string" ? data.reservationId : undefined,
+    peerLoanId: typeof data.peerLoanId === "string" ? data.peerLoanId : undefined,
     createdBy: (data.createdBy as string) ?? "",
     createdAt: data.createdAt ? tsToIso(data.createdAt) : new Date().toISOString(),
   };
@@ -1962,6 +1968,259 @@ export async function applyCreditToReservationPayment(params: {
   const creditApplied = payment.creditApplied ?? 0;
   const remaining = Math.max(0, Math.round((fee - creditApplied) * 100) / 100);
   return { payment, creditApplied, remaining, paid: remaining <= 0 };
+}
+
+// ─── Peer credit loans (mutual guarantee) ───────────────────────────────────
+
+function peerLoanFromDoc(id: string, data: DocumentData): PeerCreditLoan {
+  return {
+    id,
+    lenderId: data.lenderId as string,
+    lenderName: (data.lenderName as string) ?? "",
+    borrowerId: data.borrowerId as string,
+    borrowerName: (data.borrowerName as string) ?? "",
+    principal: typeof data.principal === "number" ? data.principal : 0,
+    outstanding: typeof data.outstanding === "number" ? data.outstanding : 0,
+    status: data.status === "settled" ? "settled" : "open",
+    createdAt: data.createdAt ? tsToIso(data.createdAt) : new Date().toISOString(),
+    settledAt: data.settledAt ? tsToIso(data.settledAt) : undefined,
+  };
+}
+
+/** Members a borrower can receive credit from / send credit to (id + name only). */
+export async function listMemberDirectory(
+  excludeId?: string
+): Promise<Array<{ id: string; name: string }>> {
+  const snap = await getAdminDb().collection("members").get();
+  return snap.docs
+    .map((d) => ({ id: d.id, name: (d.data().name as string) ?? "חבר/ה" }))
+    .filter((m) => m.id !== excludeId)
+    .sort((a, b) => a.name.localeCompare(b.name, "he"));
+}
+
+/** Open debts a member owes (as borrower) and is owed (as lender), aggregated. */
+export async function getPeerCreditSummary(memberId: string): Promise<{
+  owed: PeerDebtSummary[];
+  lent: PeerDebtSummary[];
+}> {
+  const db = getAdminDb();
+  const [owedSnap, lentSnap] = await Promise.all([
+    db
+      .collection("credit_loans")
+      .where("borrowerId", "==", memberId)
+      .where("status", "==", "open")
+      .get(),
+    db
+      .collection("credit_loans")
+      .where("lenderId", "==", memberId)
+      .where("status", "==", "open")
+      .get(),
+  ]);
+
+  const aggregate = (
+    loans: PeerCreditLoan[],
+    counterparty: "lender" | "borrower"
+  ): PeerDebtSummary[] => {
+    const map = new Map<string, PeerDebtSummary>();
+    for (const loan of loans) {
+      if (loan.outstanding <= 0) continue;
+      const id = counterparty === "lender" ? loan.lenderId : loan.borrowerId;
+      const name = counterparty === "lender" ? loan.lenderName : loan.borrowerName;
+      const existing = map.get(id);
+      if (existing) existing.total = Math.round((existing.total + loan.outstanding) * 100) / 100;
+      else map.set(id, { counterpartyId: id, counterpartyName: name, total: loan.outstanding });
+    }
+    return [...map.values()].sort((a, b) => b.total - a.total);
+  };
+
+  return {
+    owed: aggregate(
+      owedSnap.docs.map((d) => peerLoanFromDoc(d.id, d.data())),
+      "lender"
+    ),
+    lent: aggregate(
+      lentSnap.docs.map((d) => peerLoanFromDoc(d.id, d.data())),
+      "borrower"
+    ),
+  };
+}
+
+/**
+ * Transfer internal credit from one member to another and record the debt.
+ * The recipient owes the sender back. Atomic: balances, ledger entries and the
+ * loan record all move together.
+ */
+export async function transferCreditToMember(params: {
+  fromMemberId: string;
+  toMemberId: string;
+  amount: number;
+}): Promise<{ loan: PeerCreditLoan }> {
+  const { fromMemberId, toMemberId } = params;
+  const amount = Math.round(params.amount * 100) / 100;
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("סכום ההעברה אינו תקין");
+  }
+  if (fromMemberId === toMemberId) {
+    throw new Error("לא ניתן להעביר קרדיט לעצמכם");
+  }
+
+  const db = getAdminDb();
+  const fromRef = db.collection("members").doc(fromMemberId);
+  const toRef = db.collection("members").doc(toMemberId);
+  const loanRef = db.collection("credit_loans").doc(newId("cloan"));
+  const fromLedgerRef = db.collection("credit_ledger").doc(newId("cl"));
+  const toLedgerRef = db.collection("credit_ledger").doc(newId("cl"));
+
+  await db.runTransaction(async (txn) => {
+    const [fromSnap, toSnap] = await Promise.all([txn.get(fromRef), txn.get(toRef)]);
+    if (!fromSnap.exists) throw new Error("החשבון שלך לא נמצא");
+    if (!toSnap.exists) throw new Error("המשתמש שאליו מעבירים לא נמצא");
+
+    const fromData = fromSnap.data() ?? {};
+    const toData = toSnap.data() ?? {};
+    const fromBalance = memberCreditBalance(fromData);
+    const toBalance = memberCreditBalance(toData);
+
+    if (fromBalance < amount) {
+      throw new Error("אין מספיק יתרה פנימית להעברה");
+    }
+
+    const fromName = (fromData.name as string) ?? "חבר/ה";
+    const toName = (toData.name as string) ?? "חבר/ה";
+    const fromAfter = Math.round((fromBalance - amount) * 100) / 100;
+    const toAfter = Math.round((toBalance + amount) * 100) / 100;
+
+    txn.set(fromRef, { creditBalance: fromAfter, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    txn.set(toRef, { creditBalance: toAfter, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+
+    txn.set(loanRef, {
+      id: loanRef.id,
+      lenderId: fromMemberId,
+      lenderName: fromName,
+      borrowerId: toMemberId,
+      borrowerName: toName,
+      principal: amount,
+      outstanding: amount,
+      status: "open",
+      createdAt: FieldValue.serverTimestamp(),
+    });
+
+    txn.set(fromLedgerRef, {
+      id: fromLedgerRef.id,
+      memberId: fromMemberId,
+      delta: -amount,
+      balanceAfter: fromAfter,
+      reason: "peer_transfer_out",
+      note: `העברת קרדיט למשפחת ${toName}`,
+      peerLoanId: loanRef.id,
+      createdBy: fromMemberId,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    txn.set(toLedgerRef, {
+      id: toLedgerRef.id,
+      memberId: toMemberId,
+      delta: amount,
+      balanceAfter: toAfter,
+      reason: "peer_transfer_in",
+      note: `קבלת קרדיט ממשפחת ${fromName}`,
+      peerLoanId: loanRef.id,
+      createdBy: fromMemberId,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+  });
+
+  const loanSnap = await loanRef.get();
+  return { loan: peerLoanFromDoc(loanRef.id, loanSnap.data() ?? {}) };
+}
+
+/**
+ * Repay, in full, every open debt the borrower owes to one counterparty
+ * (lender). Moves credit back and settles the loans atomically.
+ */
+export async function repayPeerCreditDebt(params: {
+  borrowerId: string;
+  lenderId: string;
+}): Promise<{ repaid: number }> {
+  const { borrowerId, lenderId } = params;
+  if (borrowerId === lenderId) throw new Error("בקשה לא תקינה");
+
+  const db = getAdminDb();
+  const borrowerRef = db.collection("members").doc(borrowerId);
+  const lenderRef = db.collection("members").doc(lenderId);
+  const openLoansQuery = db
+    .collection("credit_loans")
+    .where("borrowerId", "==", borrowerId)
+    .where("lenderId", "==", lenderId)
+    .where("status", "==", "open");
+  const borrowerLedgerRef = db.collection("credit_ledger").doc(newId("cl"));
+  const lenderLedgerRef = db.collection("credit_ledger").doc(newId("cl"));
+
+  const repaid = await db.runTransaction(async (txn) => {
+    const loansSnap = await txn.get(openLoansQuery);
+    const total = loansSnap.docs.reduce((sum, d) => {
+      const o = d.data().outstanding;
+      return sum + (typeof o === "number" ? o : 0);
+    }, 0);
+    const totalRounded = Math.round(total * 100) / 100;
+    if (totalRounded <= 0) throw new Error("אין חוב פתוח להחזרה");
+
+    const [borrowerSnap, lenderSnap] = await Promise.all([
+      txn.get(borrowerRef),
+      txn.get(lenderRef),
+    ]);
+    if (!borrowerSnap.exists) throw new Error("החשבון שלך לא נמצא");
+    if (!lenderSnap.exists) throw new Error("המלווה לא נמצא");
+
+    const borrowerBalance = memberCreditBalance(borrowerSnap.data() ?? {});
+    const lenderBalance = memberCreditBalance(lenderSnap.data() ?? {});
+    if (borrowerBalance < totalRounded) {
+      throw new Error(
+        "אין מספיק יתרה להחזרת החוב המלא — המתינו שהמנהל יטעין את היתרה"
+      );
+    }
+
+    const lenderName = (lenderSnap.data()?.name as string) ?? "חבר/ה";
+    const borrowerName = (borrowerSnap.data()?.name as string) ?? "חבר/ה";
+    const borrowerAfter = Math.round((borrowerBalance - totalRounded) * 100) / 100;
+    const lenderAfter = Math.round((lenderBalance + totalRounded) * 100) / 100;
+
+    txn.set(borrowerRef, { creditBalance: borrowerAfter, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    txn.set(lenderRef, { creditBalance: lenderAfter, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+
+    for (const doc of loansSnap.docs) {
+      txn.update(doc.ref, {
+        outstanding: 0,
+        status: "settled",
+        settledAt: FieldValue.serverTimestamp(),
+      });
+    }
+
+    txn.set(borrowerLedgerRef, {
+      id: borrowerLedgerRef.id,
+      memberId: borrowerId,
+      delta: -totalRounded,
+      balanceAfter: borrowerAfter,
+      reason: "peer_repay_out",
+      note: `החזר חוב למשפחת ${lenderName}`,
+      createdBy: borrowerId,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    txn.set(lenderLedgerRef, {
+      id: lenderLedgerRef.id,
+      memberId: lenderId,
+      delta: totalRounded,
+      balanceAfter: lenderAfter,
+      reason: "peer_repay_in",
+      note: `קבלת החזר ממשפחת ${borrowerName}`,
+      createdBy: borrowerId,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+
+    return totalRounded;
+  });
+
+  return { repaid };
 }
 
 export async function getPotsOverviewForGemach(gemachId: string) {

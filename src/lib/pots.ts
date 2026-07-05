@@ -27,6 +27,14 @@ export function formatNIS(amount: number): string {
   return `₪${amount.toLocaleString("he-IL")}`;
 }
 
+/**
+ * Format the cooperative's internal credit unit ("שֶׁכֵּלִים" — a pun on שקל + כלים).
+ * 1 שכל = 1 ₪. Always uses the plural form per product decision.
+ */
+export function formatCredits(amount: number): string {
+  return `${amount.toLocaleString("he-IL")} שֶׁכֵּלִים`;
+}
+
 export interface PotKindRow {
   kindId: string;
   name: string;
