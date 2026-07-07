@@ -369,6 +369,8 @@ export interface Member {
   id: string;
   name: string;
   email: string;
+  /** Mobile number (digits only). Collected once after sign-in; used to match PayBox payments. */
+  phone?: string;
   hasPaymentMethod: boolean;
   role: MemberRole;
   /** Gemach IDs this member can admin (when role is GEMACH_ADMIN). */
@@ -586,6 +588,7 @@ export interface AdminMemberSummary {
   id: string;
   name: string;
   email: string;
+  phone?: string;
   role: MemberRole;
   gemachAdminIds?: string[];
   /** Internal usable balance (₪). */

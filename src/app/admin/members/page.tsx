@@ -23,14 +23,19 @@ type ImportResult = {
     totalApplied: number;
     duplicateCount: number;
     unmatchedCount: number;
-    missingEmailCount: number;
     skippedNonPayment: number;
     errorCount: number;
   };
-  applied: Array<{ name: string; email: string; amount: number; balance: number; date: string }>;
-  duplicates: Array<{ email: string; amount: number; date: string }>;
-  unmatched: Array<{ row: number; email: string; amount: number }>;
-  missingEmail: Array<{ row: number; name: string; amount: number }>;
+  applied: Array<{
+    name: string;
+    identifier: string;
+    amount: number;
+    balance: number;
+    date: string;
+    matchedBy: "phone" | "email";
+  }>;
+  duplicates: Array<{ identifier: string; amount: number; date: string }>;
+  unmatched: Array<{ row: number; identifier: string; amount: number }>;
   errors: Array<{ row: number; message: string }>;
 };
 
@@ -241,8 +246,9 @@ export default function AdminMembersPage() {
           <h2 className="font-bold text-stone-900">טעינת תשלומי PayBox</h2>
           <p className="mt-1 text-xs text-[var(--muted)]">
             העלו את קובץ ה-Excel שמייצא PayBox. הסכום מעמודת <strong>סכום</strong> יתווסף
-            ליתרת החבר לפי האימייל שהוזן בעמודת <strong>הערות</strong>. טעינה חוזרת של אותו
-            קובץ לא תזכה פעמיים. פעולה זו זמינה למנהל פלטפורמה בלבד.
+            ליתרת החבר לפי <strong>מספר הטלפון</strong> (עמודת פלאפון), ואם לא נמצא — לפי
+            אימייל שהוזן בעמודת <strong>הערות</strong>. טעינה חוזרת של אותו קובץ לא תזכה
+            פעמיים. פעולה זו זמינה למנהל פלטפורמה בלבד.
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <input
@@ -277,14 +283,9 @@ export default function AdminMembersPage() {
                     כפולים (דולגו): {importResult.summary.duplicateCount}
                   </span>
                 )}
-                {importResult.summary.missingEmailCount > 0 && (
-                  <span className="rounded-lg bg-amber-100 px-3 py-1 font-semibold text-amber-800">
-                    ללא אימייל בהערות: {importResult.summary.missingEmailCount}
-                  </span>
-                )}
                 {importResult.summary.unmatchedCount > 0 && (
                   <span className="rounded-lg bg-amber-100 px-3 py-1 font-semibold text-amber-800">
-                    אימייל לא נמצא: {importResult.summary.unmatchedCount}
+                    לא נמצא חבר תואם: {importResult.summary.unmatchedCount}
                   </span>
                 )}
                 {importResult.summary.skippedNonPayment > 0 && (
@@ -305,8 +306,9 @@ export default function AdminMembersPage() {
                   <ul className="space-y-0.5 text-xs text-[var(--muted)]">
                     {importResult.applied.map((a, idx) => (
                       <li key={`a-${idx}`}>
-                        {a.name} ({a.email}) — {formatCredits(a.amount)}
+                        {a.name} ({a.identifier}) — {formatCredits(a.amount)}
                         {a.date ? ` · ${a.date}` : ""}
+                        {` · ${a.matchedBy === "phone" ? "לפי טלפון" : "לפי אימייל"}`}
                       </li>
                     ))}
                   </ul>
@@ -321,7 +323,7 @@ export default function AdminMembersPage() {
                   <ul className="space-y-0.5 text-xs text-[var(--muted)]">
                     {importResult.duplicates.map((d, idx) => (
                       <li key={`d-${idx}`}>
-                        {d.email} — {formatCredits(d.amount)}
+                        {d.identifier} — {formatCredits(d.amount)}
                         {d.date ? ` · ${d.date}` : ""}
                       </li>
                     ))}
@@ -332,27 +334,12 @@ export default function AdminMembersPage() {
               {importResult.unmatched.length > 0 && (
                 <div>
                   <p className="mb-1 text-xs font-bold text-amber-800">
-                    אימיילים שלא נמצאו במערכת (החבר עדיין לא התחבר?)
+                    לא נמצא חבר תואם (הטלפון/האימייל לא במערכת — החבר עדיין לא נרשם?)
                   </p>
                   <ul className="space-y-0.5 text-xs text-[var(--muted)]">
                     {importResult.unmatched.map((u) => (
                       <li key={`u-${u.row}`}>
-                        שורה {u.row}: {u.email} — {formatCredits(u.amount)}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {importResult.missingEmail.length > 0 && (
-                <div>
-                  <p className="mb-1 text-xs font-bold text-amber-800">
-                    שורות ללא אימייל בעמודת הערות
-                  </p>
-                  <ul className="space-y-0.5 text-xs text-[var(--muted)]">
-                    {importResult.missingEmail.map((m) => (
-                      <li key={`m-${m.row}`}>
-                        שורה {m.row}: {m.name || "—"} — {formatCredits(m.amount)}
+                        שורה {u.row}: {u.identifier} — {formatCredits(u.amount)}
                       </li>
                     ))}
                   </ul>
@@ -449,6 +436,11 @@ export default function AdminMembersPage() {
                 <CardBody className="py-4">
                   <p className="text-xl font-bold text-stone-900">{selected.member.name}</p>
                   <p className="text-sm text-[var(--muted)]">{selected.member.email}</p>
+                  {selected.member.phone && (
+                    <p className="text-sm text-[var(--muted)]" dir="ltr">
+                      {selected.member.phone}
+                    </p>
+                  )}
                   <p className="mt-2 text-sm">
                     תפקיד: <strong>{roleLabels[selected.member.role]}</strong>
                   </p>

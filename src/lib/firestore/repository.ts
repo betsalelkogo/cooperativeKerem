@@ -1404,6 +1404,7 @@ function memberFromDoc(id: string, data: DocumentData): Member {
     id,
     name: (data.name as string) ?? "חבר",
     email: (data.email as string) ?? "",
+    phone: (data.phone as string) || undefined,
     hasPaymentMethod: (data.hasPaymentMethod as boolean) ?? false,
     role: roleFromMemberData(data),
     gemachAdminIds: gemachAdminIdsFromData(data),
@@ -1449,6 +1450,7 @@ export async function syncMemberFromAuth(params: {
     id: params.uid,
     name: params.name,
     email: params.email,
+    phone: (existingData?.phone as string) || undefined,
     hasPaymentMethod: existing.exists
       ? ((existingData?.hasPaymentMethod as boolean) ?? false)
       : false,
@@ -1456,6 +1458,21 @@ export async function syncMemberFromAuth(params: {
     gemachAdminIds: existing.exists ? gemachAdminIdsFromData(existingData ?? {}) : [],
     creditBalance: existing.exists ? memberCreditBalance(existingData ?? {}) : 0,
   };
+}
+
+/** Save a member's mobile number (stored as digits only). */
+export async function updateMemberPhone(uid: string, phone: string): Promise<Member> {
+  const ref = getAdminDb().collection("members").doc(uid);
+  const existing = await ref.get();
+  if (!existing.exists) throw new Error("משתמש לא נמצא");
+
+  await ref.set(
+    { phone, updatedAt: FieldValue.serverTimestamp() },
+    { merge: true }
+  );
+
+  const snap = await ref.get();
+  return memberFromDoc(snap.id, snap.data()!);
 }
 
 export async function getAdminDashboard(options?: {
@@ -1671,6 +1688,7 @@ export async function listMembers(query?: string): Promise<AdminMemberSummary[]>
       id: m.id,
       name: m.name,
       email: m.email,
+      phone: m.phone,
       role: m.role,
       gemachAdminIds: m.gemachAdminIds,
       creditBalance: m.creditBalance,
@@ -1707,6 +1725,7 @@ export async function getMemberHistory(memberId: string): Promise<AdminMemberHis
       id: member.id,
       name: member.name,
       email: member.email,
+      phone: member.phone,
       role: member.role,
       gemachAdminIds: member.gemachAdminIds,
       creditBalance: member.creditBalance,

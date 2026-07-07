@@ -3,6 +3,7 @@ import { createHash } from "crypto";
 import { requirePlatformAdmin } from "@/lib/firebase/admin-auth";
 import { applyPayboxImportRow, listMembers } from "@/lib/firestore/repository";
 import { readXlsxRows } from "@/lib/xlsx-reader";
+import { normalizePhone } from "@/lib/phone";
 
 export const runtime = "nodejs";
 
@@ -81,9 +82,9 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-    if (columns.notes === undefined) {
+    if (columns.phone === undefined && columns.notes === undefined) {
       return NextResponse.json(
-        { error: "לא נמצאה עמודת 'הערות' (בה החברים מזינים את האימייל)" },
+        { error: "לא נמצאה עמודת 'פלאפון' או 'הערות' לזיהוי החבר" },
         { status: 400 }
       );
     }
@@ -95,16 +96,28 @@ export async function POST(request: Request) {
         .map((m) => [m.email.trim().toLowerCase(), m])
     );
 
+    // Members are matched primarily by phone. If two members share the same
+    // normalized number we can't safely credit either, so those numbers are
+    // excluded from phone matching (email-in-notes still works for them).
+    const phoneToMember = new Map<string, (typeof members)[number]>();
+    const ambiguousPhones = new Set<string>();
+    for (const m of members) {
+      const key = m.phone ? normalizePhone(m.phone) : "";
+      if (!key) continue;
+      if (phoneToMember.has(key)) ambiguousPhones.add(key);
+      else phoneToMember.set(key, m);
+    }
+
     const applied: Array<{
       name: string;
-      email: string;
+      identifier: string;
       amount: number;
       balance: number;
       date: string;
+      matchedBy: "phone" | "email";
     }> = [];
-    const duplicates: Array<{ email: string; amount: number; date: string }> = [];
-    const unmatched: Array<{ row: number; email: string; amount: number }> = [];
-    const missingEmail: Array<{ row: number; name: string; amount: number }> = [];
+    const duplicates: Array<{ identifier: string; amount: number; date: string }> = [];
+    const unmatched: Array<{ row: number; identifier: string; amount: number }> = [];
     const errors: Array<{ row: number; message: string }> = [];
     let skippedNonPayment = 0;
     let totalApplied = 0;
@@ -136,16 +149,24 @@ export async function POST(request: Request) {
         continue;
       }
 
+      // Primary match: phone. Fallback: an email typed into the notes column.
+      const phoneKey = normalizePhone(phone);
       const emailMatch = notes.match(EMAIL_REGEX);
       const email = emailMatch ? emailMatch[0].trim().toLowerCase() : "";
-      if (!email) {
-        missingEmail.push({ row: rowNumber, name, amount });
-        continue;
+
+      let member: (typeof members)[number] | undefined;
+      let matchedBy: "phone" | "email" = "phone";
+      if (phoneKey && !ambiguousPhones.has(phoneKey)) {
+        member = phoneToMember.get(phoneKey);
+      }
+      if (!member && email) {
+        member = emailToMember.get(email);
+        matchedBy = "email";
       }
 
-      const member = emailToMember.get(email);
+      const identifier = phone || email || "—";
       if (!member) {
-        unmatched.push({ row: rowNumber, email, amount });
+        unmatched.push({ row: rowNumber, identifier, amount });
         continue;
       }
 
@@ -165,14 +186,15 @@ export async function POST(request: Request) {
           createdBy: auth.uid,
         });
         if (result.status === "duplicate") {
-          duplicates.push({ email, amount, date: dateText });
+          duplicates.push({ identifier, amount, date: dateText });
         } else {
           applied.push({
             name: member.name,
-            email,
+            identifier,
             amount,
             balance: result.balance,
             date: dateText,
+            matchedBy,
           });
           totalApplied += amount;
         }
@@ -190,14 +212,12 @@ export async function POST(request: Request) {
         totalApplied: Math.round(totalApplied * 100) / 100,
         duplicateCount: duplicates.length,
         unmatchedCount: unmatched.length,
-        missingEmailCount: missingEmail.length,
         skippedNonPayment,
         errorCount: errors.length,
       },
       applied,
       duplicates,
       unmatched,
-      missingEmail,
       errors,
     });
   } catch (err) {
