@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Alert } from "@/components/ui/Alert";
@@ -17,6 +17,23 @@ import type {
   MemberRole,
 } from "@/lib/types";
 
+type ImportResult = {
+  summary: {
+    appliedCount: number;
+    totalApplied: number;
+    duplicateCount: number;
+    unmatchedCount: number;
+    missingEmailCount: number;
+    skippedNonPayment: number;
+    errorCount: number;
+  };
+  applied: Array<{ name: string; email: string; amount: number; balance: number; date: string }>;
+  duplicates: Array<{ email: string; amount: number; date: string }>;
+  unmatched: Array<{ row: number; email: string; amount: number }>;
+  missingEmail: Array<{ row: number; name: string; amount: number }>;
+  errors: Array<{ row: number; message: string }>;
+};
+
 const roleLabels: Record<MemberRole, string> = {
   ADMIN: "מנהל פלטפורמה",
   GEMACH_ADMIN: "מנהל גמ״ח",
@@ -29,6 +46,7 @@ const creditReasonLabels: Record<CreditLedgerReason, string> = {
   manual_adjustment: "עדכון ידני",
   tool_sale: "מכירת כלי לקואופרטיב",
   refund: "החזר",
+  paybox_import: "טעינת תשלומי PayBox",
   payment_debit: "תשלום מהיתרה",
   peer_transfer_out: "העברת קרדיט לחבר",
   peer_transfer_in: "קבלת קרדיט מחבר",
@@ -50,26 +68,61 @@ export default function AdminMembersPage() {
   const [creditReason, setCreditReason] = useState<CreditLedgerReason>("manual_adjustment");
   const [creditNote, setCreditNote] = useState("");
   const [creditUpdating, setCreditUpdating] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const loadMembers = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const token = await getIdToken();
+      const res = await authFetch("/api/admin/members", { token });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "טעינה נכשלה");
+      setMembers(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "שגיאה");
+      setMembers([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [getIdToken]);
 
   useEffect(() => {
-    async function loadMembers() {
-      setLoading(true);
-      setError("");
-      try {
-        const token = await getIdToken();
-        const res = await authFetch("/api/admin/members", { token });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error ?? "טעינה נכשלה");
-        setMembers(data);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "שגיאה");
-        setMembers([]);
-      } finally {
-        setLoading(false);
-      }
-    }
     loadMembers();
-  }, [getIdToken]);
+  }, [loadMembers]);
+
+  async function importPayments() {
+    if (!importFile) {
+      setError("יש לבחור קובץ Excel להעלאה");
+      return;
+    }
+    setImporting(true);
+    setError("");
+    setImportResult(null);
+    try {
+      const token = await getIdToken();
+      const formData = new FormData();
+      formData.append("file", importFile);
+      const res = await authFetch("/api/admin/members/import-payments", {
+        method: "POST",
+        token,
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "העלאת הקובץ נכשלה");
+      setImportResult(data as ImportResult);
+      setImportFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      await loadMembers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "שגיאה");
+    } finally {
+      setImporting(false);
+    }
+  }
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -182,6 +235,146 @@ export default function AdminMembersPage() {
           {error}
         </Alert>
       )}
+
+      <Card className="mb-6 border-kerem-200">
+        <CardBody className="py-4">
+          <h2 className="font-bold text-stone-900">טעינת תשלומי PayBox</h2>
+          <p className="mt-1 text-xs text-[var(--muted)]">
+            העלו את קובץ ה-Excel שמייצא PayBox. הסכום מעמודת <strong>סכום</strong> יתווסף
+            ליתרת החבר לפי האימייל שהוזן בעמודת <strong>הערות</strong>. טעינה חוזרת של אותו
+            קובץ לא תזכה פעמיים. פעולה זו זמינה למנהל פלטפורמה בלבד.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx"
+              onChange={(e) => {
+                setImportFile(e.target.files?.[0] ?? null);
+                setImportResult(null);
+              }}
+              className="text-sm file:me-3 file:rounded-lg file:border-0 file:bg-kerem-100 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-kerem-800 hover:file:bg-kerem-200"
+            />
+            <button
+              type="button"
+              disabled={importing || !importFile}
+              onClick={importPayments}
+              className="rounded-lg bg-kerem-700 px-4 py-2 text-sm font-semibold text-white hover:bg-kerem-800 disabled:opacity-50"
+            >
+              {importing ? "טוען…" : "טען תשלומים"}
+            </button>
+          </div>
+
+          {importResult && (
+            <div className="mt-4 space-y-3 text-sm">
+              <div className="flex flex-wrap gap-2">
+                <span className="rounded-lg bg-emerald-100 px-3 py-1 font-semibold text-emerald-800">
+                  זוכו: {importResult.summary.appliedCount} · סה״כ{" "}
+                  {formatCredits(importResult.summary.totalApplied)}
+                </span>
+                {importResult.summary.duplicateCount > 0 && (
+                  <span className="rounded-lg bg-stone-100 px-3 py-1 font-semibold text-stone-700">
+                    כפולים (דולגו): {importResult.summary.duplicateCount}
+                  </span>
+                )}
+                {importResult.summary.missingEmailCount > 0 && (
+                  <span className="rounded-lg bg-amber-100 px-3 py-1 font-semibold text-amber-800">
+                    ללא אימייל בהערות: {importResult.summary.missingEmailCount}
+                  </span>
+                )}
+                {importResult.summary.unmatchedCount > 0 && (
+                  <span className="rounded-lg bg-amber-100 px-3 py-1 font-semibold text-amber-800">
+                    אימייל לא נמצא: {importResult.summary.unmatchedCount}
+                  </span>
+                )}
+                {importResult.summary.skippedNonPayment > 0 && (
+                  <span className="rounded-lg bg-stone-100 px-3 py-1 font-semibold text-stone-700">
+                    לא תשלום (דולגו): {importResult.summary.skippedNonPayment}
+                  </span>
+                )}
+                {importResult.summary.errorCount > 0 && (
+                  <span className="rounded-lg bg-red-100 px-3 py-1 font-semibold text-red-800">
+                    שגיאות: {importResult.summary.errorCount}
+                  </span>
+                )}
+              </div>
+
+              {importResult.applied.length > 0 && (
+                <div>
+                  <p className="mb-1 text-xs font-bold text-emerald-800">זוכו בהצלחה</p>
+                  <ul className="space-y-0.5 text-xs text-[var(--muted)]">
+                    {importResult.applied.map((a, idx) => (
+                      <li key={`a-${idx}`}>
+                        {a.name} ({a.email}) — {formatCredits(a.amount)}
+                        {a.date ? ` · ${a.date}` : ""}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {importResult.duplicates.length > 0 && (
+                <div>
+                  <p className="mb-1 text-xs font-bold text-stone-700">
+                    כבר זוכו בעבר — דולגו כדי לא לזכות פעמיים
+                  </p>
+                  <ul className="space-y-0.5 text-xs text-[var(--muted)]">
+                    {importResult.duplicates.map((d, idx) => (
+                      <li key={`d-${idx}`}>
+                        {d.email} — {formatCredits(d.amount)}
+                        {d.date ? ` · ${d.date}` : ""}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {importResult.unmatched.length > 0 && (
+                <div>
+                  <p className="mb-1 text-xs font-bold text-amber-800">
+                    אימיילים שלא נמצאו במערכת (החבר עדיין לא התחבר?)
+                  </p>
+                  <ul className="space-y-0.5 text-xs text-[var(--muted)]">
+                    {importResult.unmatched.map((u) => (
+                      <li key={`u-${u.row}`}>
+                        שורה {u.row}: {u.email} — {formatCredits(u.amount)}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {importResult.missingEmail.length > 0 && (
+                <div>
+                  <p className="mb-1 text-xs font-bold text-amber-800">
+                    שורות ללא אימייל בעמודת הערות
+                  </p>
+                  <ul className="space-y-0.5 text-xs text-[var(--muted)]">
+                    {importResult.missingEmail.map((m) => (
+                      <li key={`m-${m.row}`}>
+                        שורה {m.row}: {m.name || "—"} — {formatCredits(m.amount)}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {importResult.errors.length > 0 && (
+                <div>
+                  <p className="mb-1 text-xs font-bold text-red-800">שגיאות</p>
+                  <ul className="space-y-0.5 text-xs text-[var(--muted)]">
+                    {importResult.errors.map((e) => (
+                      <li key={`e-${e.row}`}>
+                        שורה {e.row}: {e.message}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </CardBody>
+      </Card>
 
       <Card className="mb-8">
         <CardBody className="py-4">

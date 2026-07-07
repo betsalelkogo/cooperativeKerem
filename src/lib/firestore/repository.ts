@@ -1859,6 +1859,84 @@ export async function adjustMemberCredit(params: {
 }
 
 /**
+ * Credit a single PayBox payment row to a member's balance. Idempotent per
+ * `importKey`: the whole operation (dedupe check, balance update, ledger entry
+ * and import record) runs in one transaction, so re-uploading the same export
+ * never double-credits. Returns "duplicate" when the row was already imported.
+ */
+export async function applyPayboxImportRow(params: {
+  memberId: string;
+  amount: number;
+  importKey: string;
+  note?: string;
+  createdBy: string;
+}): Promise<
+  | { status: "duplicate" }
+  | { status: "applied"; balance: number; entry: CreditLedgerEntry }
+> {
+  const { memberId, amount, importKey, note, createdBy } = params;
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("סכום התשלום אינו תקין");
+  }
+
+  const db = getAdminDb();
+  const memberRef = db.collection("members").doc(memberId);
+  const importRef = db.collection("paybox_payment_imports").doc(importKey);
+  const ledgerRef = db.collection("credit_ledger").doc(newId("cl"));
+
+  const result = await db.runTransaction(async (txn) => {
+    const importSnap = await txn.get(importRef);
+    if (importSnap.exists) return { status: "duplicate" as const };
+
+    const snap = await txn.get(memberRef);
+    if (!snap.exists) throw new Error("משתמש לא נמצא");
+
+    const current = memberCreditBalance(snap.data() ?? {});
+    const next = Math.round((current + amount) * 100) / 100;
+
+    txn.set(
+      memberRef,
+      { creditBalance: next, updatedAt: FieldValue.serverTimestamp() },
+      { merge: true }
+    );
+    txn.set(
+      ledgerRef,
+      omitUndefined({
+        id: ledgerRef.id,
+        memberId,
+        delta: amount,
+        balanceAfter: next,
+        reason: "paybox_import" as CreditLedgerEntry["reason"],
+        note,
+        createdBy,
+        createdAt: FieldValue.serverTimestamp(),
+      })
+    );
+    txn.set(
+      importRef,
+      omitUndefined({
+        id: importKey,
+        memberId,
+        amount,
+        ledgerId: ledgerRef.id,
+        note,
+        createdBy,
+        createdAt: FieldValue.serverTimestamp(),
+      })
+    );
+    return { status: "applied" as const, balance: next };
+  });
+
+  if (result.status === "duplicate") return { status: "duplicate" };
+
+  const entry = creditLedgerFromDoc(
+    ledgerRef.id,
+    (await ledgerRef.get()).data() ?? {}
+  );
+  return { status: "applied", balance: result.balance, entry };
+}
+
+/**
  * Apply the member's internal balance toward a reservation's loan fee.
  * Debits up to the available balance (partial allowed), records a ledger
  * entry, and updates/creates the reservation payment. Idempotent: a payment

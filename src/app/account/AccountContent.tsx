@@ -20,6 +20,8 @@ function describeEntry(entry: StatementEntry): string {
       return "זיכוי עבור מכירת כלי";
     case "refund":
       return "החזר קרדיט";
+    case "paybox_import":
+      return "טעינת תשלום PayBox";
     // Peer entries store the counterparty family name in the note; prefer it.
     case "peer_transfer_out":
       return entry.note || "העברת קרדיט לחבר";

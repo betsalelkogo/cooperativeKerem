@@ -382,6 +382,8 @@ export type CreditLedgerReason =
   | "tool_sale"
   | "payment_debit"
   | "refund"
+  /** Credit added from an imported PayBox payments export. */
+  | "paybox_import"
   /** Credit sent to another member (lender side, negative). */
   | "peer_transfer_out"
   /** Credit received from another member (borrower side, positive). */
