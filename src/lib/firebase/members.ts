@@ -28,7 +28,14 @@ export async function upsertMemberFromUser(user: User): Promise<Member> {
       ? (existing.data().hasPaymentMethod as boolean)
       : false,
     updatedAt: serverTimestamp(),
-    ...(existing.exists() ? {} : { createdAt: serverTimestamp(), role: DEFAULT_MEMBER_ROLE }),
+    ...(existing.exists()
+      ? {}
+      : {
+          createdAt: serverTimestamp(),
+          role: DEFAULT_MEMBER_ROLE,
+          isAmember: false,
+          firstPayout: true,
+        }),
   };
 
   await setDoc(ref, memberData, { merge: true });
@@ -46,6 +53,8 @@ export async function upsertMemberFromUser(user: User): Promise<Member> {
     name: memberData.name,
     email: memberData.email,
     phone: existing.exists() ? (existing.data().phone as string) || undefined : undefined,
+    isAmember: existing.exists() ? (existing.data().isAmember as boolean) ?? false : false,
+    firstPayout: existing.exists() ? existing.data().firstPayout !== false : true,
     hasPaymentMethod: memberData.hasPaymentMethod,
     role,
     gemachAdminIds,
@@ -69,6 +78,8 @@ export async function getMember(uid: string): Promise<Member | null> {
     name: data.name as string,
     email: data.email as string,
     phone: (data.phone as string) || undefined,
+    isAmember: (data.isAmember as boolean) ?? false,
+    firstPayout: data.firstPayout !== false,
     hasPaymentMethod: (data.hasPaymentMethod as boolean) ?? false,
     role: roleFromMemberData(data),
     gemachAdminIds: gemachAdminIdsFromData(data),

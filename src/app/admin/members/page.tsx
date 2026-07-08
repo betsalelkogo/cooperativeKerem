@@ -21,8 +21,10 @@ type ImportResult = {
   summary: {
     appliedCount: number;
     totalApplied: number;
+    totalMembershipFee: number;
     duplicateCount: number;
     unmatchedCount: number;
+    notMemberCount: number;
     skippedNonPayment: number;
     errorCount: number;
   };
@@ -30,12 +32,16 @@ type ImportResult = {
     name: string;
     identifier: string;
     amount: number;
+    membershipFee: number;
+    gross: number;
     balance: number;
     date: string;
     matchedBy: "phone" | "email";
+    becameMember: boolean;
   }>;
   duplicates: Array<{ identifier: string; amount: number; date: string }>;
   unmatched: Array<{ row: number; identifier: string; amount: number }>;
+  notMember: Array<{ row: number; name: string; identifier: string; amount: number }>;
   errors: Array<{ row: number; message: string }>;
 };
 
@@ -68,6 +74,7 @@ export default function AdminMembersPage() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState("");
   const [roleUpdating, setRoleUpdating] = useState(false);
+  const [flagUpdating, setFlagUpdating] = useState(false);
   const [creditAmount, setCreditAmount] = useState("");
   const [creditSign, setCreditSign] = useState<"add" | "subtract">("add");
   const [creditReason, setCreditReason] = useState<CreditLedgerReason>("manual_adjustment");
@@ -202,6 +209,37 @@ export default function AdminMembersPage() {
     }
   }
 
+  async function updateFlags(
+    memberId: string,
+    updates: { isAmember?: boolean; firstPayout?: boolean }
+  ) {
+    setFlagUpdating(true);
+    setError("");
+    try {
+      const token = await getIdToken();
+      const res = await authFetch(`/api/admin/members/${encodeURIComponent(memberId)}`, {
+        method: "PATCH",
+        token,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "עדכון נכשל");
+      setSelected((prev) => (prev ? { ...prev, member: data.member } : prev));
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.id === memberId
+            ? { ...m, isAmember: data.member.isAmember, firstPayout: data.member.firstPayout }
+            : m
+        )
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "שגיאה");
+    } finally {
+      setFlagUpdating(false);
+    }
+  }
+
   async function updateRole(memberId: string, role: MemberRole) {
     setRoleUpdating(true);
     setError("");
@@ -247,8 +285,9 @@ export default function AdminMembersPage() {
           <p className="mt-1 text-xs text-[var(--muted)]">
             העלו את קובץ ה-Excel שמייצא PayBox. הסכום מעמודת <strong>סכום</strong> יתווסף
             ליתרת החבר לפי <strong>מספר הטלפון</strong> (עמודת פלאפון), ואם לא נמצא — לפי
-            אימייל שהוזן בעמודת <strong>הערות</strong>. טעינה חוזרת של אותו קובץ לא תזכה
-            פעמיים. פעולה זו זמינה למנהל פלטפורמה בלבד.
+            אימייל שהוזן בעמודת <strong>הערות</strong>. מי שאינו חבר יזוכה רק בתשלום הצטרפות
+            של ₪200 ומעלה (מנוכים ₪150 דמי חבר), ואז יסומן כחבר. טעינה חוזרת של אותו קובץ
+            לא תזכה פעמיים. פעולה זו זמינה למנהל פלטפורמה בלבד.
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <input
@@ -278,6 +317,11 @@ export default function AdminMembersPage() {
                   זוכו: {importResult.summary.appliedCount} · סה״כ{" "}
                   {formatCredits(importResult.summary.totalApplied)}
                 </span>
+                {importResult.summary.totalMembershipFee > 0 && (
+                  <span className="rounded-lg bg-kerem-100 px-3 py-1 font-semibold text-kerem-800">
+                    דמי חבר שנגבו: {formatCredits(importResult.summary.totalMembershipFee)}
+                  </span>
+                )}
                 {importResult.summary.duplicateCount > 0 && (
                   <span className="rounded-lg bg-stone-100 px-3 py-1 font-semibold text-stone-700">
                     כפולים (דולגו): {importResult.summary.duplicateCount}
@@ -286,6 +330,11 @@ export default function AdminMembersPage() {
                 {importResult.summary.unmatchedCount > 0 && (
                   <span className="rounded-lg bg-amber-100 px-3 py-1 font-semibold text-amber-800">
                     לא נמצא חבר תואם: {importResult.summary.unmatchedCount}
+                  </span>
+                )}
+                {importResult.summary.notMemberCount > 0 && (
+                  <span className="rounded-lg bg-amber-100 px-3 py-1 font-semibold text-amber-800">
+                    לא חבר — לא זוכה: {importResult.summary.notMemberCount}
                   </span>
                 )}
                 {importResult.summary.skippedNonPayment > 0 && (
@@ -307,8 +356,14 @@ export default function AdminMembersPage() {
                     {importResult.applied.map((a, idx) => (
                       <li key={`a-${idx}`}>
                         {a.name} ({a.identifier}) — {formatCredits(a.amount)}
+                        {a.membershipFee > 0
+                          ? ` (מתוך ${formatCredits(a.gross)}, דמי חבר ${formatCredits(
+                              a.membershipFee
+                            )})`
+                          : ""}
                         {a.date ? ` · ${a.date}` : ""}
                         {` · ${a.matchedBy === "phone" ? "לפי טלפון" : "לפי אימייל"}`}
+                        {a.becameMember ? " · הצטרף כחבר" : ""}
                       </li>
                     ))}
                   </ul>
@@ -325,6 +380,21 @@ export default function AdminMembersPage() {
                       <li key={`d-${idx}`}>
                         {d.identifier} — {formatCredits(d.amount)}
                         {d.date ? ` · ${d.date}` : ""}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {importResult.notMember.length > 0 && (
+                <div>
+                  <p className="mb-1 text-xs font-bold text-amber-800">
+                    לא חבר — לא זוכה (תשלום נמוך מ-₪200; רק תשלום הצטרפות מזכה)
+                  </p>
+                  <ul className="space-y-0.5 text-xs text-[var(--muted)]">
+                    {importResult.notMember.map((n) => (
+                      <li key={`n-${n.row}`}>
+                        שורה {n.row}: {n.name} ({n.identifier}) — {formatCredits(n.amount)}
                       </li>
                     ))}
                   </ul>
@@ -465,6 +535,52 @@ export default function AdminMembersPage() {
                         הסר הרשאות מנהל
                       </button>
                     )}
+                  </div>
+
+                  <div className="mt-4 space-y-2 border-t border-[var(--border)] pt-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm">
+                        חבר בקואופרטיב:{" "}
+                        <strong>{selected.member.isAmember ? "כן" : "לא"}</strong>
+                      </span>
+                      <button
+                        type="button"
+                        disabled={flagUpdating}
+                        onClick={() =>
+                          updateFlags(selected.member.id, {
+                            isAmember: !selected.member.isAmember,
+                          })
+                        }
+                        className="rounded-lg bg-kerem-100 px-3 py-1.5 text-xs font-semibold text-kerem-800 hover:bg-kerem-200 disabled:opacity-50"
+                      >
+                        {selected.member.isAmember ? "סמן כלא-חבר" : "סמן כחבר"}
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm">
+                        דמי חבר (₪150):{" "}
+                        <strong>
+                          {selected.member.firstPayout ? "טרם נגבו" : "נגבו"}
+                        </strong>
+                      </span>
+                      <button
+                        type="button"
+                        disabled={flagUpdating}
+                        onClick={() =>
+                          updateFlags(selected.member.id, {
+                            firstPayout: !selected.member.firstPayout,
+                          })
+                        }
+                        className="rounded-lg bg-stone-100 px-3 py-1.5 text-xs font-semibold text-stone-700 hover:bg-stone-200 disabled:opacity-50"
+                      >
+                        {selected.member.firstPayout
+                          ? "סמן כנגבו"
+                          : "אפס לגבייה מחדש"}
+                      </button>
+                    </div>
+                    <p className="text-xs text-[var(--muted)]">
+                      בתשלום הראשון של חבר מנוכים דמי החבר (₪150) והיתרה נזקפת ליתרתו.
+                    </p>
                   </div>
                 </CardBody>
               </Card>

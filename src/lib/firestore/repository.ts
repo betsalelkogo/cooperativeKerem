@@ -41,6 +41,11 @@ import {
   formatLateDuration,
 } from "@/lib/late-fees";
 import {
+  isFirstPayout,
+  splitFirstPayout,
+  MEMBERSHIP_JOIN_MIN_NIS,
+} from "@/lib/membership";
+import {
   resolveKindId,
   groupToolsByKind,
   resolveKindUnits,
@@ -1405,10 +1410,28 @@ function memberFromDoc(id: string, data: DocumentData): Member {
     name: (data.name as string) ?? "חבר",
     email: (data.email as string) ?? "",
     phone: (data.phone as string) || undefined,
+    isAmember: (data.isAmember as boolean) ?? false,
+    firstPayout: data.firstPayout !== false,
     hasPaymentMethod: (data.hasPaymentMethod as boolean) ?? false,
     role: roleFromMemberData(data),
     gemachAdminIds: gemachAdminIdsFromData(data),
     creditBalance: memberCreditBalance(data),
+  };
+}
+
+/** Full admin summary projection for a member document. */
+function memberSummaryFromDoc(id: string, data: DocumentData): AdminMemberSummary {
+  const m = memberFromDoc(id, data);
+  return {
+    id: m.id,
+    name: m.name,
+    email: m.email,
+    phone: m.phone,
+    isAmember: m.isAmember,
+    firstPayout: m.firstPayout,
+    role: m.role,
+    gemachAdminIds: m.gemachAdminIds,
+    creditBalance: m.creditBalance,
   };
 }
 
@@ -1441,7 +1464,13 @@ export async function syncMemberFromAuth(params: {
         : false,
       role,
       updatedAt: FieldValue.serverTimestamp(),
-      ...(existing.exists ? {} : { createdAt: FieldValue.serverTimestamp() }),
+      ...(existing.exists
+        ? {}
+        : {
+            createdAt: FieldValue.serverTimestamp(),
+            isAmember: false,
+            firstPayout: true,
+          }),
     },
     { merge: true }
   );
@@ -1451,6 +1480,8 @@ export async function syncMemberFromAuth(params: {
     name: params.name,
     email: params.email,
     phone: (existingData?.phone as string) || undefined,
+    isAmember: (existingData?.isAmember as boolean) ?? false,
+    firstPayout: existingData?.firstPayout !== false,
     hasPaymentMethod: existing.exists
       ? ((existingData?.hasPaymentMethod as boolean) ?? false)
       : false,
@@ -1458,6 +1489,23 @@ export async function syncMemberFromAuth(params: {
     gemachAdminIds: existing.exists ? gemachAdminIdsFromData(existingData ?? {}) : [],
     creditBalance: existing.exists ? memberCreditBalance(existingData ?? {}) : 0,
   };
+}
+
+/** Update platform-admin-managed member flags (membership / first payout). */
+export async function updateMemberFlags(
+  memberId: string,
+  updates: { isAmember?: boolean; firstPayout?: boolean }
+): Promise<AdminMemberSummary> {
+  const ref = getAdminDb().collection("members").doc(memberId);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error("משתמש לא נמצא");
+
+  const patch: Record<string, unknown> = { updatedAt: FieldValue.serverTimestamp() };
+  if (typeof updates.isAmember === "boolean") patch.isAmember = updates.isAmember;
+  if (typeof updates.firstPayout === "boolean") patch.firstPayout = updates.firstPayout;
+
+  await ref.set(patch, { merge: true });
+  return memberSummaryFromDoc(memberId, (await ref.get()).data()!);
 }
 
 /** Save a member's mobile number (stored as digits only). */
@@ -1689,6 +1737,8 @@ export async function listMembers(query?: string): Promise<AdminMemberSummary[]>
       name: m.name,
       email: m.email,
       phone: m.phone,
+      isAmember: m.isAmember,
+      firstPayout: m.firstPayout,
       role: m.role,
       gemachAdminIds: m.gemachAdminIds,
       creditBalance: m.creditBalance,
@@ -1726,6 +1776,8 @@ export async function getMemberHistory(memberId: string): Promise<AdminMemberHis
       name: member.name,
       email: member.email,
       phone: member.phone,
+      isAmember: member.isAmember,
+      firstPayout: member.firstPayout,
       role: member.role,
       gemachAdminIds: member.gemachAdminIds,
       creditBalance: member.creditBalance,
@@ -1774,15 +1826,7 @@ export async function updateMemberRole(
     updatedAt: FieldValue.serverTimestamp(),
   });
 
-  const member = memberFromDoc(memberId, (await ref.get()).data()!);
-  return {
-    id: member.id,
-    name: member.name,
-    email: member.email,
-    role: member.role,
-    gemachAdminIds: member.gemachAdminIds,
-    creditBalance: member.creditBalance,
-  };
+  return memberSummaryFromDoc(memberId, (await ref.get()).data()!);
 }
 
 // ─── Internal credit balance ─────────────────────────────────────────────────
@@ -1891,7 +1935,15 @@ export async function applyPayboxImportRow(params: {
   createdBy: string;
 }): Promise<
   | { status: "duplicate" }
-  | { status: "applied"; balance: number; entry: CreditLedgerEntry }
+  | { status: "rejected_not_member" }
+  | {
+      status: "applied";
+      balance: number;
+      entry: CreditLedgerEntry;
+      credited: number;
+      membershipFee: number;
+      becameMember: boolean;
+    }
 > {
   const { memberId, amount, importKey, note, createdBy } = params;
   if (!Number.isFinite(amount) || amount <= 0) {
@@ -1910,12 +1962,41 @@ export async function applyPayboxImportRow(params: {
     const snap = await txn.get(memberRef);
     if (!snap.exists) throw new Error("משתמש לא נמצא");
 
-    const current = memberCreditBalance(snap.data() ?? {});
-    const next = Math.round((current + amount) * 100) / 100;
+    const data = snap.data() ?? {};
+    const isAmember = data.isAmember === true;
+
+    // A non-member can only be credited by a qualifying membership payment
+    // (>= the join minimum). Anything smaller is rejected — no credit applied.
+    if (!isAmember && amount < MEMBERSHIP_JOIN_MIN_NIS) {
+      return { status: "rejected_not_member" as const };
+    }
+
+    // A qualifying non-member becomes a member now. Only on that first join do
+    // we withhold the one-time membership fee and credit the remainder; every
+    // later payment from an existing member is credited in full.
+    const firstPayout = isFirstPayout(data);
+    const becameMember = !isAmember;
+    const { membershipFee, credited } = splitFirstPayout(
+      amount,
+      becameMember && firstPayout
+    );
+
+    const current = memberCreditBalance(data);
+    const next = Math.round((current + credited) * 100) / 100;
+
+    const feeNote =
+      membershipFee > 0
+        ? `${note ? `${note} · ` : ""}דמי חבר נוכו ₪${membershipFee} מתוך ₪${amount}`
+        : note;
 
     txn.set(
       memberRef,
-      { creditBalance: next, updatedAt: FieldValue.serverTimestamp() },
+      omitUndefined({
+        creditBalance: next,
+        ...(firstPayout ? { firstPayout: false } : {}),
+        ...(becameMember ? { isAmember: true } : {}),
+        updatedAt: FieldValue.serverTimestamp(),
+      }),
       { merge: true }
     );
     txn.set(
@@ -1923,10 +2004,10 @@ export async function applyPayboxImportRow(params: {
       omitUndefined({
         id: ledgerRef.id,
         memberId,
-        delta: amount,
+        delta: credited,
         balanceAfter: next,
         reason: "paybox_import" as CreditLedgerEntry["reason"],
-        note,
+        note: feeNote,
         createdBy,
         createdAt: FieldValue.serverTimestamp(),
       })
@@ -1937,22 +2018,38 @@ export async function applyPayboxImportRow(params: {
         id: importKey,
         memberId,
         amount,
+        credited,
+        membershipFee,
         ledgerId: ledgerRef.id,
-        note,
+        note: feeNote,
         createdBy,
         createdAt: FieldValue.serverTimestamp(),
       })
     );
-    return { status: "applied" as const, balance: next };
+    return {
+      status: "applied" as const,
+      balance: next,
+      credited,
+      membershipFee,
+      becameMember,
+    };
   });
 
   if (result.status === "duplicate") return { status: "duplicate" };
+  if (result.status === "rejected_not_member") return { status: "rejected_not_member" };
 
   const entry = creditLedgerFromDoc(
     ledgerRef.id,
     (await ledgerRef.get()).data() ?? {}
   );
-  return { status: "applied", balance: result.balance, entry };
+  return {
+    status: "applied",
+    balance: result.balance,
+    entry,
+    credited: result.credited,
+    membershipFee: result.membershipFee,
+    becameMember: result.becameMember,
+  };
 }
 
 /**

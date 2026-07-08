@@ -112,15 +112,25 @@ export async function POST(request: Request) {
       name: string;
       identifier: string;
       amount: number;
+      membershipFee: number;
+      gross: number;
       balance: number;
       date: string;
       matchedBy: "phone" | "email";
+      becameMember: boolean;
     }> = [];
     const duplicates: Array<{ identifier: string; amount: number; date: string }> = [];
     const unmatched: Array<{ row: number; identifier: string; amount: number }> = [];
+    const notMember: Array<{
+      row: number;
+      name: string;
+      identifier: string;
+      amount: number;
+    }> = [];
     const errors: Array<{ row: number; message: string }> = [];
     let skippedNonPayment = 0;
     let totalApplied = 0;
+    let totalMembershipFee = 0;
 
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
@@ -187,16 +197,22 @@ export async function POST(request: Request) {
         });
         if (result.status === "duplicate") {
           duplicates.push({ identifier, amount, date: dateText });
+        } else if (result.status === "rejected_not_member") {
+          notMember.push({ row: rowNumber, name: member.name, identifier, amount });
         } else {
           applied.push({
             name: member.name,
             identifier,
-            amount,
+            amount: result.credited,
+            membershipFee: result.membershipFee,
+            gross: amount,
             balance: result.balance,
             date: dateText,
             matchedBy,
+            becameMember: result.becameMember,
           });
-          totalApplied += amount;
+          totalApplied += result.credited;
+          totalMembershipFee += result.membershipFee;
         }
       } catch (err) {
         errors.push({
@@ -210,14 +226,17 @@ export async function POST(request: Request) {
       summary: {
         appliedCount: applied.length,
         totalApplied: Math.round(totalApplied * 100) / 100,
+        totalMembershipFee: Math.round(totalMembershipFee * 100) / 100,
         duplicateCount: duplicates.length,
         unmatchedCount: unmatched.length,
+        notMemberCount: notMember.length,
         skippedNonPayment,
         errorCount: errors.length,
       },
       applied,
       duplicates,
       unmatched,
+      notMember,
       errors,
     });
   } catch (err) {

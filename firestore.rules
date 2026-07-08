@@ -8,7 +8,9 @@ service cloud.firestore {
         && (!('role' in request.resource.data) || request.resource.data.role == "MEMBER")
         && (!('isAdmin' in request.resource.data) || request.resource.data.isAdmin == false)
         && (!('gemachAdminIds' in request.resource.data))
-        && (!('creditBalance' in request.resource.data) || request.resource.data.creditBalance == 0);
+        && (!('creditBalance' in request.resource.data) || request.resource.data.creditBalance == 0)
+        && (!('isAmember' in request.resource.data) || request.resource.data.isAmember == false)
+        && (!('firstPayout' in request.resource.data) || request.resource.data.firstPayout == true);
       allow update: if request.auth != null && request.auth.uid == userId
         && (!('role' in request.resource.data)
             || request.resource.data.role == resource.data.get('role', "MEMBER"))
@@ -17,7 +19,11 @@ service cloud.firestore {
         && (!('gemachAdminIds' in request.resource.data)
             || request.resource.data.gemachAdminIds == resource.data.get('gemachAdminIds', []))
         && (!('creditBalance' in request.resource.data)
-            || request.resource.data.creditBalance == resource.data.get('creditBalance', 0));
+            || request.resource.data.creditBalance == resource.data.get('creditBalance', 0))
+        && (!('isAmember' in request.resource.data)
+            || request.resource.data.isAmember == resource.data.get('isAmember', false))
+        && (!('firstPayout' in request.resource.data)
+            || request.resource.data.firstPayout == resource.data.get('firstPayout', true));
     }
 
     match /credit_ledger/{entryId} {

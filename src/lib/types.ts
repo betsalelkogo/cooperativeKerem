@@ -371,6 +371,14 @@ export interface Member {
   email: string;
   /** Mobile number (digits only). Collected once after sign-in; used to match PayBox payments. */
   phone?: string;
+  /** Whether the member is a paying member of the cooperative. Set by platform admins. */
+  isAmember?: boolean;
+  /**
+   * True until the member's first payment is processed. On that first payment the
+   * one-time membership fee is deducted before the remainder is credited, then
+   * this flips to false. Defaults to true for new members.
+   */
+  firstPayout?: boolean;
   hasPaymentMethod: boolean;
   role: MemberRole;
   /** Gemach IDs this member can admin (when role is GEMACH_ADMIN). */
@@ -589,6 +597,8 @@ export interface AdminMemberSummary {
   name: string;
   email: string;
   phone?: string;
+  isAmember?: boolean;
+  firstPayout?: boolean;
   role: MemberRole;
   gemachAdminIds?: string[];
   /** Internal usable balance (₪). */
