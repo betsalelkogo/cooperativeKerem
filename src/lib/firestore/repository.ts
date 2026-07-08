@@ -1886,7 +1886,13 @@ export async function adjustMemberCredit(params: {
     const snap = await txn.get(memberRef);
     if (!snap.exists) throw new Error("משתמש לא נמצא");
 
-    const current = memberCreditBalance(snap.data() ?? {});
+    const data = snap.data() ?? {};
+    // Balance can only be added to paying members. A non-member must join first.
+    if (delta > 0 && data.isAmember !== true) {
+      throw new Error("לא ניתן להוסיף יתרה למי שאינו רשום כחבר משלם בקואופרטיב");
+    }
+
+    const current = memberCreditBalance(data);
     const next = Math.round((current + delta) * 100) / 100;
     if (next < 0) {
       throw new Error("היתרה אינה יכולה לרדת מתחת לאפס");

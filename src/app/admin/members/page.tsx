@@ -597,6 +597,12 @@ export default function AdminMembersPage() {
                     יתרה לשימוש בתשלום דמי השאלה. ניתן לעדכון על ידי מנהל פלטפורמה בלבד
                     (למשל הוספת קרדיט עבור מכירת כלי לקואופרטיב).
                   </p>
+                  {!selected.member.isAmember && (
+                    <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                      חבר זה אינו רשום כחבר משלם — לא ניתן להוסיף לו יתרה. יש לסמן אותו כחבר
+                      תחילה.
+                    </p>
+                  )}
 
                   <div className="mt-4 grid gap-2 sm:grid-cols-[auto,1fr]">
                     <div className="flex gap-2">
