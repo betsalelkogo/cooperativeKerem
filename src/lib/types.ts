@@ -368,6 +368,16 @@ export type MemberRole =
 export interface Member {
   id: string;
   name: string;
+  /** Given name, pulled from the Google login profile and overwritten on each sign-in. */
+  firstName?: string;
+  /** Family (last) name, pulled from the Google login profile and overwritten on each sign-in. */
+  familyName?: string;
+  /**
+   * True once the member has provided (or Google supplied) both name parts.
+   * The name gate is shown only while this is false, so a member is never
+   * prompted again after filling it once.
+   */
+  nameCompleted?: boolean;
   email: string;
   /** Mobile number (digits only). Collected once after sign-in; used to match PayBox payments. */
   phone?: string;
@@ -595,6 +605,8 @@ export interface AdminToolKindEdit {
 export interface AdminMemberSummary {
   id: string;
   name: string;
+  firstName?: string;
+  familyName?: string;
   email: string;
   phone?: string;
   isAmember?: boolean;

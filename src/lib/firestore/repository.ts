@@ -1408,6 +1408,9 @@ function memberFromDoc(id: string, data: DocumentData): Member {
   return {
     id,
     name: (data.name as string) ?? "חבר",
+    firstName: (data.firstName as string) || undefined,
+    familyName: (data.familyName as string) || undefined,
+    nameCompleted: data.nameCompleted === true,
     email: (data.email as string) ?? "",
     phone: (data.phone as string) || undefined,
     isAmember: (data.isAmember as boolean) ?? false,
@@ -1425,6 +1428,8 @@ function memberSummaryFromDoc(id: string, data: DocumentData): AdminMemberSummar
   return {
     id: m.id,
     name: m.name,
+    firstName: m.firstName,
+    familyName: m.familyName,
     email: m.email,
     phone: m.phone,
     isAmember: m.isAmember,
@@ -1478,6 +1483,9 @@ export async function syncMemberFromAuth(params: {
   return {
     id: params.uid,
     name: params.name,
+    firstName: (existingData?.firstName as string) || undefined,
+    familyName: (existingData?.familyName as string) || undefined,
+    nameCompleted: existingData?.nameCompleted === true,
     email: params.email,
     phone: (existingData?.phone as string) || undefined,
     isAmember: (existingData?.isAmember as boolean) ?? false,
@@ -1516,6 +1524,31 @@ export async function updateMemberPhone(uid: string, phone: string): Promise<Mem
 
   await ref.set(
     { phone, updatedAt: FieldValue.serverTimestamp() },
+    { merge: true }
+  );
+
+  const snap = await ref.get();
+  return memberFromDoc(snap.id, snap.data()!);
+}
+
+/** Save a member's first and family name (both required). */
+export async function updateMemberName(
+  uid: string,
+  firstName: string,
+  familyName: string
+): Promise<Member> {
+  const ref = getAdminDb().collection("members").doc(uid);
+  const existing = await ref.get();
+  if (!existing.exists) throw new Error("משתמש לא נמצא");
+
+  await ref.set(
+    {
+      firstName,
+      familyName,
+      name: `${firstName} ${familyName}`,
+      nameCompleted: true,
+      updatedAt: FieldValue.serverTimestamp(),
+    },
     { merge: true }
   );
 
@@ -1735,6 +1768,8 @@ export async function listMembers(query?: string): Promise<AdminMemberSummary[]>
     .map((m) => ({
       id: m.id,
       name: m.name,
+      firstName: m.firstName,
+      familyName: m.familyName,
       email: m.email,
       phone: m.phone,
       isAmember: m.isAmember,
@@ -1774,6 +1809,8 @@ export async function getMemberHistory(memberId: string): Promise<AdminMemberHis
     member: {
       id: member.id,
       name: member.name,
+      firstName: member.firstName,
+      familyName: member.familyName,
       email: member.email,
       phone: member.phone,
       isAmember: member.isAmember,

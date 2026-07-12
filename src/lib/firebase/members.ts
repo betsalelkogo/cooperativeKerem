@@ -51,6 +51,9 @@ export async function upsertMemberFromUser(user: User): Promise<Member> {
   return {
     id: user.uid,
     name: memberData.name,
+    firstName: existing.exists() ? (existing.data().firstName as string) || undefined : undefined,
+    familyName: existing.exists() ? (existing.data().familyName as string) || undefined : undefined,
+    nameCompleted: existing.exists() ? existing.data().nameCompleted === true : false,
     email: memberData.email,
     phone: existing.exists() ? (existing.data().phone as string) || undefined : undefined,
     isAmember: existing.exists() ? (existing.data().isAmember as boolean) ?? false : false,
@@ -76,6 +79,9 @@ export async function getMember(uid: string): Promise<Member | null> {
   return {
     id: uid,
     name: data.name as string,
+    firstName: (data.firstName as string) || undefined,
+    familyName: (data.familyName as string) || undefined,
+    nameCompleted: data.nameCompleted === true,
     email: data.email as string,
     phone: (data.phone as string) || undefined,
     isAmember: (data.isAmember as boolean) ?? false,
@@ -85,4 +91,28 @@ export async function getMember(uid: string): Promise<Member | null> {
     gemachAdminIds: gemachAdminIdsFromData(data),
     creditBalance: typeof data.creditBalance === "number" ? data.creditBalance : 0,
   };
+}
+
+/**
+ * Overwrite the member's first/family name in Firestore with the values pulled
+ * from the Google login. Only non-empty parts are written so we never clobber
+ * an existing value with a blank.
+ */
+export async function saveMemberNameParts(
+  uid: string,
+  parts: { firstName?: string; familyName?: string }
+): Promise<void> {
+  const db = getFirebaseDb();
+  if (!db) return;
+
+  const patch: Record<string, unknown> = {};
+  if (parts.firstName) patch.firstName = parts.firstName;
+  if (parts.familyName) patch.familyName = parts.familyName;
+  if (Object.keys(patch).length === 0) return;
+
+  // If Google gave us both parts, the name is complete — never prompt for it.
+  if (parts.firstName && parts.familyName) patch.nameCompleted = true;
+
+  patch.updatedAt = serverTimestamp();
+  await setDoc(doc(db, "members", uid), patch, { merge: true });
 }

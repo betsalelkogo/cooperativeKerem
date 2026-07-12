@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 import { useAuth } from "@/contexts/AuthProvider";
@@ -59,7 +60,11 @@ function LoginContent() {
         <CardBody className="py-8">
           <GoogleSignInButton label="התחברות עם Google" />
           <p className="mt-6 text-center text-xs leading-relaxed text-[var(--muted)]">
-            בכניסה אתם מסכימים לתנאי השימוש של הקואופרטיב.
+            בכניסה אתם מסכימים{" "}
+            <Link href="/takanon" className="font-medium text-kerem-700 underline hover:text-kerem-800">
+              לתקנון ולתנאי השימוש
+            </Link>{" "}
+            של הקואופרטיב.
           </p>
         </CardBody>
       </Card>

@@ -505,6 +505,13 @@ export default function AdminMembersPage() {
               <Card>
                 <CardBody className="py-4">
                   <p className="text-xl font-bold text-stone-900">{selected.member.name}</p>
+                  {(selected.member.firstName || selected.member.familyName) && (
+                    <p className="text-sm text-[var(--muted)]">
+                      {[selected.member.firstName, selected.member.familyName]
+                        .filter(Boolean)
+                        .join(" ")}
+                    </p>
+                  )}
                   <p className="text-sm text-[var(--muted)]">{selected.member.email}</p>
                   {selected.member.phone && (
                     <p className="text-sm text-[var(--muted)]" dir="ltr">

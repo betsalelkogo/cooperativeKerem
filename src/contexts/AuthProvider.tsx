@@ -10,6 +10,7 @@ import {
 } from "react";
 import {
   GoogleAuthProvider,
+  getAdditionalUserInfo,
   onAuthStateChanged,
   setPersistence,
   browserLocalPersistence,
@@ -21,7 +22,8 @@ import { getFirebaseAuth } from "@/lib/firebase/client";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { authFetch } from "@/lib/api-client";
 import { DEFAULT_MEMBER_ROLE } from "@/lib/admin";
-import { upsertMemberFromUser } from "@/lib/firebase/members";
+import { saveMemberNameParts, upsertMemberFromUser } from "@/lib/firebase/members";
+import { splitFullName } from "@/lib/name";
 import type { Member } from "@/lib/types";
 
 interface AuthContextValue {
@@ -93,7 +95,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!auth) throw new Error("Firebase לא מוגדר");
 
     const provider = new GoogleAuthProvider();
-    await signInWithPopup(auth, provider);
+    const result = await signInWithPopup(auth, provider);
+
+    // Overwrite the stored first/family name with what Google gave us. Prefer
+    // Google's distinct given_name/family_name, falling back to splitting the
+    // display name when they aren't present in the OAuth profile.
+    const profile = getAdditionalUserInfo(result)?.profile as
+      | { given_name?: string; family_name?: string }
+      | undefined;
+    const fallback = splitFullName(result.user.displayName ?? "");
+    const firstName = profile?.given_name?.trim() || fallback.firstName;
+    const familyName = profile?.family_name?.trim() || fallback.familyName;
+    if (firstName || familyName) {
+      try {
+        await saveMemberNameParts(result.user.uid, { firstName, familyName });
+      } catch {
+        // non-fatal — sign-in should still succeed if the name write fails
+      }
+    }
   }, []);
 
   const signOut = useCallback(async () => {

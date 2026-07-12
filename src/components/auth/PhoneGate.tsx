@@ -6,7 +6,7 @@ import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
 import { isValidPhone } from "@/lib/phone";
 
-const PUBLIC_PATHS = ["/login"];
+const PUBLIC_PATHS = ["/login", "/takanon"];
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));

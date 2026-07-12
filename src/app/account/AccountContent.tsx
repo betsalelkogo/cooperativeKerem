@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Alert } from "@/components/ui/Alert";
@@ -417,6 +418,15 @@ export default function AccountContent() {
           )}
         </>
       )}
+
+      <div className="mt-8 border-t border-[var(--border)] pt-4 text-center">
+        <Link
+          href="/takanon"
+          className="text-sm font-medium text-kerem-700 underline hover:text-kerem-800"
+        >
+          תקנון ותנאי שימוש
+        </Link>
+      </div>
     </div>
   );
 }
