@@ -139,10 +139,10 @@ export default function AdminMembersPage() {
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     if (!normalized) return members;
-    return members.filter(
-      (m) =>
-        m.email.toLowerCase().includes(normalized) ||
-        m.name.toLowerCase().includes(normalized)
+    return members.filter((m) =>
+      [m.firstName, m.familyName, m.name, m.email]
+        .filter(Boolean)
+        .some((field) => field!.toLowerCase().includes(normalized))
     );
   }, [members, query]);
 
@@ -270,7 +270,7 @@ export default function AdminMembersPage() {
     <div>
       <PageHeader
         title="ניהול חברים"
-        description="כל החברים במערכת — חיפוש לפי שם או אימייל, צפייה בהיסטוריה ומתן הרשאות מנהל."
+        description="כל החברים במערכת — חיפוש לפי שם פרטי, שם משפחה או אימייל, צפייה בהיסטוריה ומתן הרשאות מנהל."
       />
 
       {error && (
@@ -439,7 +439,7 @@ export default function AdminMembersPage() {
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="סינון לפי שם או אימייל..."
+            placeholder="סינון לפי שם פרטי, שם משפחה או אימייל..."
             className="min-h-[44px] w-full rounded-xl border border-[var(--border)] px-4 py-2 text-sm"
           />
         </CardBody>
