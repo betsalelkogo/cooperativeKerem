@@ -137,14 +137,22 @@ export function AuthNav() {
 
 export function Footer() {
   return (
-    <footer className="mt-auto hidden border-t border-[var(--border)] bg-white/60 py-8 md:block">
+    <footer className="mt-auto border-t border-[var(--border)] bg-white/60 py-6 md:py-8">
       <div className="mx-auto max-w-6xl px-4 sm:px-6">
         <div className="flex flex-col items-center justify-between gap-4 sm:flex-row">
           <div className="flex items-center gap-3">
             <SiteLogo size="sm" />
             <span className="font-semibold text-kerem-900">כרם רעים — קואופרטיב הציוד</span>
           </div>
-          <p className="text-sm text-[var(--muted)]">שיתוף ציוד · קופות חכמות · בטיחות קודמת</p>
+          <div className="flex flex-col items-center gap-1 sm:items-end">
+            <p className="text-sm text-[var(--muted)]">שיתוף ציוד · קופות חכמות · בטיחות קודמת</p>
+            <Link
+              href="/takanon"
+              className="text-sm font-medium text-kerem-700 underline-offset-2 hover:underline"
+            >
+              תקנון ותנאי שימוש
+            </Link>
+          </div>
         </div>
       </div>
     </footer>
