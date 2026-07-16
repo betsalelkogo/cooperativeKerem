@@ -6,6 +6,7 @@ import { AuthProvider } from "@/contexts/AuthProvider";
 import { AuthGate } from "@/components/auth/AuthGate";
 import { NameGate } from "@/components/auth/NameGate";
 import { PhoneGate } from "@/components/auth/PhoneGate";
+import { MembershipOfferGate } from "@/components/auth/MembershipOfferGate";
 import "./globals.css";
 
 const heebo = Heebo({
@@ -48,14 +49,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <AuthGate>
             <NameGate>
               <PhoneGate>
-                <main
-                  className={`mx-auto w-full max-w-6xl flex-1 px-4 sm:px-6 ${
-                    /* less bottom padding on login (no bottom nav) */
-                    "py-5 pb-24 sm:py-10 sm:pb-10"
-                  }`}
-                >
-                  {children}
-                </main>
+                <MembershipOfferGate>
+                  <main
+                    className={`mx-auto w-full max-w-6xl flex-1 px-4 sm:px-6 ${
+                      /* less bottom padding on login (no bottom nav) */
+                      "py-5 pb-24 sm:py-10 sm:pb-10"
+                    }`}
+                  >
+                    {children}
+                  </main>
+                </MembershipOfferGate>
               </PhoneGate>
             </NameGate>
           </AuthGate>

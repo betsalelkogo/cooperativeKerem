@@ -21,8 +21,13 @@ import { BackLink } from "@/components/ui/PageHeader";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
+import { JoinMembershipBanner } from "@/components/membership/JoinMembershipBanner";
 import type { GemachReservationMode, ToolKindWithAvailability } from "@/lib/types";
 import { LOAN_HOUR_CANDIDATES } from "@/lib/gemach";
+import {
+  MEMBERSHIP_REQUIRED_CODE,
+  TERMS_REQUIRED_CODE,
+} from "@/lib/membership";
 
 function loanHourOptions(kind: ToolKindWithAvailability): number[] {
   const min = kind.gemachDefaultLoanHours ?? 4;
@@ -41,6 +46,7 @@ export default function ReserveToolPage() {
   const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [gateCode, setGateCode] = useState<string | null>(null);
 
   const mode: GemachReservationMode = kind?.gemachReservationMode ?? "fixed_hours";
   const isFixedHours = mode === "fixed_hours";
@@ -143,6 +149,7 @@ export default function ReserveToolPage() {
             returnTimeEnd,
           };
 
+      setGateCode(null);
       const res = await authFetch("/api/reservations", {
         method: "POST",
         token,
@@ -152,6 +159,12 @@ export default function ReserveToolPage() {
 
       if (!res.ok) {
         const data = await res.json();
+        if (
+          data.code === TERMS_REQUIRED_CODE ||
+          data.code === MEMBERSHIP_REQUIRED_CODE
+        ) {
+          setGateCode(data.code);
+        }
         throw new Error(data.error ?? "השריון נכשל");
       }
 
@@ -398,6 +411,7 @@ export default function ReserveToolPage() {
             </div>
 
             {error && <Alert variant="error">{error}</Alert>}
+            {gateCode && <JoinMembershipBanner reason={gateCode} />}
 
             <Button
               type="submit"

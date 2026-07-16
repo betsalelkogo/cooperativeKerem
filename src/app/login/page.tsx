@@ -60,11 +60,11 @@ function LoginContent() {
         <CardBody className="py-8">
           <GoogleSignInButton label="התחברות עם Google" />
           <p className="mt-6 text-center text-xs leading-relaxed text-[var(--muted)]">
-            בכניסה אתם מסכימים{" "}
+            אפשר לגלוש במלאי אחרי ההרשמה. אישור{" "}
             <Link href="/takanon" className="font-medium text-kerem-700 underline hover:text-kerem-800">
-              לתקנון ולתנאי השימוש
+              התקנון
             </Link>{" "}
-            של הקואופרטיב.
+            ותשלום דמי הצטרפות נדרשים רק לפני השאלת כלי מהקואופרטיב.
           </p>
         </CardBody>
       </Card>

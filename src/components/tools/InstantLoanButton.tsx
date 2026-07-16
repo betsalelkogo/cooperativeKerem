@@ -4,6 +4,11 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
+import { JoinMembershipBanner } from "@/components/membership/JoinMembershipBanner";
+import {
+  MEMBERSHIP_REQUIRED_CODE,
+  TERMS_REQUIRED_CODE,
+} from "@/lib/membership";
 
 interface InstantLoanButtonProps {
   kindId: string;
@@ -22,6 +27,7 @@ export function InstantLoanButton({
   const { user, getIdToken } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [gateCode, setGateCode] = useState<string | null>(null);
   const [choosing, setChoosing] = useState(false);
   const [quantity, setQuantity] = useState(1);
 
@@ -35,6 +41,7 @@ export function InstantLoanButton({
 
   function handleTrigger() {
     setError("");
+    setGateCode(null);
     if (!user) {
       router.push("/login");
       return;
@@ -50,6 +57,7 @@ export function InstantLoanButton({
   async function book(qty: number) {
     setLoading(true);
     setError("");
+    setGateCode(null);
     try {
       const token = await getIdToken();
       const res = await authFetch("/api/reservations", {
@@ -60,6 +68,12 @@ export function InstantLoanButton({
       });
       const data = await res.json();
       if (!res.ok) {
+        if (
+          data.code === TERMS_REQUIRED_CODE ||
+          data.code === MEMBERSHIP_REQUIRED_CODE
+        ) {
+          setGateCode(data.code);
+        }
         throw new Error(data.error ?? "לא ניתן להתחיל השאלה מיידית");
       }
       router.push(`/checkout/${data.id}`);
@@ -67,6 +81,11 @@ export function InstantLoanButton({
       setError(err instanceof Error ? err.message : "משהו השתבש");
       setLoading(false);
     }
+  }
+
+  function gateBanner() {
+    if (!gateCode) return null;
+    return <JoinMembershipBanner reason={gateCode} className="mt-2 w-full" />;
   }
 
   // ── Quantity chooser (shown after clicking when more than one unit is free) ──
@@ -134,6 +153,7 @@ export function InstantLoanButton({
           </button>
         </div>
         {error && <p className="text-xs font-medium text-red-700">{error}</p>}
+        {gateBanner()}
       </div>
     );
   }
@@ -152,6 +172,7 @@ export function InstantLoanButton({
         {error && (
           <p className="w-full text-right text-xs font-medium text-red-700">{error}</p>
         )}
+        {gateBanner()}
       </>
     );
   }
@@ -167,6 +188,7 @@ export function InstantLoanButton({
         {loading ? "מתחיל…" : "⚡ השאלה מיידית"}
       </button>
       {error && <p className="mt-2 text-sm font-medium text-red-700">{error}</p>}
+      {gateBanner()}
     </div>
   );
 }

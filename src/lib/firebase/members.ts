@@ -58,6 +58,12 @@ export async function upsertMemberFromUser(user: User): Promise<Member> {
     phone: existing.exists() ? (existing.data().phone as string) || undefined : undefined,
     isAmember: existing.exists() ? (existing.data().isAmember as boolean) ?? false : false,
     firstPayout: existing.exists() ? existing.data().firstPayout !== false : true,
+    termsAcceptedAt: existing.exists()
+      ? ((existing.data().termsAcceptedAt as string) || undefined)
+      : undefined,
+    membershipOfferDismissedAt: existing.exists()
+      ? ((existing.data().membershipOfferDismissedAt as string) || undefined)
+      : undefined,
     hasPaymentMethod: memberData.hasPaymentMethod,
     role,
     gemachAdminIds,
@@ -86,6 +92,8 @@ export async function getMember(uid: string): Promise<Member | null> {
     phone: (data.phone as string) || undefined,
     isAmember: (data.isAmember as boolean) ?? false,
     firstPayout: data.firstPayout !== false,
+    termsAcceptedAt: (data.termsAcceptedAt as string) || undefined,
+    membershipOfferDismissedAt: (data.membershipOfferDismissedAt as string) || undefined,
     hasPaymentMethod: (data.hasPaymentMethod as boolean) ?? false,
     role: roleFromMemberData(data),
     gemachAdminIds: gemachAdminIdsFromData(data),

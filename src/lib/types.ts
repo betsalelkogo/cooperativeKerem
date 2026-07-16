@@ -381,7 +381,7 @@ export interface Member {
   email: string;
   /** Mobile number (digits only). Collected once after sign-in; used to match PayBox payments. */
   phone?: string;
-  /** Whether the member is a paying member of the cooperative. Set by platform admins. */
+  /** Whether the member is a paying member of the cooperative. Set by platform admins (or PayBox import). */
   isAmember?: boolean;
   /**
    * True until the member's first payment is processed. On that first payment the
@@ -389,6 +389,16 @@ export interface Member {
    * this flips to false. Defaults to true for new members.
    */
   firstPayout?: boolean;
+  /**
+   * ISO timestamp when the member accepted the cooperative תקנון.
+   * Optional while browsing; required before borrowing a cooperative tool.
+   */
+  termsAcceptedAt?: string;
+  /**
+   * ISO timestamp when the member dismissed the post-signup join offer
+   * (PayBox + תקנון). Paid members (`isAmember`) never see that offer.
+   */
+  membershipOfferDismissedAt?: string;
   hasPaymentMethod: boolean;
   role: MemberRole;
   /** Gemach IDs this member can admin (when role is GEMACH_ADMIN). */

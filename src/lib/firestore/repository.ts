@@ -1415,6 +1415,9 @@ function memberFromDoc(id: string, data: DocumentData): Member {
     phone: (data.phone as string) || undefined,
     isAmember: (data.isAmember as boolean) ?? false,
     firstPayout: data.firstPayout !== false,
+    termsAcceptedAt: (data.termsAcceptedAt as string) || undefined,
+    membershipOfferDismissedAt:
+      (data.membershipOfferDismissedAt as string) || undefined,
     hasPaymentMethod: (data.hasPaymentMethod as boolean) ?? false,
     role: roleFromMemberData(data),
     gemachAdminIds: gemachAdminIdsFromData(data),
@@ -1490,6 +1493,9 @@ export async function syncMemberFromAuth(params: {
     phone: (existingData?.phone as string) || undefined,
     isAmember: (existingData?.isAmember as boolean) ?? false,
     firstPayout: existingData?.firstPayout !== false,
+    termsAcceptedAt: (existingData?.termsAcceptedAt as string) || undefined,
+    membershipOfferDismissedAt:
+      (existingData?.membershipOfferDismissedAt as string) || undefined,
     hasPaymentMethod: existing.exists
       ? ((existingData?.hasPaymentMethod as boolean) ?? false)
       : false,
@@ -1524,6 +1530,51 @@ export async function updateMemberPhone(uid: string, phone: string): Promise<Mem
 
   await ref.set(
     { phone, updatedAt: FieldValue.serverTimestamp() },
+    { merge: true }
+  );
+
+  const snap = await ref.get();
+  return memberFromDoc(snap.id, snap.data()!);
+}
+
+/** Record תקנון acceptance (idempotent). */
+export async function acceptMemberTerms(uid: string): Promise<Member> {
+  const ref = getAdminDb().collection("members").doc(uid);
+  const existing = await ref.get();
+  if (!existing.exists) throw new Error("משתמש לא נמצא");
+
+  const data = existing.data()!;
+  if (typeof data.termsAcceptedAt === "string" && data.termsAcceptedAt) {
+    return memberFromDoc(existing.id, data);
+  }
+
+  const termsAcceptedAt = new Date().toISOString();
+  await ref.set(
+    { termsAcceptedAt, updatedAt: FieldValue.serverTimestamp() },
+    { merge: true }
+  );
+
+  const snap = await ref.get();
+  return memberFromDoc(snap.id, snap.data()!);
+}
+
+/** Dismiss the optional post-signup join offer (PayBox + תקנון). */
+export async function dismissMembershipOffer(uid: string): Promise<Member> {
+  const ref = getAdminDb().collection("members").doc(uid);
+  const existing = await ref.get();
+  if (!existing.exists) throw new Error("משתמש לא נמצא");
+
+  const data = existing.data()!;
+  if (
+    typeof data.membershipOfferDismissedAt === "string" &&
+    data.membershipOfferDismissedAt
+  ) {
+    return memberFromDoc(existing.id, data);
+  }
+
+  const membershipOfferDismissedAt = new Date().toISOString();
+  await ref.set(
+    { membershipOfferDismissedAt, updatedAt: FieldValue.serverTimestamp() },
     { merge: true }
   );
 

@@ -12,9 +12,27 @@ export const MEMBERSHIP_FEE_NIS = 150;
  */
 export const MEMBERSHIP_JOIN_MIN_NIS = 200;
 
+/** API / UI error codes for reservation gates. */
+export const TERMS_REQUIRED_CODE = "TERMS_REQUIRED" as const;
+export const MEMBERSHIP_REQUIRED_CODE = "MEMBERSHIP_REQUIRED" as const;
+
 /** Read a member's firstPayout flag with the correct default (true). */
 export function isFirstPayout(data: { firstPayout?: unknown } | undefined | null): boolean {
   return data?.firstPayout !== false;
+}
+
+/** Whether the member has accepted the תקנון. */
+export function hasAcceptedTerms(
+  data: { termsAcceptedAt?: unknown } | undefined | null
+): boolean {
+  return typeof data?.termsAcceptedAt === "string" && data.termsAcceptedAt.length > 0;
+}
+
+/** Paying cooperative member — skip join/PayBox offer. */
+export function isPaidMember(
+  data: { isAmember?: unknown } | undefined | null
+): boolean {
+  return data?.isAmember === true;
 }
 
 /**

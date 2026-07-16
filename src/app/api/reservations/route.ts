@@ -16,6 +16,12 @@ import {
   resolveTotalReservationFee,
   resolveToolDefaultLoanHours,
 } from "@/lib/gemach";
+import {
+  hasAcceptedTerms,
+  isPaidMember,
+  MEMBERSHIP_REQUIRED_CODE,
+  TERMS_REQUIRED_CODE,
+} from "@/lib/membership";
 import { formatCredits } from "@/lib/pots";
 import {
   computeFixedHoursReservation,
@@ -193,10 +199,36 @@ export async function POST(request: Request) {
       units.length
     );
 
+    const member = await getMemberById(memberId);
+
+    // Cooperative tools: terms + paid membership (`isAmember`). Partner gemachim
+    // stay usable for browsing/borrowing without joining the cooperative.
+    if (isPlatformGemach(gemach)) {
+      if (!hasAcceptedTerms(member)) {
+        return NextResponse.json(
+          {
+            error: "יש לאשר את תקנון הקואופרטיב לפני השאלת כלי מהקואופרטיב.",
+            code: TERMS_REQUIRED_CODE,
+          },
+          { status: 403 }
+        );
+      }
+
+      if (!isPaidMember(member)) {
+        return NextResponse.json(
+          {
+            error:
+              "השאלת כלי מהקואופרטיב פתוחה לחברים ששילמו דמי הצטרפות. אפשר לגלוש במלאי — ולשלם בפייבוקס עד לאישור מנהל.",
+            code: MEMBERSHIP_REQUIRED_CODE,
+          },
+          { status: 403 }
+        );
+      }
+    }
+
     // Cooperative loans are paid from the internal balance only — block the
     // booking up-front when the member can't cover the fee (no PayBox fallback).
     if (isPlatformGemach(gemach) && feeAmount > 0) {
-      const member = await getMemberById(memberId);
       const balance = member?.creditBalance ?? 0;
       if (balance < feeAmount) {
         return NextResponse.json(

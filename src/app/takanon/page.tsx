@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardBody } from "@/components/ui/Card";
+import { AcceptTermsButton } from "@/components/takanon/AcceptTermsButton";
 
 export const metadata: Metadata = {
   title: "תקנון — כרם רעים",
@@ -240,12 +241,13 @@ export default function TakanonPage() {
         ))}
 
         <Card>
-          <CardBody className="py-5">
+          <CardBody className="space-y-4 py-5">
             <p className="text-sm leading-relaxed font-medium text-stone-900">
               אני מאשר כי קראתי את התקנון במלואו, הבנתי את תוכנו, ואני מסכים באופן מלא ומרצון חופשי לכל
               תנאיו, לרבות סעיפי הפטור הבלתי מותנה מאחריות של המיזם, מפעיליו, וכן הסרת האחריות הנוגעת
               לגמ&quot;חים החיצוניים המפורסמים באתר.
             </p>
+            <AcceptTermsButton />
           </CardBody>
         </Card>
       </div>

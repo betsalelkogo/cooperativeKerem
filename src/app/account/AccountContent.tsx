@@ -7,6 +7,8 @@ import { Card, CardBody } from "@/components/ui/Card";
 import { Alert } from "@/components/ui/Alert";
 import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
+import { JoinMembershipBanner } from "@/components/membership/JoinMembershipBanner";
+import { isPaidMember } from "@/lib/membership";
 import { formatCredits } from "@/lib/pots";
 import type { CreditLedgerEntry, PeerDebtSummary } from "@/lib/types";
 
@@ -51,7 +53,7 @@ function formatDateTime(iso: string): string {
 }
 
 export default function AccountContent() {
-  const { user, getIdToken, refreshMember } = useAuth();
+  const { user, member, getIdToken, refreshMember } = useAuth();
 
   const [balance, setBalance] = useState(0);
   const [entries, setEntries] = useState<StatementEntry[]>([]);
@@ -197,6 +199,10 @@ export default function AccountContent() {
           <p className="mt-1 text-4xl font-bold text-emerald-900">{formatCredits(balance)}</p>
         </CardBody>
       </Card>
+
+      {member && !isPaidMember(member) && (
+        <JoinMembershipBanner className="mb-6" />
+      )}
 
       {notice && (
         <Alert variant="success" className="mb-4">
