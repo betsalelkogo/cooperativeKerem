@@ -1,5 +1,5 @@
 import type { Gemach, Tool } from "@/lib/types";
-import { reservationDateTime } from "@/lib/israel-time";
+import { israelNowParts, reservationDateTime } from "@/lib/israel-time";
 import {
   resolveToolDefaultLoanHours,
   resolveToolMaxLoanHours,
@@ -37,6 +37,20 @@ function addDaysToDate(dateStr: string, days: number): string {
   const d = reservationDateTime(dateStr, "00:00");
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().split("T")[0];
+}
+
+/**
+ * Earliest pickup that passes "must be in the future" validation.
+ * Wall-clock times are stored as HH:mm with seconds=0, so the current minute
+ * is often already past — use the next Israel minute (rollover to tomorrow if needed).
+ */
+export function earliestFuturePickup(now = new Date()): { date: string; time: string } {
+  const { date, minutes } = israelNowParts(now);
+  const next = minutes + 1;
+  if (next >= 24 * 60) {
+    return { date: addDaysToDate(date, 1), time: "00:00" };
+  }
+  return { date, time: minutesToTime(next) };
 }
 
 export interface ReservationSchedule {

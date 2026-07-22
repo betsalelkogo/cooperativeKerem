@@ -7,15 +7,17 @@ import { authFetch } from "@/lib/api-client";
 import { inventoryLabel } from "@/lib/tool-kinds";
 import {
   computeFixedHoursReservation,
-  DEFAULT_PICKUP_START,
   DEFAULT_RETURN_END,
   DEFAULT_RETURN_START,
+  earliestFuturePickup,
   formatLoanDurationLabel,
   MAX_PICKUP_WINDOW_HOURS,
+  parseTimeToMinutes,
   validateDateRangeReservation,
   validateFixedHoursReservation,
   addHoursToTime,
 } from "@/lib/reservation-times";
+import { israelNowParts } from "@/lib/israel-time";
 import { formatDateHe } from "@/lib/dates";
 import { BackLink } from "@/components/ui/PageHeader";
 import { Card, CardBody } from "@/components/ui/Card";
@@ -51,15 +53,32 @@ export default function ReserveToolPage() {
   const mode: GemachReservationMode = kind?.gemachReservationMode ?? "fixed_hours";
   const isFixedHours = mode === "fixed_hours";
 
-  const [pickupDate, setPickupDate] = useState("");
-  const [pickupTimeStart, setPickupTimeStart] = useState(DEFAULT_PICKUP_START);
+  // ASAP defaults: today (Israel) + next valid future minute — no empty date / past 09:00 trap.
+  const [pickupDefaults] = useState(() => earliestFuturePickup());
+  const [pickupDate, setPickupDate] = useState(pickupDefaults.date);
+  const [pickupTimeStart, setPickupTimeStart] = useState(pickupDefaults.time);
   const [loanHours, setLoanHours] = useState(4);
   const [pickupTimeEnd, setPickupTimeEnd] = useState(
-    addHoursToTime(DEFAULT_PICKUP_START, MAX_PICKUP_WINDOW_HOURS)
+    addHoursToTime(pickupDefaults.time, MAX_PICKUP_WINDOW_HOURS)
   );
-  const [returnDate, setReturnDate] = useState("");
-  const [returnTimeStart, setReturnTimeStart] = useState(DEFAULT_RETURN_START);
-  const [returnTimeEnd, setReturnTimeEnd] = useState(DEFAULT_RETURN_END);
+  const [returnDate, setReturnDate] = useState(pickupDefaults.date);
+  const [returnTimeStart, setReturnTimeStart] = useState(() => {
+    const pickupMins = parseTimeToMinutes(pickupDefaults.time) ?? 0;
+    const defaultReturn = parseTimeToMinutes(DEFAULT_RETURN_START) ?? 17 * 60;
+    // Evening defaults don't work for afternoon/evening ASAP pickups.
+    if (defaultReturn <= pickupMins) {
+      return addHoursToTime(pickupDefaults.time, 4);
+    }
+    return DEFAULT_RETURN_START;
+  });
+  const [returnTimeEnd, setReturnTimeEnd] = useState(() => {
+    const pickupMins = parseTimeToMinutes(pickupDefaults.time) ?? 0;
+    const defaultReturn = parseTimeToMinutes(DEFAULT_RETURN_START) ?? 17 * 60;
+    if (defaultReturn <= pickupMins) {
+      return addHoursToTime(pickupDefaults.time, 5);
+    }
+    return DEFAULT_RETURN_END;
+  });
   const [quantity, setQuantity] = useState(1);
 
   const hourOptions = useMemo(
@@ -101,24 +120,84 @@ export default function ReserveToolPage() {
     e.preventDefault();
     if (!kind) return;
 
+    const pastMsg = "לא ניתן לשמור לעבר — בחרו זמן עתידי";
+    let effectivePickupDate = pickupDate;
+    let effectivePickupTimeStart = pickupTimeStart;
+    let effectivePickupTimeEnd = pickupTimeEnd;
+    let effectiveReturnDate = returnDate;
+    let effectiveReturnTimeStart = returnTimeStart;
+    let effectiveReturnTimeEnd = returnTimeEnd;
+
+    // If the chosen start slipped into the past (stale tab / ASAP default), bump to next slot.
+    function bumpToEarliestFuture() {
+      const asap = earliestFuturePickup();
+      effectivePickupDate = asap.date;
+      effectivePickupTimeStart = asap.time;
+      effectivePickupTimeEnd = addHoursToTime(asap.time, MAX_PICKUP_WINDOW_HOURS);
+      setPickupDate(asap.date);
+      setPickupTimeStart(asap.time);
+      setPickupTimeEnd(effectivePickupTimeEnd);
+      if (!isFixedHours) {
+        const pickupMins = parseTimeToMinutes(asap.time) ?? 0;
+        const retStartMins = parseTimeToMinutes(effectiveReturnTimeStart) ?? 0;
+        if (
+          effectiveReturnDate < asap.date ||
+          (effectiveReturnDate === asap.date && retStartMins <= pickupMins)
+        ) {
+          effectiveReturnDate = asap.date;
+          effectiveReturnTimeStart = addHoursToTime(asap.time, 4);
+          effectiveReturnTimeEnd = addHoursToTime(asap.time, 5);
+          setReturnDate(effectiveReturnDate);
+          setReturnTimeStart(effectiveReturnTimeStart);
+          setReturnTimeEnd(effectiveReturnTimeEnd);
+        }
+      }
+    }
+
     if (isFixedHours) {
-      const timeError = validateFixedHoursReservation(pickupDate, pickupTimeStart, loanHours, {
+      const limits = {
         minHours: kind.gemachDefaultLoanHours ?? 4,
         maxHours: kind.gemachMaxLoanHours ?? 24,
-      });
+      };
+      let timeError = validateFixedHoursReservation(
+        effectivePickupDate,
+        effectivePickupTimeStart,
+        loanHours,
+        limits
+      );
+      if (timeError === pastMsg) {
+        bumpToEarliestFuture();
+        timeError = validateFixedHoursReservation(
+          effectivePickupDate,
+          effectivePickupTimeStart,
+          loanHours,
+          limits
+        );
+      }
       if (timeError) {
         setError(timeError);
         return;
       }
     } else {
-      const timeError = validateDateRangeReservation({
-        pickupDate,
-        pickupTimeStart,
-        pickupTimeEnd,
-        returnDate,
-        returnTimeStart,
-        returnTimeEnd,
+      let timeError = validateDateRangeReservation({
+        pickupDate: effectivePickupDate,
+        pickupTimeStart: effectivePickupTimeStart,
+        pickupTimeEnd: effectivePickupTimeEnd,
+        returnDate: effectiveReturnDate,
+        returnTimeStart: effectiveReturnTimeStart,
+        returnTimeEnd: effectiveReturnTimeEnd,
       });
+      if (timeError === pastMsg) {
+        bumpToEarliestFuture();
+        timeError = validateDateRangeReservation({
+          pickupDate: effectivePickupDate,
+          pickupTimeStart: effectivePickupTimeStart,
+          pickupTimeEnd: effectivePickupTimeEnd,
+          returnDate: effectiveReturnDate,
+          returnTimeStart: effectiveReturnTimeStart,
+          returnTimeEnd: effectiveReturnTimeEnd,
+        });
+      }
       if (timeError) {
         setError(timeError);
         return;
@@ -134,19 +213,19 @@ export default function ReserveToolPage() {
         ? {
             kindId: kind.catalogId,
             quantity,
-            pickupDate,
-            pickupTimeStart,
+            pickupDate: effectivePickupDate,
+            pickupTimeStart: effectivePickupTimeStart,
             loanDurationHours: loanHours,
           }
         : {
             kindId: kind.catalogId,
             quantity,
-            pickupDate,
-            pickupTimeStart,
-            pickupTimeEnd,
-            returnDate,
-            returnTimeStart,
-            returnTimeEnd,
+            pickupDate: effectivePickupDate,
+            pickupTimeStart: effectivePickupTimeStart,
+            pickupTimeEnd: effectivePickupTimeEnd,
+            returnDate: effectiveReturnDate,
+            returnTimeStart: effectiveReturnTimeStart,
+            returnTimeEnd: effectiveReturnTimeEnd,
           };
 
       setGateCode(null);
@@ -186,7 +265,7 @@ export default function ReserveToolPage() {
     );
   }
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = israelNowParts().date;
   const stockLabel = inventoryLabel(kind);
   const priceText = kind.priceLabel ?? "—";
 
@@ -200,8 +279,8 @@ export default function ReserveToolPage() {
           <h1 className="text-2xl font-bold text-stone-900">שריון {kind.name}</h1>
           <p className="mt-2 text-sm text-[var(--muted)]">
             {isFixedHours
-              ? `בחרו מתי מתחילים — ברירת מחדל ${kind.gemachDefaultLoanHours ?? 4} שעות, עד ${kind.gemachMaxLoanHours ?? 24} שעות.`
-              : "בחרו חלונות איסוף והחזרה — מתאים להשאלות ארוכות יותר."}
+              ? `תאריך ושעת ההתחלה ממולאים אוטומטית לזמן הקרוב ביותר האפשרי. משך ברירת מחדל ${kind.gemachDefaultLoanHours ?? 4} שעות, עד ${kind.gemachMaxLoanHours ?? 24} שעות.`
+              : "תאריך האיסוף ממולא אוטומטית לזמן הקרוב ביותר — אפשר לעדכן את חלונות האיסוף וההחזרה."}
           </p>
           {kind.gemachName && (
             <p className="mt-1 text-xs font-medium text-amber-800">
@@ -264,6 +343,9 @@ export default function ReserveToolPage() {
                       onChange={(e) => setPickupTimeStart(e.target.value)}
                       className="w-full rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm focus:border-kerem-400 focus:outline-none focus:ring-2 focus:ring-kerem-200"
                     />
+                    <p className="mt-1 text-xs text-[var(--muted)]">
+                      ברירת מחדל: הדקה הקרובה ביותר שאפשר לשריין
+                    </p>
                   </div>
                   <div>
                     <label htmlFor="loanHours" className="mb-1.5 block text-sm font-semibold text-stone-800">
