@@ -65,9 +65,12 @@ const creditReasonLabels: Record<CreditLedgerReason, string> = {
   peer_repay_in: "קבלת החזר חוב מחבר",
 };
 
+type CoopFilter = "all" | "members" | "non-members";
+
 export default function AdminMembersPage() {
   const { getIdToken } = useAuth();
   const [query, setQuery] = useState("");
+  const [coopFilter, setCoopFilter] = useState<CoopFilter>("all");
   const [loading, setLoading] = useState(true);
   const [members, setMembers] = useState<AdminMemberSummary[]>([]);
   const [selected, setSelected] = useState<AdminMemberHistory | null>(null);
@@ -138,13 +141,17 @@ export default function AdminMembersPage() {
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    if (!normalized) return members;
-    return members.filter((m) =>
-      [m.firstName, m.familyName, m.name, m.email]
+    return members.filter((m) => {
+      if (coopFilter === "members" && m.isAmember !== true) return false;
+      if (coopFilter === "non-members" && m.isAmember === true) return false;
+      if (!normalized) return true;
+      return [m.firstName, m.familyName, m.name, m.email]
         .filter(Boolean)
-        .some((field) => field!.toLowerCase().includes(normalized))
-    );
-  }, [members, query]);
+        .some((field) => field!.toLowerCase().includes(normalized));
+    });
+  }, [members, query, coopFilter]);
+
+  const filterActive = coopFilter !== "all" || Boolean(query.trim());
 
   async function loadMember(id: string) {
     setLoadingDetail(true);
@@ -434,7 +441,29 @@ export default function AdminMembersPage() {
       </Card>
 
       <Card className="mb-8">
-        <CardBody className="py-4">
+        <CardBody className="space-y-3 py-4">
+          <div className="flex flex-wrap gap-2">
+            {(
+              [
+                ["all", "הכל"],
+                ["members", "חברי קואופרטיב"],
+                ["non-members", "לא חברים"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setCoopFilter(value)}
+                className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${
+                  coopFilter === value
+                    ? "bg-kerem-700 text-white"
+                    : "bg-warm-100 text-stone-700 hover:bg-warm-200"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <input
             type="search"
             value={query}
@@ -449,7 +478,7 @@ export default function AdminMembersPage() {
         <section>
           <h2 className="mb-3 text-lg font-bold text-stone-900">
             חברים ({loading ? "…" : filtered.length}
-            {query.trim() && members.length !== filtered.length
+            {filterActive && members.length !== filtered.length
               ? ` מתוך ${members.length}`
               : ""}
             )
@@ -479,8 +508,17 @@ export default function AdminMembersPage() {
                 >
                   <p className="font-semibold text-stone-900">{member.name}</p>
                   <p className="text-sm text-[var(--muted)]">{member.email}</p>
-                  <p className="mt-1 text-xs font-medium text-kerem-800">
-                    {roleLabels[member.role]}
+                  <p className="mt-1 flex flex-wrap items-center gap-2 text-xs font-medium">
+                    <span className="text-kerem-800">{roleLabels[member.role]}</span>
+                    {member.isAmember === true ? (
+                      <span className="rounded-md bg-emerald-100 px-1.5 py-0.5 text-emerald-800">
+                        חבר בקואופרטיב
+                      </span>
+                    ) : (
+                      <span className="rounded-md bg-stone-100 px-1.5 py-0.5 text-stone-600">
+                        לא חבר
+                      </span>
+                    )}
                   </p>
                 </button>
               ))}
