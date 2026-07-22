@@ -13,6 +13,7 @@ import {
   ReservationCard,
   type ReservationWithTool,
 } from "@/components/my-activity/ActivityCards";
+import { formatCredits } from "@/lib/pots";
 
 export default function MyReservationsContent() {
   const { getIdToken, user } = useAuth();
@@ -52,7 +53,7 @@ export default function MyReservationsContent() {
 
   async function handleCancelReservation(reservationId: string) {
     const confirmed = window.confirm(
-      "לבטל את השריון? הכלי יחזור להיות זמין.\n\nאם כבר שילמת דרך PayBox, פנו למנהל לגבי החזר."
+      "לבטל את השריון? הכלי יחזור להיות זמין.\n\nאם כבר שילמתם וביטול הוא לפני מועד תחילת ההשאלה — הסכום יוחזר אוטומטית ליתרה שלכם. אחרי מועד ההתחלה, או בביטול אוטומטי שלא הגעתם, אין החזר אוטומטי."
     );
     if (!confirmed) return;
 
@@ -68,8 +69,14 @@ export default function MyReservationsContent() {
       if (!res.ok) {
         throw new Error(data.error ?? "ביטול השריון נכשל");
       }
-      if (data.hadPaidPayment) {
-        window.alert("השריון בוטל. שילמת דרך PayBox — פנו למנהל לגבי החזר.");
+      if (typeof data.refundedAmount === "number" && data.refundedAmount > 0) {
+        window.alert(
+          `השריון בוטל. זוכו ${formatCredits(data.refundedAmount)} ליתרה שלכם.`
+        );
+      } else if (data.hadPaidPayment) {
+        window.alert(
+          "השריון בוטל. הביטול היה אחרי מועד תחילת ההשאלה — אין החזר אוטומטי. אפשר לפנות למנהל."
+        );
       }
       await loadData();
     } catch (err) {

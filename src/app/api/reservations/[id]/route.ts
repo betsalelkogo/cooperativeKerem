@@ -3,7 +3,6 @@ import { getUidFromRequest } from "@/lib/firebase/admin";
 import {
   cancelReservation,
   expireNoShowReservationIfNeeded,
-  getPaidPaymentForReservation,
   getReservationById,
   getToolById,
 } from "@/lib/firestore/repository";
@@ -45,12 +44,16 @@ export async function DELETE(
     }
 
     const { id } = await params;
-    const paidBeforeCancel = await getPaidPaymentForReservation(id);
-    const reservation = await cancelReservation(id, memberId);
+    const { reservation, refundedAmount, hadPaidPayment } = await cancelReservation(
+      id,
+      memberId
+    );
 
     return NextResponse.json({
       reservation,
-      hadPaidPayment: Boolean(paidBeforeCancel),
+      hadPaidPayment,
+      refundedAmount,
+      refunded: refundedAmount > 0,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "שגיאת שרת";

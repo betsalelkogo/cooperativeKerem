@@ -22,7 +22,9 @@ function describeEntry(entry: StatementEntry): string {
     case "tool_sale":
       return "זיכוי עבור מכירת כלי";
     case "refund":
-      return "החזר קרדיט";
+      return entry.note?.includes("ביטול שריון")
+        ? "החזר על ביטול שריון"
+        : "החזר קרדיט";
     case "paybox_import":
       return "טעינת תשלום PayBox";
     // Peer entries store the counterparty family name in the note; prefer it.

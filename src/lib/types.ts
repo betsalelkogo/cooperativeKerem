@@ -674,7 +674,7 @@ export interface PayboxSettings {
   growPageCode?: string;
 }
 
-export type PaymentStatus = "pending" | "paid" | "failed";
+export type PaymentStatus = "pending" | "paid" | "failed" | "refunded";
 export type PaymentProvider = "paybox_group" | "grow" | "credit";
 
 export interface MemberPayment {
@@ -691,6 +691,8 @@ export interface MemberPayment {
   creditApplied?: number;
   createdAt: string;
   paidAt?: string;
+  /** Set when a paid payment is refunded to the member's credit balance. */
+  refundedAt?: string;
 }
 
 export type PayoutPotTarget = "operations" | "device";

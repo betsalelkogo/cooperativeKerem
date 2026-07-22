@@ -95,7 +95,10 @@ import {
 } from "@/lib/tools-admin";
 import { disputeProgressLabel, isDisputeOpen, pickRandomMediators } from "@/lib/disputes";
 import { countUnitsAvailableInWindow } from "@/lib/availability";
-import { isReservationNoShowExpired } from "@/lib/reservation-expiry";
+import {
+  isReservationNoShowExpired,
+  reservationPickupStart,
+} from "@/lib/reservation-expiry";
 import type { DefectCategory } from "@/lib/types";
 
 function tsToIso(value: unknown): string {
@@ -1315,10 +1318,91 @@ export async function expireNoShowReservationIfNeeded(
   return getReservationById(reservationId);
 }
 
+/**
+ * Refund a paid reservation payment into the member's internal credit balance.
+ * Idempotent: if the payment is already `refunded`, returns 0.
+ * Used for member-initiated cancel before pickup start (not for no-show).
+ */
+async function refundPaidReservationToCredit(params: {
+  payment: MemberPayment;
+  reservationId: string;
+  memberId: string;
+}): Promise<number> {
+  const { payment, reservationId, memberId } = params;
+  if (payment.status === "refunded") return 0;
+  if (payment.status !== "paid") return 0;
+
+  const amount = Math.round(payment.amount * 100) / 100;
+  if (!(amount > 0)) {
+    await getAdminDb().collection("payments").doc(payment.id).update({
+      status: "refunded",
+      refundedAt: FieldValue.serverTimestamp(),
+    });
+    return 0;
+  }
+
+  const db = getAdminDb();
+  const memberRef = db.collection("members").doc(memberId);
+  const paymentRef = db.collection("payments").doc(payment.id);
+  const ledgerRef = db.collection("credit_ledger").doc(newId("cl"));
+
+  const refunded = await db.runTransaction(async (txn) => {
+    const paySnap = await txn.get(paymentRef);
+    if (!paySnap.exists) return 0;
+    const payData = paySnap.data() ?? {};
+    if (payData.status === "refunded") return 0;
+    if (payData.status !== "paid") return 0;
+
+    const refundAmount =
+      Math.round((typeof payData.amount === "number" ? payData.amount : amount) * 100) /
+      100;
+    if (!(refundAmount > 0)) {
+      txn.update(paymentRef, {
+        status: "refunded",
+        refundedAt: FieldValue.serverTimestamp(),
+      });
+      return 0;
+    }
+
+    const memberSnap = await txn.get(memberRef);
+    if (!memberSnap.exists) throw new Error("משתמש לא נמצא");
+    const current = memberCreditBalance(memberSnap.data() ?? {});
+    const next = Math.round((current + refundAmount) * 100) / 100;
+
+    txn.set(
+      memberRef,
+      { creditBalance: next, updatedAt: FieldValue.serverTimestamp() },
+      { merge: true }
+    );
+    txn.set(
+      ledgerRef,
+      omitUndefined({
+        id: ledgerRef.id,
+        memberId,
+        delta: refundAmount,
+        balanceAfter: next,
+        reason: "refund" as const,
+        note: `החזר על ביטול שריון לפני מועד ההשאלה — ${reservationId}`,
+        reservationId,
+        createdBy: memberId,
+        createdAt: FieldValue.serverTimestamp(),
+      })
+    );
+    txn.update(paymentRef, {
+      status: "refunded",
+      refundedAt: FieldValue.serverTimestamp(),
+    });
+
+    return refundAmount;
+  });
+
+  return refunded;
+}
+
 export async function cancelReservation(
   id: string,
   memberId: string
-): Promise<Reservation> {
+): Promise<{ reservation: Reservation; refundedAmount: number; hadPaidPayment: boolean }> {
   const reservation = await getReservationById(id);
   if (!reservation) {
     throw new Error("השריון לא נמצא");
@@ -1341,6 +1425,10 @@ export async function cancelReservation(
     throw new Error("כבר התחיל תהליך לקיחה — לא ניתן לבטל");
   }
 
+  const paidPayment = await getPaidPaymentForReservation(id);
+  const beforePickupStart =
+    Date.now() < reservationPickupStart(reservation).getTime();
+
   const batch = db.batch();
   batch.update(db.collection("reservations").doc(id), {
     status: "cancelled",
@@ -1358,7 +1446,21 @@ export async function cancelReservation(
   }
 
   await batch.commit();
-  return { ...reservation, status: "cancelled" };
+
+  let refundedAmount = 0;
+  if (paidPayment && beforePickupStart) {
+    refundedAmount = await refundPaidReservationToCredit({
+      payment: paidPayment,
+      reservationId: id,
+      memberId,
+    });
+  }
+
+  return {
+    reservation: { ...reservation, status: "cancelled" },
+    refundedAmount,
+    hadPaidPayment: Boolean(paidPayment),
+  };
 }
 
 export async function getAllReservations(): Promise<Reservation[]> {
@@ -2960,6 +3062,9 @@ export async function getPaymentById(id: string): Promise<MemberPayment | null> 
   }
   if (payment && snap.data()?.paidAt) {
     payment.paidAt = tsToIso(snap.data()!.paidAt);
+  }
+  if (payment && snap.data()?.refundedAt) {
+    payment.refundedAt = tsToIso(snap.data()!.refundedAt);
   }
   return payment;
 }
