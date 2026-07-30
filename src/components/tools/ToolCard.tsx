@@ -4,6 +4,7 @@ import { inventoryLabel } from "@/lib/tool-kinds";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Card, CardBody, CardFooter } from "@/components/ui/Card";
 import { InstantLoanButton } from "@/components/tools/InstantLoanButton";
+import { ExpandableText } from "@/components/ui/ExpandableText";
 import { cn } from "@/lib/cn";
 
 const categoryMeta: Record<string, { icon: string; gradient: string }> = {
@@ -85,7 +86,22 @@ export function ToolCard({ kind }: { kind: ToolKindWithAvailability }) {
           </div>
           <StatusBadge status={kind.status} />
         </div>
-        <p className="text-sm leading-relaxed text-[var(--muted)]">{kind.description}</p>
+        <ExpandableText
+          text={kind.description}
+          lines={3}
+          className="text-sm text-[var(--muted)]"
+        />
+        {!kind.isPartnerGemach && kind.youtubeUrl && (
+          <a
+            href={kind.youtubeUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-kerem-700 transition hover:text-kerem-800 hover:underline"
+          >
+            <span aria-hidden>▶</span>
+            סרטון הדרכה
+          </a>
+        )}
         {kind.location && (
           <p className="mt-2 flex items-start gap-1.5 text-xs text-stone-600">
             <span className="shrink-0" aria-hidden>

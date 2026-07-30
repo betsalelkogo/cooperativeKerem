@@ -101,6 +101,7 @@ export function buildToolKindWithAvailability(
     supplier: representative.supplier,
     purpose: representative.purpose,
     productAge: representative.productAge,
+    youtubeUrl: representative.youtubeUrl,
     gemachId: representative.gemachId,
     status,
     totalUnits: units.length,

@@ -43,6 +43,8 @@ export interface Tool {
   purpose?: string;
   /** Product age in years (approximate). */
   productAge?: number;
+  /** Optional YouTube how-to video (cooperative tools only). */
+  youtubeUrl?: string;
   /** Additional gallery images (first may duplicate imageUrl). */
   imageUrls?: string[];
 }
@@ -78,6 +80,7 @@ export interface ToolKindWithAvailability extends Omit<
   supplier?: string;
   purpose?: string;
   productAge?: number;
+  youtubeUrl?: string;
   imageUrls?: string[];
   /** Catalog popularity / usage stats (when loaded for detail page). */
   stats?: ToolKindStats;
@@ -605,6 +608,7 @@ export interface AdminToolKindEdit {
   supplier?: string;
   purpose?: string;
   productAge?: number;
+  youtubeUrl?: string;
   adminNotes?: string;
   /** Custom safety instructions (empty = no safety step). */
   safetyRules?: SafetyRule[];

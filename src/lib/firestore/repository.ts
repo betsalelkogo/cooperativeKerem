@@ -299,6 +299,7 @@ function toolFromDoc(id: string, data: DocumentData): Tool {
     supplier: typeof data.supplier === "string" ? data.supplier : undefined,
     purpose: typeof data.purpose === "string" ? data.purpose : undefined,
     productAge: typeof data.productAge === "number" ? data.productAge : undefined,
+    youtubeUrl: typeof data.youtubeUrl === "string" ? data.youtubeUrl : undefined,
     imageUrls: Array.isArray(data.imageUrls)
       ? data.imageUrls.filter((u): u is string => typeof u === "string")
       : undefined,
@@ -668,6 +669,7 @@ export async function getToolKindForAdmin(
     supplier: representative.supplier,
     purpose: representative.purpose,
     productAge: representative.productAge,
+    youtubeUrl: representative.youtubeUrl,
     adminNotes: representative.adminNotes,
     safetyRules: representative.safetyRules,
     gemachLocation: gemach.location,
@@ -691,6 +693,7 @@ export async function updateToolKindDetails(params: {
   supplier?: string | null;
   purpose?: string | null;
   productAge?: number | null;
+  youtubeUrl?: string | null;
   adminNotes?: string | null;
   safetyRules?: SafetyRule[] | null;
 }): Promise<{ updated: number }> {
@@ -811,6 +814,13 @@ export async function updateToolKindDetails(params: {
       update.productAge = FieldValue.delete();
     } else if (params.productAge !== undefined) {
       update.productAge = params.productAge;
+    }
+
+    if (params.youtubeUrl === null) {
+      update.youtubeUrl = FieldValue.delete();
+    } else if (params.youtubeUrl !== undefined) {
+      const v = params.youtubeUrl.trim();
+      update.youtubeUrl = v ? v : FieldValue.delete();
     }
 
     batch.update(getAdminDb().collection("tools").doc(tool.id), update);
@@ -1058,6 +1068,7 @@ export async function createToolsForGemach(params: {
   supplier?: string;
   purpose?: string;
   productAge?: number;
+  youtubeUrl?: string;
   createdBy: string;
 }): Promise<{ kindId: string; tools: Tool[] }> {
   const gemach = await getGemachById(params.gemachId);
@@ -1112,6 +1123,7 @@ export async function createToolsForGemach(params: {
       ...(params.productAge !== undefined && Number.isFinite(params.productAge)
         ? { productAge: params.productAge }
         : {}),
+      ...(params.youtubeUrl?.trim() ? { youtubeUrl: params.youtubeUrl.trim() } : {}),
       safetyRules,
       createdBy: params.createdBy,
       createdAt: FieldValue.serverTimestamp(),
@@ -1152,6 +1164,7 @@ export async function createToolsForGemach(params: {
       ...(params.productAge !== undefined && Number.isFinite(params.productAge)
         ? { productAge: params.productAge }
         : {}),
+      ...(params.youtubeUrl?.trim() ? { youtubeUrl: params.youtubeUrl.trim() } : {}),
       safetyRules,
     });
   }

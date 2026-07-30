@@ -8,6 +8,8 @@ import { BackLink } from "@/components/ui/PageHeader";
 import { Card, CardBody } from "@/components/ui/Card";
 import { ToolImageGallery } from "@/components/tools/ToolImageGallery";
 import { InstantLoanButton } from "@/components/tools/InstantLoanButton";
+import { ExpandableText } from "@/components/ui/ExpandableText";
+import { youtubeEmbedUrl } from "@/lib/tools-admin";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +37,10 @@ export default async function ToolDetailPage({
 
   const stats = kind.stats ?? { totalLoans: 0, activeLoans: 0, uniqueBorrowers: 0 };
   const popular = popularityLabel(stats.totalLoans);
+  const youtubeEmbed =
+    !kind.isPartnerGemach && kind.youtubeUrl
+      ? youtubeEmbedUrl(kind.youtubeUrl)
+      : null;
 
   const specRows = [
     { label: "מיקום", value: kind.location },
@@ -108,7 +114,38 @@ export default async function ToolDetailPage({
             </p>
           )}
 
-          <p className="mb-4 leading-relaxed text-stone-700">{kind.description}</p>
+          <div className="mb-4">
+            <ExpandableText
+              text={kind.description}
+              lines={5}
+              className="text-stone-700"
+            />
+          </div>
+
+          {youtubeEmbed && kind.youtubeUrl && (
+            <div className="mb-6">
+              <h2 className="mb-2 text-sm font-bold text-stone-900">סרטון הדרכה</h2>
+              <div className="relative aspect-video overflow-hidden rounded-xl bg-stone-900 ring-1 ring-[var(--border)]">
+                <iframe
+                  src={youtubeEmbed}
+                  title={`הדרכה: ${kind.name}`}
+                  className="absolute inset-0 h-full w-full"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  allowFullScreen
+                  loading="lazy"
+                  referrerPolicy="strict-origin-when-cross-origin"
+                />
+              </div>
+              <a
+                href={kind.youtubeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 inline-block text-sm font-semibold text-kerem-700 hover:underline"
+              >
+                פתיחה ב-YouTube
+              </a>
+            </div>
+          )}
 
           {kind.purpose && (
             <div className="mb-4 rounded-xl border border-sky-200 bg-sky-50/50 px-4 py-3">

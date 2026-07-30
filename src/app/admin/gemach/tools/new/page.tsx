@@ -8,6 +8,7 @@ import { authFetch } from "@/lib/api-client";
 import { compressImageFile } from "@/lib/compress-image";
 import {
   gemachPricingModeLabels,
+  isPlatformGemach,
   resolveGemachReservationMode,
   resolveGemachDefaultLoanHours,
   resolveGemachMaxLoanHours,
@@ -45,6 +46,7 @@ export default function AddGemachToolPage() {
   const [supplier, setSupplier] = useState("");
   const [purpose, setPurpose] = useState("");
   const [productAge, setProductAge] = useState("");
+  const [youtubeUrl, setYoutubeUrl] = useState("");
   const [safetyRulesText, setSafetyRulesText] = useState("");
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -109,6 +111,9 @@ export default function AddGemachToolPage() {
           ...(supplier.trim() ? { supplier: supplier.trim() } : {}),
           ...(purpose.trim() ? { purpose: purpose.trim() } : {}),
           ...(productAge.trim() ? { productAge: Number(productAge) } : {}),
+          ...(gemach && isPlatformGemach(gemach) && youtubeUrl.trim()
+            ? { youtubeUrl: youtubeUrl.trim() }
+            : {}),
           safetyRules: parseSafetyRules(safetyRulesText),
           ...(showLoanHours && defaultLoanHours.trim()
             ? { defaultLoanHours: Number(defaultLoanHours) }
@@ -303,6 +308,28 @@ export default function AddGemachToolPage() {
                   className="w-full max-w-[8rem] rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm"
                 />
               </div>
+              {gemach && isPlatformGemach(gemach) && (
+                <div>
+                  <label
+                    htmlFor="youtubeUrl"
+                    className="mb-1 block text-sm font-semibold text-stone-800"
+                  >
+                    סרטון הדרכה (YouTube)
+                  </label>
+                  <input
+                    id="youtubeUrl"
+                    type="url"
+                    dir="ltr"
+                    value={youtubeUrl}
+                    onChange={(e) => setYoutubeUrl(e.target.value)}
+                    placeholder="https://www.youtube.com/watch?v=..."
+                    className="w-full rounded-xl border border-[var(--border)] px-4 py-2.5 font-mono text-sm"
+                  />
+                  <p className="mt-1 text-xs text-[var(--muted)]">
+                    רק לכלי קואופרטיב — יוצג בעמוד הכלי לשואלים.
+                  </p>
+                </div>
+              )}
             </fieldset>
 
             <div>

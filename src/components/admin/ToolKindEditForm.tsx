@@ -3,7 +3,12 @@
 import { useRef, useState } from "react";
 import { authFetch } from "@/lib/api-client";
 import { compressImageFile } from "@/lib/compress-image";
-import { gemachPricingModeLabels, MAX_LOAN_HOURS_CAP } from "@/lib/gemach";
+import {
+  gemachPricingModeLabels,
+  isPlatformGemach,
+  MAX_LOAN_HOURS_CAP,
+  PLATFORM_GEMACH_ID,
+} from "@/lib/gemach";
 import { TOOL_CATEGORIES, parseSafetyRules, safetyRulesToText } from "@/lib/tools-admin";
 import { resolveToolImageUrl, validateToolImageUrl } from "@/lib/tool-image";
 import { Card, CardBody } from "@/components/ui/Card";
@@ -57,6 +62,7 @@ export function ToolKindEditForm({
   const [productAge, setProductAge] = useState(
     kind.productAge !== undefined ? String(kind.productAge) : ""
   );
+  const [youtubeUrl, setYoutubeUrl] = useState(kind.youtubeUrl ?? "");
   const [extraImageUrls, setExtraImageUrls] = useState(
     (kind.imageUrls ?? []).join("\n")
   );
@@ -73,6 +79,10 @@ export function ToolKindEditForm({
   const showFees = kind.pricingMode === "loan_fee";
   const isFree = kind.pricingMode === "free";
   const showLoanHours = kind.reservationMode === "fixed_hours";
+  const isCooperativeTool = isPlatformGemach({
+    id: gemachId,
+    isPlatform: gemachId === PLATFORM_GEMACH_ID,
+  });
 
   async function handleImageFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -198,6 +208,9 @@ export function ToolKindEditForm({
             supplier: supplier.trim() || null,
             purpose: purpose.trim() || null,
             productAge: productAge.trim() === "" ? null : Number(productAge),
+            ...(isCooperativeTool
+              ? { youtubeUrl: youtubeUrl.trim() || null }
+              : {}),
             safetyRules: parseSafetyRules(safetyRulesText),
             imageUrls: galleryUrls.length ? galleryUrls : null,
             ...(imageToSave !== undefined ? { imageUrl: imageToSave } : {}),
@@ -411,6 +424,29 @@ export function ToolKindEditForm({
                 className="w-full max-w-[8rem] rounded-xl border border-[var(--border)] px-4 py-3 text-sm focus:border-kerem-500 focus:outline-none focus:ring-2 focus:ring-kerem-200"
               />
             </div>
+
+            {isCooperativeTool && (
+              <div>
+                <label
+                  htmlFor="youtubeUrl"
+                  className="mb-1.5 block text-sm font-semibold text-stone-800"
+                >
+                  סרטון הדרכה (YouTube)
+                </label>
+                <input
+                  id="youtubeUrl"
+                  type="url"
+                  dir="ltr"
+                  value={youtubeUrl}
+                  onChange={(e) => setYoutubeUrl(e.target.value)}
+                  placeholder="https://www.youtube.com/watch?v=..."
+                  className="w-full rounded-xl border border-[var(--border)] px-4 py-3 font-mono text-sm focus:border-kerem-500 focus:outline-none focus:ring-2 focus:ring-kerem-200"
+                />
+                <p className="mt-1 text-xs text-[var(--muted)]">
+                  יוצג בעמוד הכלי לשואלים. השאירו ריק כדי להסתיר.
+                </p>
+              </div>
+            )}
 
             <div>
               <label htmlFor="extraImageUrls" className="mb-1.5 block text-sm font-semibold text-stone-800">

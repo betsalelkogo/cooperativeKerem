@@ -4,7 +4,12 @@ import {
   resolveGemachAdminScope,
 } from "@/lib/firebase/admin-auth";
 import { createToolsForGemach, getGemachById } from "@/lib/firestore/repository";
-import { sanitizeSafetyRules, validateToolInput } from "@/lib/tools-admin";
+import { isPlatformGemach } from "@/lib/gemach";
+import {
+  normalizeYoutubeUrl,
+  sanitizeSafetyRules,
+  validateToolInput,
+} from "@/lib/tools-admin";
 
 export async function POST(request: Request) {
   const auth = await requireAdmin(request);
@@ -28,6 +33,7 @@ export async function POST(request: Request) {
       supplier,
       purpose,
       productAge,
+      youtubeUrl,
       safetyRules,
     } = body as {
       gemachId?: string;
@@ -45,6 +51,7 @@ export async function POST(request: Request) {
       supplier?: string;
       purpose?: string;
       productAge?: number;
+      youtubeUrl?: string;
       safetyRules?: unknown;
     };
 
@@ -64,6 +71,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "הגמ״ח סגור — לא ניתן להוסיף כלים" }, { status: 403 });
     }
 
+    let resolvedYoutubeUrl: string | undefined;
+    if (isPlatformGemach(gemach) && youtubeUrl !== undefined) {
+      const normalized = normalizeYoutubeUrl(youtubeUrl);
+      if (normalized === null) {
+        return NextResponse.json(
+          { error: "קישור YouTube לא תקין" },
+          { status: 400 }
+        );
+      }
+      resolvedYoutubeUrl = normalized || undefined;
+    }
+
     const result = await createToolsForGemach({
       gemachId,
       name: name!,
@@ -81,6 +100,7 @@ export async function POST(request: Request) {
       supplier: supplier?.trim() || undefined,
       purpose: purpose?.trim() || undefined,
       productAge: productAge !== undefined ? Number(productAge) : undefined,
+      youtubeUrl: resolvedYoutubeUrl,
       safetyRules: sanitizeSafetyRules(safetyRules),
       createdBy: auth.uid,
     });

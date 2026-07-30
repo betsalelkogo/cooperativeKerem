@@ -12,7 +12,7 @@ import {
 import { isPlatformAdmin } from "@/lib/admin";
 import { isPlatformGemach } from "@/lib/gemach";
 import { resolveToolImageUrl } from "@/lib/tool-image";
-import { sanitizeSafetyRules } from "@/lib/tools-admin";
+import { normalizeYoutubeUrl, sanitizeSafetyRules } from "@/lib/tools-admin";
 
 export async function GET(
   request: Request,
@@ -70,6 +70,7 @@ export async function PATCH(
       supplier,
       purpose,
       productAge,
+      youtubeUrl,
       imageUrls,
       safetyRules,
     } = body as {
@@ -88,6 +89,7 @@ export async function PATCH(
       supplier?: string | null;
       purpose?: string | null;
       productAge?: number | null;
+      youtubeUrl?: string | null;
       imageUrls?: string[] | null;
       safetyRules?: unknown;
     };
@@ -126,6 +128,22 @@ export async function PATCH(
       } catch (err) {
         const message = err instanceof Error ? err.message : "תמונה לא תקינה";
         return NextResponse.json({ error: message }, { status: 400 });
+      }
+    }
+
+    let resolvedYoutubeUrl: string | null | undefined;
+    if (isPlatformGemach(gemach)) {
+      if (youtubeUrl === null) {
+        resolvedYoutubeUrl = null;
+      } else if (youtubeUrl !== undefined) {
+        const normalized = normalizeYoutubeUrl(youtubeUrl);
+        if (normalized === null) {
+          return NextResponse.json(
+            { error: "קישור YouTube לא תקין" },
+            { status: 400 }
+          );
+        }
+        resolvedYoutubeUrl = normalized || null;
       }
     }
 
@@ -171,6 +189,7 @@ export async function PATCH(
           : productAge !== undefined
             ? Number(productAge)
             : undefined,
+      youtubeUrl: resolvedYoutubeUrl,
       imageUrls: imageUrls === null ? null : imageUrls,
       safetyRules: safetyRules === undefined ? undefined : (sanitizeSafetyRules(safetyRules) ?? []),
     });
