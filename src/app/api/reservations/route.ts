@@ -4,13 +4,15 @@ import {
   createReservation,
   getReservationsByMember,
   getToolById,
+  getToolKindWithAvailability,
   getGemachById,
   getMemberById,
   memberHasOpenPeerDebt,
-  updateToolStatus,
   pickAvailableToolUnits,
-  pickAvailableToolUnit,
+  syncReservationHardLocks,
+  updateToolStatus,
 } from "@/lib/firestore/repository";
+import { isReservationHardLockDue } from "@/lib/availability";
 import {
   isPlatformGemach,
   resolveGemachReservationMode,
@@ -102,28 +104,18 @@ export async function POST(request: Request) {
 
     const quantity = Math.min(Math.max(1, Number(quantityRaw) || 1), 500);
 
-    let units = await pickAvailableToolUnits(catalogKey, quantity);
-    if (units.length < quantity) {
-      const single = await pickAvailableToolUnit(catalogKey);
-      if (single && units.length === 0) {
-        units = [single];
-      }
+    // Resolve kind/gemach first so we can compute the schedule, then pick units
+    // that are free for that window (soft future holds stay usable until 1h before).
+    const kind = await getToolKindWithAvailability(catalogKey);
+    if (!kind) {
+      return NextResponse.json({ error: "הכלי לא נמצא" }, { status: 404 });
     }
 
-    if (units.length === 0) {
-      return NextResponse.json({ error: "אין יחידה זמינה מסוג זה כרגע" }, { status: 409 });
+    const tool = await getToolById(kind.representativeToolId);
+    if (!tool) {
+      return NextResponse.json({ error: "הכלי לא נמצא" }, { status: 404 });
     }
 
-    if (units.length < quantity) {
-      return NextResponse.json(
-        {
-          error: `רק ${units.length} יחידות זמינות — נסו כמות קטנה יותר`,
-        },
-        { status: 409 }
-      );
-    }
-
-    const tool = units[0];
     const gemach = await getGemachById(tool.gemachId);
     if (!gemach) {
       return NextResponse.json({ error: "גמ״ח לא נמצא" }, { status: 404 });
@@ -193,6 +185,29 @@ export async function POST(request: Request) {
         returnTimeStart: returnTimeStart ?? returnTimeEnd ?? "17:00",
         returnTimeEnd: returnTimeEnd ?? "18:00",
       };
+    }
+
+    const units = await pickAvailableToolUnits(catalogKey, quantity, {
+      pickupDate: schedule.pickupDate,
+      pickupTimeStart: schedule.pickupTimeStart,
+      returnDate: schedule.returnDate,
+      returnTimeEnd: schedule.returnTimeEnd,
+    });
+
+    if (units.length === 0) {
+      return NextResponse.json(
+        { error: "אין יחידה זמינה לחלון הזמן שנבחר" },
+        { status: 409 }
+      );
+    }
+
+    if (units.length < quantity) {
+      return NextResponse.json(
+        {
+          error: `רק ${units.length} יחידות זמינות בחלון זה — נסו כמות קטנה יותר או מועדים אחרים`,
+        },
+        { status: 409 }
+      );
     }
 
     const { feeAmount, cooperativeFeeAmount } = resolveTotalReservationFee(
@@ -279,7 +294,13 @@ export async function POST(request: Request) {
       cooperativeFeeAmount,
     });
 
-    await Promise.all(toolIds.map((id) => updateToolStatus(id, "reserved")));
+    // Soft hold: keep tools available for gap loans until 1h before pickup.
+    // Immediate / near-term pickups hard-lock right away.
+    if (isReservationHardLockDue(reservation)) {
+      await Promise.all(toolIds.map((id) => updateToolStatus(id, "reserved")));
+    } else {
+      await syncReservationHardLocks();
+    }
 
     return NextResponse.json(reservation, { status: 201 });
   } catch {

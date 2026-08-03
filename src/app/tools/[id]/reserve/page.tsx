@@ -32,6 +32,22 @@ import {
   PEER_DEBT_REQUIRED_CODE,
   TERMS_REQUIRED_CODE,
 } from "@/lib/membership";
+import { RESERVATION_HARD_LOCK_HOURS } from "@/lib/availability";
+
+type WindowAvailability = {
+  availableUnits: number;
+  totalUnits: number;
+  lendableNow: number;
+  reservedForFuture: number;
+  hardLockHours: number;
+  nextHold: null | {
+    pickupDate: string;
+    pickupTimeStart?: string;
+    quantity: number;
+    hardLockAtLabel: string;
+    mustReturnByLabel: string;
+  };
+};
 
 function loanHourOptions(kind: ToolKindWithAvailability): number[] {
   const min = kind.gemachDefaultLoanHours ?? 4;
@@ -82,6 +98,9 @@ export default function ReserveToolPage() {
     return DEFAULT_RETURN_END;
   });
   const [quantity, setQuantity] = useState(1);
+  const [windowAvail, setWindowAvail] = useState<WindowAvailability | null>(null);
+  const [availLoading, setAvailLoading] = useState(false);
+  const [viableHours, setViableHours] = useState<number[] | null>(null);
 
   const hourOptions = useMemo(
     () => (kind ? loanHourOptions(kind) : [4]),
@@ -112,6 +131,103 @@ export default function ReserveToolPage() {
       return null;
     }
   }, [isFixedHours, pickupDate, pickupTimeStart, loanHours]);
+
+  // Live window availability for the selected schedule (soft holds + loans).
+  useEffect(() => {
+    if (!kind || !pickupDate || !pickupTimeStart) return;
+
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      setAvailLoading(true);
+      try {
+        const qs = new URLSearchParams({
+          pickupDate,
+          pickupTimeStart,
+        });
+        if (isFixedHours) {
+          qs.set("loanDurationHours", String(loanHours));
+        } else if (returnDate && returnTimeEnd) {
+          qs.set("returnDate", returnDate);
+          qs.set("returnTimeEnd", returnTimeEnd);
+        } else {
+          setAvailLoading(false);
+          return;
+        }
+
+        const res = await fetch(
+          `/api/tools/${encodeURIComponent(kind.catalogId)}/availability?${qs}`,
+          { signal: controller.signal }
+        );
+        if (!res.ok) throw new Error("שגיאה בבדיקת זמינות");
+        const data = (await res.json()) as WindowAvailability;
+        setWindowAvail(data);
+        setQuantity((q) =>
+          data.availableUnits > 0 ? Math.min(q, data.availableUnits) : q
+        );
+      } catch (err) {
+        if ((err as { name?: string }).name === "AbortError") return;
+        setWindowAvail(null);
+      } finally {
+        setAvailLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [
+    kind,
+    isFixedHours,
+    pickupDate,
+    pickupTimeStart,
+    loanHours,
+    returnDate,
+    returnTimeEnd,
+  ]);
+
+  // Which loan durations still have stock for the chosen start + quantity.
+  useEffect(() => {
+    if (!kind || !isFixedHours || !pickupDate || !pickupTimeStart) {
+      setViableHours(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      const results = await Promise.all(
+        hourOptions.map(async (h) => {
+          const qs = new URLSearchParams({
+            pickupDate,
+            pickupTimeStart,
+            loanDurationHours: String(h),
+          });
+          try {
+            const res = await fetch(
+              `/api/tools/${encodeURIComponent(kind.catalogId)}/availability?${qs}`,
+              { signal: controller.signal }
+            );
+            if (!res.ok) return { h, ok: false };
+            const data = (await res.json()) as WindowAvailability;
+            return { h, ok: data.availableUnits >= quantity };
+          } catch {
+            return { h, ok: false };
+          }
+        })
+      );
+      if (controller.signal.aborted) return;
+      const okHours = results.filter((r) => r.ok).map((r) => r.h);
+      setViableHours(okHours);
+      setLoanHours((current) =>
+        okHours.length > 0 && !okHours.includes(current) ? okHours[0] : current
+      );
+    }, 300);
+
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [kind, isFixedHours, pickupDate, pickupTimeStart, quantity, hourOptions]);
 
   function handlePickupStartChange(value: string) {
     setPickupTimeStart(value);
@@ -271,6 +387,14 @@ export default function ReserveToolPage() {
   const today = israelNowParts().date;
   const stockLabel = inventoryLabel(kind);
   const priceText = kind.priceLabel ?? "—";
+  const maxQuantity = Math.min(
+    windowAvail?.availableUnits ?? kind.availableUnits,
+    500
+  );
+  const windowBlocked =
+    Boolean(windowAvail) && (windowAvail?.availableUnits ?? 0) < quantity;
+  const displayedHours =
+    viableHours && viableHours.length > 0 ? viableHours : hourOptions;
 
   return (
     <div className="mx-auto max-w-md">
@@ -282,8 +406,8 @@ export default function ReserveToolPage() {
           <h1 className="text-2xl font-bold text-stone-900">שריון {kind.name}</h1>
           <p className="mt-2 text-sm text-[var(--muted)]">
             {isFixedHours
-              ? `תאריך ושעת ההתחלה ממולאים אוטומטית לזמן הקרוב ביותר האפשרי. משך ברירת מחדל ${kind.gemachDefaultLoanHours ?? 4} שעות, עד ${kind.gemachMaxLoanHours ?? 24} שעות.`
-              : "תאריך האיסוף ממולא אוטומטית לזמן הקרוב ביותר — אפשר לעדכן את חלונות האיסוף וההחזרה."}
+              ? `בחרו מתי לקחת ולכמה זמן. שריון עתידי לא נועל את המלאי מיד — אפשר להשאיל עד ${RESERVATION_HARD_LOCK_HOURS} שעה לפני הלקיחה הבאה.`
+              : `בחרו חלונות איסוף והחזרה. שריון עתידי משאיר את הכלים זמינים עד ${RESERVATION_HARD_LOCK_HOURS} שעה לפני האיסוף.`}
           </p>
           {kind.gemachName && (
             <p className="mt-1 text-xs font-medium text-amber-800">
@@ -292,6 +416,12 @@ export default function ReserveToolPage() {
           )}
           {stockLabel && kind.availableUnits > 0 && (
             <p className="mt-2 text-sm font-medium text-sky-700">{stockLabel}</p>
+          )}
+          {windowAvail && windowAvail.reservedForFuture > 0 && (
+            <p className="mt-1 text-xs text-amber-800">
+              {windowAvail.reservedForFuture} יחידות שמורות לעתיד — עדיין זמינות
+              להשאלה עד שעה לפני הלקיחה שלהן.
+            </p>
           )}
 
           <form onSubmit={handleSubmit} className="mt-6 space-y-5">
@@ -304,13 +434,24 @@ export default function ReserveToolPage() {
                   id="quantity"
                   type="number"
                   min={1}
-                  max={Math.min(kind.availableUnits, 500)}
+                  max={Math.max(1, maxQuantity)}
                   value={quantity}
-                  onChange={(e) => setQuantity(Math.max(1, Number(e.target.value) || 1))}
+                  onChange={(e) =>
+                    setQuantity(
+                      Math.min(
+                        Math.max(1, Number(e.target.value) || 1),
+                        Math.max(1, maxQuantity)
+                      )
+                    )
+                  }
                   className="w-full rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm focus:border-kerem-400 focus:outline-none focus:ring-2 focus:ring-kerem-200"
                 />
                 <p className="mt-1 text-xs text-[var(--muted)]">
-                  עד {Math.min(kind.availableUnits, 500)} יחידות זמינות
+                  {availLoading
+                    ? "בודק זמינות לחלון שנבחר…"
+                    : windowAvail
+                      ? `עד ${maxQuantity} יחידות זמינות בחלון זה (${windowAvail.lendableNow} זמינים עכשיו במלאי)`
+                      : `עד ${Math.min(kind.availableUnits, 500)} יחידות זמינות עכשיו`}
                 </p>
               </div>
             )}
@@ -360,12 +501,17 @@ export default function ReserveToolPage() {
                       onChange={(e) => setLoanHours(Number(e.target.value))}
                       className="w-full rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm focus:border-kerem-400 focus:outline-none focus:ring-2 focus:ring-kerem-200"
                     >
-                      {hourOptions.map((h) => (
+                      {displayedHours.map((h) => (
                         <option key={h} value={h}>
                           {formatLoanDurationLabel(h)}
                         </option>
                       ))}
                     </select>
+                    {viableHours && viableHours.length < hourOptions.length && (
+                      <p className="mt-1 text-xs text-amber-800">
+                        משכים ארוכים יותר נחסמו כי הם חופפים לשריון/השאלה קיימים.
+                      </p>
+                    )}
                   </div>
                 </fieldset>
 
@@ -384,6 +530,22 @@ export default function ReserveToolPage() {
                       <span className="font-medium text-stone-800">החזרה עד:</span>{" "}
                       {formatDateHe(fixedSchedule.returnDate)} · {fixedSchedule.returnTimeEnd}
                     </p>
+                    {windowAvail && (
+                      <p className="mt-2 font-medium text-sky-900">
+                        {availLoading
+                          ? "בודק זמינות…"
+                          : `${windowAvail.availableUnits} יחידות פנויות בחלון זה`}
+                      </p>
+                    )}
+                    {windowAvail?.nextHold && (
+                      <p className="mt-2 text-xs leading-relaxed text-amber-900">
+                        השריון/השאלה הבאים ננעלים ב־{windowAvail.nextHold.hardLockAtLabel}
+                        {windowAvail.nextHold.quantity > 1
+                          ? ` (${windowAvail.nextHold.quantity} יחידות)`
+                          : ""}
+                        . צריך להחזיר עד שעה לפני הלקיחה הזו.
+                      </p>
+                    )}
                   </div>
                 )}
               </>
@@ -485,6 +647,22 @@ export default function ReserveToolPage() {
                     </div>
                   </div>
                 </fieldset>
+
+                {windowAvail && (
+                  <div className="rounded-xl border border-sky-200 bg-sky-50/60 p-4 text-sm">
+                    <p className="font-medium text-sky-900">
+                      {availLoading
+                        ? "בודק זמינות…"
+                        : `${windowAvail.availableUnits} יחידות פנויות בחלון זה`}
+                    </p>
+                    {windowAvail.nextHold && (
+                      <p className="mt-2 text-xs leading-relaxed text-amber-900">
+                        השריון/השאלה הבאים ננעלים ב־{windowAvail.nextHold.hardLockAtLabel}
+                        . צריך להחזיר עד שעה לפני הלקיחה הזו.
+                      </p>
+                    )}
+                  </div>
+                )}
               </>
             )}
 
@@ -495,6 +673,12 @@ export default function ReserveToolPage() {
               <p className="mt-1 text-xl font-bold text-kerem-800">{priceText}</p>
             </div>
 
+            {windowBlocked && (
+              <Alert variant="warning">
+                אין מספיק יחידות פנויות בחלון הזמן שנבחר. קצרו את משך ההשאלה, הזיזו
+                תאריך, או הפחיתו כמות.
+              </Alert>
+            )}
             {error && <Alert variant="error">{error}</Alert>}
             {gateCode === PEER_DEBT_REQUIRED_CODE ? (
               <PeerDebtBanner />
@@ -506,10 +690,13 @@ export default function ReserveToolPage() {
               type="submit"
               disabled={
                 loading ||
+                availLoading ||
                 !pickupDate ||
                 !pickupTimeStart ||
                 (!isFixedHours && !returnDate) ||
-                kind.availableUnits === 0
+                kind.availableUnits === 0 ||
+                windowBlocked ||
+                (isFixedHours && displayedHours.length === 0)
               }
               className="w-full"
               size="lg"

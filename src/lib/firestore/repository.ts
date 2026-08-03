@@ -49,8 +49,6 @@ import {
   resolveKindId,
   groupToolsByKind,
   resolveKindUnits,
-  pickAvailableUnit,
-  pickAvailableUnits,
   buildToolKindWithAvailability,
   aggregateKindStatus,
 } from "@/lib/tool-kinds";
@@ -94,7 +92,20 @@ import {
   validateToolInput,
 } from "@/lib/tools-admin";
 import { disputeProgressLabel, isDisputeOpen, pickRandomMediators } from "@/lib/disputes";
-import { countUnitsAvailableInWindow } from "@/lib/availability";
+import {
+  activeReservationsForUnits,
+  countUnitsAvailableInWindow,
+  countUnitsLendableNow,
+  countUnitsReservedForFuture,
+  findNextHoldAfter,
+  isReservationHardLockDue,
+  pickUnitsAvailableInWindow,
+  pickUnitsLendableNow,
+  reservationHardLockStart,
+  RESERVATION_HARD_LOCK_HOURS,
+  type ReservationWindow,
+} from "@/lib/availability";
+import { formatReservationDateTimeHe, reservationDateTime } from "@/lib/israel-time";
 import {
   isReservationNoShowExpired,
   reservationPickupStart,
@@ -840,6 +851,7 @@ export async function getAllTools(): Promise<Tool[]> {
 
 export async function getToolKindsWithAvailability(): Promise<ToolKindWithAvailability[]> {
   await expireStaleNoShowReservations();
+  await syncReservationHardLocks();
   const [tools, loans, reservations, gemachim] = await Promise.all([
     getAllTools(),
     getAllLoans(),
@@ -867,6 +879,7 @@ export async function getToolKindWithAvailability(
   catalogKey: string
 ): Promise<ToolKindWithAvailability | null> {
   await expireStaleNoShowReservations();
+  await syncReservationHardLocks();
   const [tools, loans, reservations] = await Promise.all([
     getAllTools(),
     getAllLoans(),
@@ -904,18 +917,96 @@ function computeToolKindStats(units: Tool[], loans: Loan[]): ToolKindStats {
   };
 }
 
-export async function pickAvailableToolUnits(
-  catalogKey: string,
-  quantity: number
-): Promise<Tool[]> {
-  await expireStaleNoShowReservations();
-  const tools = await getAllTools();
-  const units = resolveKindUnits(tools, catalogKey);
-  return pickAvailableUnits(units, quantity);
+/**
+ * Soft future reservations stay status=available until 1h before pickup.
+ * Sync hard-locks / premature releases before counting or picking stock.
+ */
+export async function syncReservationHardLocks(): Promise<{
+  locked: number;
+  released: number;
+}> {
+  const now = new Date();
+  const [tools, reservations] = await Promise.all([getAllTools(), getAllReservations()]);
+  const toolMap = new Map(tools.map((t) => [t.id, t]));
+  const active = reservations.filter(
+    (r) => r.status === "pending" || r.status === "confirmed"
+  );
+
+  const hardLockedToolIds = new Set<string>();
+  for (const r of active) {
+    if (!isReservationHardLockDue(r, now)) continue;
+    for (const id of reservationToolIds(r)) hardLockedToolIds.add(id);
+  }
+
+  const db = getAdminDb();
+  const batch = db.batch();
+  let locked = 0;
+  let released = 0;
+  let ops = 0;
+
+  for (const r of active) {
+    const ids = reservationToolIds(r);
+    if (isReservationHardLockDue(r, now)) {
+      for (const id of ids) {
+        const tool = toolMap.get(id);
+        if (tool?.status === "available") {
+          batch.update(db.collection("tools").doc(id), { status: "reserved" });
+          toolMap.set(id, { ...tool, status: "reserved" });
+          locked += 1;
+          ops += 1;
+        }
+      }
+    } else {
+      for (const id of ids) {
+        if (hardLockedToolIds.has(id)) continue;
+        const tool = toolMap.get(id);
+        if (tool?.status === "reserved") {
+          batch.update(db.collection("tools").doc(id), { status: "available" });
+          toolMap.set(id, { ...tool, status: "available" });
+          released += 1;
+          ops += 1;
+        }
+      }
+    }
+  }
+
+  if (ops > 0) await batch.commit();
+  return { locked, released };
 }
 
-export async function pickAvailableToolUnit(catalogKey: string): Promise<Tool | null> {
-  const picked = await pickAvailableToolUnits(catalogKey, 1);
+export async function pickAvailableToolUnits(
+  catalogKey: string,
+  quantity: number,
+  schedule?: ReservationWindow
+): Promise<Tool[]> {
+  await expireStaleNoShowReservations();
+  await syncReservationHardLocks();
+  const [tools, loans, reservations] = await Promise.all([
+    getAllTools(),
+    getAllLoans(),
+    getAllReservations(),
+  ]);
+  const units = resolveKindUnits(tools, catalogKey);
+  const { loanByTool, reservationByTool } = buildActiveHolders(loans, reservations);
+
+  if (schedule) {
+    return pickUnitsAvailableInWindow(
+      units,
+      schedule,
+      reservationByTool,
+      loanByTool,
+      quantity
+    );
+  }
+
+  return pickUnitsLendableNow(units, reservationByTool, loanByTool, quantity);
+}
+
+export async function pickAvailableToolUnit(
+  catalogKey: string,
+  schedule?: ReservationWindow
+): Promise<Tool | null> {
+  const picked = await pickAvailableToolUnits(catalogKey, 1, schedule);
   return picked[0] ?? null;
 }
 
@@ -1321,6 +1412,9 @@ export async function expireStaleNoShowReservations(): Promise<number> {
     const result = await autoCancelNoShowReservation(r.id);
     if (result?.status === "cancelled") count += 1;
   }
+
+  // Soft future holds: release premature locks; hard-lock when within 1h of pickup.
+  await syncReservationHardLocks();
   return count;
 }
 
@@ -1726,6 +1820,7 @@ export async function getAdminDashboard(options?: {
   gemachId?: string;
   includeGemachim?: boolean;
 }): Promise<AdminDashboardData> {
+  await syncReservationHardLocks();
   const gemachId = options?.gemachId;
   const lateFeeGemachFilter =
     gemachId ?? (options?.includeGemachim ? PLATFORM_GEMACH_ID : undefined);
@@ -1748,8 +1843,13 @@ export async function getAdminDashboard(options?: {
 
   const { activeLoans, activeReservations, loanByTool, reservationByTool } =
     buildActiveHolders(
-      loans.filter((l) => toolIds.has(l.toolId)),
-      reservations.filter((r) => toolIds.has(r.toolId))
+      loans.filter((l) => {
+        const ids = l.toolIds?.length ? l.toolIds : l.toolId ? [l.toolId] : [];
+        return ids.some((id) => toolIds.has(id));
+      }),
+      reservations.filter((r) =>
+        reservationToolIds(r).some((id) => toolIds.has(id))
+      )
     );
 
   const memberIds = [
@@ -1795,9 +1895,9 @@ export async function getAdminDashboard(options?: {
       })(),
       status: aggregateKindStatus(units),
       totalUnits: units.length,
-      availableUnits: units.filter((t) => t.status === "available").length,
+      availableUnits: countUnitsLendableNow(units, reservationByTool, loanByTool),
       onLoanUnits: units.filter((t) => t.status === "on_loan").length,
-      reservedUnits: units.filter((t) => t.status === "reserved").length,
+      reservedUnits: countUnitsReservedForFuture(units, reservationByTool, loanByTool),
       disabledUnits: units.filter((t) => t.status === "disabled").length,
       maintenanceUnits: units.filter((t) => t.status === "maintenance").length,
       units: unitRows,
@@ -2654,6 +2754,65 @@ export async function getPotsOverviewForGemach(gemachId: string) {
   };
 }
 
+/**
+ * At pickup: claim concrete units for the reservation window.
+ * Prefers the original soft-assigned ids; replaces any that were lent out
+ * in the gap before hard-lock.
+ */
+async function claimToolsForCheckout(reservation: Reservation): Promise<string[]> {
+  await syncReservationHardLocks();
+
+  const quantity = Math.max(
+    1,
+    reservation.quantity ?? reservationToolIds(reservation).length
+  );
+  const preferred = reservationToolIds(reservation);
+  const catalogKey = reservation.kindId ?? preferred[0] ?? reservation.toolId;
+  const schedule: ReservationWindow = {
+    pickupDate: reservation.pickupDate,
+    pickupTimeStart: reservation.pickupTimeStart,
+    returnDate: reservation.returnDate,
+    returnTimeEnd: reservation.returnTimeEnd,
+  };
+
+  const [tools, loans, reservations] = await Promise.all([
+    getAllTools(),
+    getAllLoans(),
+    getAllReservations(),
+  ]);
+  const units = resolveKindUnits(tools, catalogKey);
+  const { loanByTool, reservationByTool } = buildActiveHolders(loans, reservations);
+
+  const claimed = pickUnitsAvailableInWindow(
+    units,
+    schedule,
+    reservationByTool,
+    loanByTool,
+    quantity,
+    { ignoreReservationId: reservation.id, preferToolIds: preferred }
+  );
+
+  if (claimed.length < quantity) {
+    throw new Error(
+      `אין מספיק יחידות פנויות ללקיחה כרגע (נדרשות ${quantity}, זמינות ${claimed.length})`
+    );
+  }
+
+  const toolIds = claimed.map((t) => t.id);
+  const db = getAdminDb();
+  const batch = db.batch();
+  batch.update(db.collection("reservations").doc(reservation.id), {
+    toolId: toolIds[0],
+    toolIds,
+    quantity: toolIds.length,
+  });
+  for (const id of toolIds) {
+    batch.update(db.collection("tools").doc(id), { status: "reserved" });
+  }
+  await batch.commit();
+  return toolIds;
+}
+
 export async function createLoanFromCheckout(params: {
   reservation: Reservation;
   checkoutPhotoUrl: string;
@@ -2670,9 +2829,9 @@ export async function createLoanFromCheckout(params: {
     throw new Error("Payment required before checkout");
   }
 
+  const toolIds = await claimToolsForCheckout(params.reservation);
   const db = getAdminDb();
   const split = splitPayment(params.reservation.feeAmount);
-  const toolIds = reservationToolIds(params.reservation);
   const quantity = toolIds.length;
   const perUnitDevice = quantity > 0 ? split.deviceAmount / quantity : 0;
   const loanId = params.loanId ?? newId("loan");
@@ -3575,6 +3734,7 @@ export async function submitMediatorDecision(params: {
 // ─── Board dashboard ─────────────────────────────────────────────────────────
 
 export async function getBoardDashboardData(): Promise<BoardDashboardData> {
+  await syncReservationHardLocks();
   const [tools, loans, reservations, disputes, tickets, lateFees, opsPot, devicePots, payouts] =
     await Promise.all([
       getAllTools(),
@@ -3598,6 +3758,7 @@ export async function getBoardDashboardData(): Promise<BoardDashboardData> {
     .filter((p) => p.status === "pending")
     .reduce((s, p) => s + p.amount, 0);
 
+  const { loanByTool, reservationByTool } = buildActiveHolders(loans, reservations);
   const statusCounts = {
     available: 0,
     on_loan: 0,
@@ -3610,10 +3771,6 @@ export async function getBoardDashboardData(): Promise<BoardDashboardData> {
       statusCounts[t.status as keyof typeof statusCounts] += 1;
     }
   }
-
-  const activeReservations = reservations.filter(
-    (r) => r.status === "pending" || r.status === "confirmed"
-  ).length;
 
   const members = await listMembers();
   const memberMap = new Map(members.map((m) => [m.id, m]));
@@ -3633,9 +3790,9 @@ export async function getBoardDashboardData(): Promise<BoardDashboardData> {
   return {
     logistics: {
       totalUnits: tools.length,
-      availableUnits: statusCounts.available,
+      availableUnits: countUnitsLendableNow(tools, reservationByTool, loanByTool),
       onLoanUnits: statusCounts.on_loan,
-      reservedUnits: statusCounts.reserved + activeReservations,
+      reservedUnits: countUnitsReservedForFuture(tools, reservationByTool, loanByTool),
       maintenanceUnits: statusCounts.maintenance,
       disabledUnits: statusCounts.disabled,
       activeDisputes,
@@ -3662,6 +3819,34 @@ export async function countKindAvailabilityInWindow(
     returnTimeEnd?: string;
   }
 ): Promise<number> {
+  const detail = await getKindScheduleAvailability(catalogKey, schedule);
+  return detail.availableUnits;
+}
+
+export type KindScheduleAvailability = {
+  availableUnits: number;
+  totalUnits: number;
+  lendableNow: number;
+  reservedForFuture: number;
+  hardLockHours: number;
+  /** Earliest upcoming hold the borrower must finish before (pickup − 1h). */
+  nextHold: null | {
+    pickupDate: string;
+    pickupTimeStart?: string;
+    returnDate: string;
+    returnTimeEnd?: string;
+    quantity: number;
+    hardLockAtLabel: string;
+    mustReturnByLabel: string;
+  };
+};
+
+/** Window availability + next blocking hold for the reserve UI. */
+export async function getKindScheduleAvailability(
+  catalogKey: string,
+  schedule: ReservationWindow
+): Promise<KindScheduleAvailability> {
+  await syncReservationHardLocks();
   const [tools, loans, reservations] = await Promise.all([
     getAllTools(),
     getAllLoans(),
@@ -3669,7 +3854,50 @@ export async function countKindAvailabilityInWindow(
   ]);
   const units = resolveKindUnits(tools, catalogKey);
   const { loanByTool, reservationByTool } = buildActiveHolders(loans, reservations);
-  return countUnitsAvailableInWindow(units, schedule, reservationByTool, loanByTool);
+
+  const availableUnits = countUnitsAvailableInWindow(
+    units,
+    schedule,
+    reservationByTool,
+    loanByTool
+  );
+  const lendableNow = countUnitsLendableNow(units, reservationByTool, loanByTool);
+  const reservedForFuture = countUnitsReservedForFuture(
+    units,
+    reservationByTool,
+    loanByTool
+  );
+
+  const scheduleStart = reservationDateTime(
+    schedule.pickupDate,
+    schedule.pickupTimeStart ?? "00:00"
+  ).getTime();
+  const kindReservations = activeReservationsForUnits(units, reservationByTool);
+  const next = findNextHoldAfter(kindReservations, scheduleStart);
+
+  let nextHold: KindScheduleAvailability["nextHold"] = null;
+  if (next) {
+    const hardLockAt = reservationHardLockStart(next);
+    const qty = next.quantity ?? (next.toolIds?.length || 1);
+    nextHold = {
+      pickupDate: next.pickupDate,
+      pickupTimeStart: next.pickupTimeStart,
+      returnDate: next.returnDate,
+      returnTimeEnd: next.returnTimeEnd,
+      quantity: qty,
+      hardLockAtLabel: formatReservationDateTimeHe(hardLockAt),
+      mustReturnByLabel: formatReservationDateTimeHe(hardLockAt),
+    };
+  }
+
+  return {
+    availableUnits,
+    totalUnits: units.length,
+    lendableNow,
+    reservedForFuture,
+    hardLockHours: RESERVATION_HARD_LOCK_HOURS,
+    nextHold,
+  };
 }
 
 export { getAdminDb } from "@/lib/firebase/admin-app";

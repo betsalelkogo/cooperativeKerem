@@ -1,5 +1,10 @@
 import type { Tool, ToolStatus, ToolWithAvailability, ToolKindWithAvailability, ToolKindStats, Loan, Reservation } from "@/lib/types";
 import { formatAvailableFromLabel } from "@/lib/dates";
+import {
+  countUnitsLendableNow,
+  countUnitsReservedForFuture,
+  isUnitLendableNow,
+} from "@/lib/availability";
 
 /** Stable grouping key for a tool kind within a gemach. */
 export function toolKindKey(tool: Pick<Tool, "gemachId"> & { kindId?: string; id?: string }): string {
@@ -80,8 +85,23 @@ export function buildToolKindWithAvailability(
 
   const representative = units[0];
   const kindId = representative.kindId ?? representative.id;
-  const availableUnits = units.filter((t) => t.status === "available").length;
-  const status: ToolStatus = availableUnits > 0 ? "available" : representative.status;
+  // Soft reservations stay lendable until 1h before pickup — don't use raw status.
+  const availableUnits = countUnitsLendableNow(units, reservationByTool, loanByTool);
+  const reservedForFuture = countUnitsReservedForFuture(
+    units,
+    reservationByTool,
+    loanByTool
+  );
+  const status: ToolStatus =
+    availableUnits > 0
+      ? "available"
+      : reservedForFuture > 0
+        ? "reserved"
+        : representative.status;
+
+  const lendableNow = units.find((t) =>
+    isUnitLendableNow(t, reservationByTool, loanByTool)
+  );
 
   return {
     catalogId: kindId,
@@ -106,7 +126,7 @@ export function buildToolKindWithAvailability(
     status,
     totalUnits: units.length,
     availableUnits,
-    representativeToolId: pickAvailableUnit(units)?.id ?? representative.id,
+    representativeToolId: lendableNow?.id ?? pickAvailableUnit(units)?.id ?? representative.id,
     ...aggregateAvailability(units, loanByTool, reservationByTool),
     ...extras,
     stats: extras?.stats,
@@ -116,7 +136,7 @@ export function buildToolKindWithAvailability(
 export function inventoryLabel(kind: Pick<ToolKindWithAvailability, "totalUnits" | "availableUnits">): string | undefined {
   if (kind.totalUnits <= 1) return undefined;
   if (kind.availableUnits > 0) {
-    return `${kind.availableUnits} מתוך ${kind.totalUnits} זמינים`;
+    return `${kind.availableUnits} מתוך ${kind.totalUnits} זמינים עכשיו`;
   }
   return `${kind.totalUnits} יחידות — אין זמינות כרגע`;
 }

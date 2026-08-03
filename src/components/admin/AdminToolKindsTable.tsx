@@ -223,12 +223,14 @@ export function AdminToolKindsTable({
                       )}
                       <td className="px-4 py-3 text-[var(--muted)]">{tool.category}</td>
                       <td className="px-4 py-3 text-[var(--muted)]">
-                        {tool.availableUnits}/{tool.totalUnits} זמינים
+                        {tool.availableUnits}/{tool.totalUnits} זמינים עכשיו
                         {tool.onLoanUnits > 0 && (
                           <span className="mr-2 text-sky-700">· {tool.onLoanUnits} מושאלים</span>
                         )}
                         {tool.reservedUnits > 0 && (
-                          <span className="mr-2 text-amber-700">· {tool.reservedUnits} שמורים</span>
+                          <span className="mr-2 text-amber-700">
+                            · {tool.reservedUnits} שמורים לעתיד
+                          </span>
                         )}
                       </td>
                       <td className="px-4 py-3">

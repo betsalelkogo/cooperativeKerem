@@ -23,16 +23,10 @@ export function canStartCheckout(
     return { allowed: false, reason: "השריון אינו פעיל" };
   }
 
-  if (tool && tool.status !== "reserved") {
-    if (tool.status === "on_loan") {
-      return { allowed: false, reason: "הכלי כבר מושאל — לא ניתן לבצע לקיחה" };
-    }
-    if (tool.status === "available") {
-      return {
-        allowed: false,
-        reason: "הכלי אינו משויך לשריון זה — פנו למנהל",
-      };
-    }
+  // Soft reservations keep tools "available" until 1h before pickup (or claim
+  // at checkout). Only block clearly unusable statuses here; unit claim may
+  // reassign fungible units if the original soft-assigned ones are out on loan.
+  if (tool && (tool.status === "maintenance" || tool.status === "disabled")) {
     return { allowed: false, reason: "הכלי אינו זמין ללקיחה כרגע" };
   }
 
