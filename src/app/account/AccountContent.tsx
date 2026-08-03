@@ -227,6 +227,10 @@ export default function AccountContent() {
           {owed.length > 0 && (
             <section className="mb-6">
               <h2 className="mb-3 text-base font-bold text-stone-900">החובות שלכם</h2>
+              <Alert variant="warning" className="mb-3">
+                כל עוד יש חוב פתוח — אי אפשר לשריין או לקחת כלי מהקואופרטיב. סה״כ חוב:{" "}
+                {formatCredits(totalOwed)}.
+              </Alert>
               <div className="space-y-2">
                 {owed.map((debt) => {
                   const canRepay = balance >= debt.total;

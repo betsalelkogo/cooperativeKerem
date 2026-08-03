@@ -15,6 +15,8 @@ export const MEMBERSHIP_JOIN_MIN_NIS = 200;
 /** API / UI error codes for reservation gates. */
 export const TERMS_REQUIRED_CODE = "TERMS_REQUIRED" as const;
 export const MEMBERSHIP_REQUIRED_CODE = "MEMBERSHIP_REQUIRED" as const;
+/** Open peer-credit debt — must repay before borrowing cooperative tools. */
+export const PEER_DEBT_REQUIRED_CODE = "PEER_DEBT_REQUIRED" as const;
 
 /** Read a member's firstPayout flag with the correct default (true). */
 export function isFirstPayout(data: { firstPayout?: unknown } | undefined | null): boolean {

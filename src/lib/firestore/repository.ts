@@ -2401,6 +2401,20 @@ export async function listMemberDirectory(
     .sort((a, b) => a.name.localeCompare(b.name, "he"));
 }
 
+/** True when the member has any open peer-credit debt with outstanding > 0. */
+export async function memberHasOpenPeerDebt(memberId: string): Promise<boolean> {
+  const snap = await getAdminDb()
+    .collection("credit_loans")
+    .where("borrowerId", "==", memberId)
+    .where("status", "==", "open")
+    .limit(25)
+    .get();
+  return snap.docs.some((d) => {
+    const outstanding = d.data().outstanding;
+    return typeof outstanding === "number" && outstanding > 0;
+  });
+}
+
 /** Open debts a member owes (as borrower) and is owed (as lender), aggregated. */
 export async function getPeerCreditSummary(memberId: string): Promise<{
   owed: PeerDebtSummary[];

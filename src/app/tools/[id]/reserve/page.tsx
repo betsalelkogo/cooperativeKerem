@@ -24,10 +24,12 @@ import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
 import { JoinMembershipBanner } from "@/components/membership/JoinMembershipBanner";
+import { PeerDebtBanner } from "@/components/membership/PeerDebtBanner";
 import type { GemachReservationMode, ToolKindWithAvailability } from "@/lib/types";
 import { LOAN_HOUR_CANDIDATES } from "@/lib/gemach";
 import {
   MEMBERSHIP_REQUIRED_CODE,
+  PEER_DEBT_REQUIRED_CODE,
   TERMS_REQUIRED_CODE,
 } from "@/lib/membership";
 
@@ -240,7 +242,8 @@ export default function ReserveToolPage() {
         const data = await res.json();
         if (
           data.code === TERMS_REQUIRED_CODE ||
-          data.code === MEMBERSHIP_REQUIRED_CODE
+          data.code === MEMBERSHIP_REQUIRED_CODE ||
+          data.code === PEER_DEBT_REQUIRED_CODE
         ) {
           setGateCode(data.code);
         }
@@ -493,7 +496,11 @@ export default function ReserveToolPage() {
             </div>
 
             {error && <Alert variant="error">{error}</Alert>}
-            {gateCode && <JoinMembershipBanner reason={gateCode} />}
+            {gateCode === PEER_DEBT_REQUIRED_CODE ? (
+              <PeerDebtBanner />
+            ) : (
+              gateCode && <JoinMembershipBanner reason={gateCode} />
+            )}
 
             <Button
               type="submit"

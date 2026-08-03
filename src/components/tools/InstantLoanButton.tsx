@@ -5,8 +5,10 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
 import { JoinMembershipBanner } from "@/components/membership/JoinMembershipBanner";
+import { PeerDebtBanner } from "@/components/membership/PeerDebtBanner";
 import {
   MEMBERSHIP_REQUIRED_CODE,
+  PEER_DEBT_REQUIRED_CODE,
   TERMS_REQUIRED_CODE,
 } from "@/lib/membership";
 
@@ -70,7 +72,8 @@ export function InstantLoanButton({
       if (!res.ok) {
         if (
           data.code === TERMS_REQUIRED_CODE ||
-          data.code === MEMBERSHIP_REQUIRED_CODE
+          data.code === MEMBERSHIP_REQUIRED_CODE ||
+          data.code === PEER_DEBT_REQUIRED_CODE
         ) {
           setGateCode(data.code);
         }
@@ -85,6 +88,9 @@ export function InstantLoanButton({
 
   function gateBanner() {
     if (!gateCode) return null;
+    if (gateCode === PEER_DEBT_REQUIRED_CODE) {
+      return <PeerDebtBanner className="mt-2 w-full" />;
+    }
     return <JoinMembershipBanner reason={gateCode} className="mt-2 w-full" />;
   }
 

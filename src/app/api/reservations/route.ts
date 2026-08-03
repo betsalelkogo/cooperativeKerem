@@ -6,6 +6,7 @@ import {
   getToolById,
   getGemachById,
   getMemberById,
+  memberHasOpenPeerDebt,
   updateToolStatus,
   pickAvailableToolUnits,
   pickAvailableToolUnit,
@@ -20,6 +21,7 @@ import {
   hasAcceptedTerms,
   isPaidMember,
   MEMBERSHIP_REQUIRED_CODE,
+  PEER_DEBT_REQUIRED_CODE,
   TERMS_REQUIRED_CODE,
 } from "@/lib/membership";
 import { formatCredits } from "@/lib/pots";
@@ -220,6 +222,17 @@ export async function POST(request: Request) {
             error:
               "השאלת כלי מהקואופרטיב פתוחה לחברים ששילמו דמי הצטרפות. אפשר לגלוש במלאי — ולשלם בפייבוקס עד לאישור מנהל.",
             code: MEMBERSHIP_REQUIRED_CODE,
+          },
+          { status: 403 }
+        );
+      }
+
+      if (await memberHasOpenPeerDebt(memberId)) {
+        return NextResponse.json(
+          {
+            error:
+              "יש לכם חוב פתוח לחבר. החזירו את החוב בעמוד העו״ש לפני השאלת כלי מהקואופרטיב.",
+            code: PEER_DEBT_REQUIRED_CODE,
           },
           { status: 403 }
         );
