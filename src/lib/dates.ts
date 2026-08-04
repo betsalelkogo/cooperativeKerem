@@ -1,3 +1,5 @@
+import { COOP_TIMEZONE } from "@/lib/israel-time";
+
 /** Normalize reservation pickup from new or legacy Firestore fields. */
 export function reservationPickupDate(data: {
   pickupDate?: unknown;
@@ -36,8 +38,12 @@ export function formatAvailableFromLabel(returnDate: string): string | undefined
 export function formatDateHe(iso?: string, withTime = false) {
   if (!iso) return "—";
   const hasTime = iso.includes("T");
-  const date = hasTime ? new Date(iso) : parseDateOnly(iso);
+  // Date-only fields (YYYY-MM-DD) are Israel calendar dates — format as noon UTC
+  // so the day does not shift when the viewer/runtime is behind Israel.
+  const date = hasTime ? new Date(iso) : new Date(`${iso}T12:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return "—";
   return date.toLocaleDateString("he-IL", {
+    timeZone: COOP_TIMEZONE,
     day: "numeric",
     month: "short",
     ...(withTime || hasTime

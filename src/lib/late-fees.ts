@@ -1,6 +1,5 @@
-import type { Reservation } from "@/lib/types";
+import type { Loan, Reservation } from "@/lib/types";
 import { reservationDateTime } from "@/lib/israel-time";
-import { parseTimeToMinutes } from "@/lib/reservation-times";
 
 export function getLateFeePerHour(): number {
   const raw = process.env.LATE_FEE_PER_HOUR;
@@ -17,11 +16,64 @@ export function scheduledReturnAt(reservation: Pick<
   return reservationDateTime(reservation.returnDate, time);
 }
 
+function loanDueAt(loan: Pick<Loan, "dueReturnDate" | "dueReturnTimeEnd">): Date | null {
+  if (!loan.dueReturnDate) return null;
+  return reservationDateTime(loan.dueReturnDate, loan.dueReturnTimeEnd ?? "23:59");
+}
+
+/**
+ * Effective due time for late fees.
+ * Never earlier than checkout — if the reservation return already passed before
+ * pickup (stale schedule / late pickup), due is checkout + planned duration.
+ */
+export function effectiveLateFeeDueAt(params: {
+  reservation: Pick<
+    Reservation,
+    "returnDate" | "returnTimeEnd" | "returnTimeStart" | "loanDurationHours"
+  >;
+  loan?: Pick<Loan, "dueReturnDate" | "dueReturnTimeEnd" | "checkedOutAt"> | null;
+  checkedOutAt?: Date | null;
+}): Date {
+  const { reservation, loan } = params;
+  const checkedOutAt =
+    params.checkedOutAt ??
+    (loan?.checkedOutAt ? new Date(loan.checkedOutAt) : null);
+
+  const fromLoan = loan ? loanDueAt(loan) : null;
+  let dueAt = fromLoan && !Number.isNaN(fromLoan.getTime())
+    ? fromLoan
+    : scheduledReturnAt(reservation);
+
+  if (checkedOutAt && !Number.isNaN(checkedOutAt.getTime())) {
+    if (dueAt.getTime() <= checkedOutAt.getTime()) {
+      const hours =
+        typeof reservation.loanDurationHours === "number" &&
+        reservation.loanDurationHours > 0
+          ? reservation.loanDurationHours
+          : 4;
+      dueAt = new Date(checkedOutAt.getTime() + hours * 60 * 60 * 1000);
+    }
+  }
+
+  return dueAt;
+}
+
 export function computeLateness(
-  reservation: Pick<Reservation, "returnDate" | "returnTimeEnd" | "returnTimeStart">,
-  returnedAt: Date
+  reservation: Pick<
+    Reservation,
+    "returnDate" | "returnTimeEnd" | "returnTimeStart" | "loanDurationHours"
+  >,
+  returnedAt: Date,
+  options?: {
+    loan?: Pick<Loan, "dueReturnDate" | "dueReturnTimeEnd" | "checkedOutAt"> | null;
+    checkedOutAt?: Date | null;
+  }
 ): { lateMinutes: number; dueAt: Date } {
-  const dueAt = scheduledReturnAt(reservation);
+  const dueAt = effectiveLateFeeDueAt({
+    reservation,
+    loan: options?.loan,
+    checkedOutAt: options?.checkedOutAt,
+  });
   const lateMs = returnedAt.getTime() - dueAt.getTime();
   const lateMinutes = lateMs > 0 ? Math.ceil(lateMs / 60_000) : 0;
   return { lateMinutes, dueAt };

@@ -2955,7 +2955,9 @@ export async function completeLoanReturn(
     : null;
 
   if (reservation) {
-    const { lateMinutes, dueAt } = computeLateness(reservation, returnedAt);
+    const { lateMinutes, dueAt } = computeLateness(reservation, returnedAt, {
+      loan,
+    });
     const amount = calculateLateFeeAmount(lateMinutes);
     if (lateMinutes > 0 && amount > 0 && !hasDefect) {
       const tool = await getToolById(loan.toolId);
@@ -3049,12 +3051,19 @@ function lateReturnFeeFromDoc(id: string, data: DocumentData): LateReturnFee {
     paid: (data.paid as boolean) ?? false,
     paidAt: data.paidAt ? tsToIso(data.paidAt) : undefined,
     markedPaidBy: (data.markedPaidBy as string) || undefined,
+    cancelled: data.cancelled === true,
+    cancelledAt: data.cancelledAt ? tsToIso(data.cancelledAt) : undefined,
+    cancelledBy: (data.cancelledBy as string) || undefined,
+    cancelReason:
+      typeof data.cancelReason === "string" ? data.cancelReason : undefined,
     createdAt: data.createdAt ? tsToIso(data.createdAt) : new Date().toISOString(),
   };
 }
 
 export async function listLateReturnFees(options?: {
   paid?: boolean;
+  /** When true (default for unpaid lists), hide cancelled fees. */
+  includeCancelled?: boolean;
   gemachId?: string;
 }): Promise<LateReturnFee[]> {
   const snap = await getAdminDb().collection("late_return_fees").get();
@@ -3062,6 +3071,9 @@ export async function listLateReturnFees(options?: {
     .map((d) => lateReturnFeeFromDoc(d.id, d.data()))
     .filter((fee) => {
       if (options?.paid !== undefined && fee.paid !== options.paid) return false;
+      if (options?.paid === false && options?.includeCancelled !== true && fee.cancelled) {
+        return false;
+      }
       if (options?.gemachId && fee.gemachId !== options.gemachId) return false;
       return true;
     })
@@ -3076,18 +3088,52 @@ export async function markLateReturnFeePaid(
   const snap = await ref.get();
   if (!snap.exists) throw new Error("רשומת קנס לא נמצאה");
 
+  const existing = lateReturnFeeFromDoc(feeId, snap.data()!);
+  if (existing.cancelled) throw new Error("הקנס בוטל — לא ניתן לסמן כשולם");
+  if (existing.paid) return existing;
+
   await ref.update({
     paid: true,
     paidAt: FieldValue.serverTimestamp(),
     markedPaidBy,
   });
 
-  const data = snap.data()!;
   return {
-    ...lateReturnFeeFromDoc(feeId, data),
+    ...existing,
     paid: true,
     paidAt: new Date().toISOString(),
     markedPaidBy,
+  };
+}
+
+/** Waive an incorrect or disputed late fee (does not collect payment). */
+export async function cancelLateReturnFee(
+  feeId: string,
+  cancelledBy: string,
+  cancelReason?: string
+): Promise<LateReturnFee> {
+  const ref = getAdminDb().collection("late_return_fees").doc(feeId);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error("רשומת קנס לא נמצאה");
+
+  const existing = lateReturnFeeFromDoc(feeId, snap.data()!);
+  if (existing.cancelled) return existing;
+  if (existing.paid) throw new Error("הקנס כבר סומן כשולם — לא ניתן לבטל");
+
+  const reason = cancelReason?.trim() || "בוטל על ידי מנהל";
+  await ref.update({
+    cancelled: true,
+    cancelledAt: FieldValue.serverTimestamp(),
+    cancelledBy,
+    cancelReason: reason,
+  });
+
+  return {
+    ...existing,
+    cancelled: true,
+    cancelledAt: new Date().toISOString(),
+    cancelledBy,
+    cancelReason: reason,
   };
 }
 

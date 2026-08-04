@@ -325,6 +325,11 @@ export interface LateReturnFee {
   paid: boolean;
   paidAt?: string;
   markedPaidBy?: string;
+  /** Admin waived / cancelled an incorrect or disputed fee. */
+  cancelled?: boolean;
+  cancelledAt?: string;
+  cancelledBy?: string;
+  cancelReason?: string;
   createdAt: string;
 }
 

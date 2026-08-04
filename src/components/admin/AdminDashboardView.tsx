@@ -92,18 +92,30 @@ export function AdminDashboardView({
   onToolsUpdated,
   onRefresh,
 }: AdminDashboardViewProps) {
-  const [markingPaidId, setMarkingPaidId] = useState<string | null>(null);
+  const [busyLateFeeId, setBusyLateFeeId] = useState<string | null>(null);
   const [lateFeeError, setLateFeeError] = useState("");
 
-  async function markLateFeePaid(feeId: string) {
+  async function updateLateFee(
+    feeId: string,
+    action: "paid" | "cancel",
+    cancelReason?: string
+  ) {
     if (!getToken) return;
-    setMarkingPaidId(feeId);
+    if (action === "cancel") {
+      const ok = window.confirm(
+        "לבטל את הקנס? הוא יוסר מרשימת הקנסות הפתוחים ולא ייגבה."
+      );
+      if (!ok) return;
+    }
+    setBusyLateFeeId(feeId);
     setLateFeeError("");
     try {
       const token = await getToken();
       const res = await authFetch(`/api/admin/late-fees/${encodeURIComponent(feeId)}`, {
         method: "PATCH",
         token,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, cancelReason }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? "עדכון נכשל");
@@ -111,7 +123,7 @@ export function AdminDashboardView({
     } catch (err) {
       setLateFeeError(err instanceof Error ? err.message : "שגיאה");
     } finally {
-      setMarkingPaidId(null);
+      setBusyLateFeeId(null);
     }
   }
 
@@ -199,15 +211,28 @@ export function AdminDashboardView({
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="secondary"
-                        disabled={markingPaidId === fee.id}
-                        onClick={() => markLateFeePaid(fee.id)}
-                      >
-                        {markingPaidId === fee.id ? "שומר…" : "סומן כשולם"}
-                      </Button>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          disabled={busyLateFeeId === fee.id}
+                          onClick={() => updateLateFee(fee.id, "paid")}
+                        >
+                          {busyLateFeeId === fee.id ? "שומר…" : "סומן כשולם"}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          disabled={busyLateFeeId === fee.id}
+                          onClick={() =>
+                            updateLateFee(fee.id, "cancel", "בוטל על ידי מנהל")
+                          }
+                        >
+                          בטל קנס
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
