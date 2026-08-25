@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
 import { inventoryLabel } from "@/lib/tool-kinds";
@@ -17,7 +17,7 @@ import {
   validateFixedHoursReservation,
   addHoursToTime,
 } from "@/lib/reservation-times";
-import { israelNowParts } from "@/lib/israel-time";
+import { israelNowParts, reservationDateTime } from "@/lib/israel-time";
 import { formatDateHe } from "@/lib/dates";
 import { BackLink } from "@/components/ui/PageHeader";
 import { Card, CardBody } from "@/components/ui/Card";
@@ -49,6 +49,23 @@ type WindowAvailability = {
   };
 };
 
+function initialPickup(searchParams: URLSearchParams): {
+  date: string;
+  time: string;
+  extending: boolean;
+} {
+  const asap = earliestFuturePickup();
+  const extending = searchParams.get("extend") === "1";
+  const date = searchParams.get("pickupDate");
+  const time = searchParams.get("pickupTimeStart");
+  if (!date || !time) return { ...asap, extending };
+  const start = reservationDateTime(date, time);
+  if (Number.isNaN(start.getTime()) || start.getTime() <= Date.now()) {
+    return { ...asap, extending };
+  }
+  return { date, time, extending };
+}
+
 function loanHourOptions(kind: ToolKindWithAvailability): number[] {
   const min = kind.gemachDefaultLoanHours ?? 4;
   const max = kind.gemachMaxLoanHours ?? 24;
@@ -59,9 +76,28 @@ function loanHourOptions(kind: ToolKindWithAvailability): number[] {
 }
 
 export default function ReserveToolPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex justify-center py-20">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-kerem-200 border-t-kerem-700" />
+        </div>
+      }
+    >
+      <ReserveToolForm />
+    </Suspense>
+  );
+}
+
+function ReserveToolForm() {
   const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const { getIdToken } = useAuth();
+  const pickupQuery = useMemo(
+    () => initialPickup(searchParams),
+    [searchParams]
+  );
   const [kind, setKind] = useState<ToolKindWithAvailability | null>(null);
   const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -71,10 +107,11 @@ export default function ReserveToolPage() {
   const mode: GemachReservationMode = kind?.gemachReservationMode ?? "fixed_hours";
   const isFixedHours = mode === "fixed_hours";
 
-  // ASAP defaults: today (Israel) + next valid future minute — no empty date / past 09:00 trap.
-  const [pickupDefaults] = useState(() => earliestFuturePickup());
+  // ASAP defaults, or consecutive start after the current loan when extending.
+  const [pickupDefaults] = useState(() => pickupQuery);
   const [pickupDate, setPickupDate] = useState(pickupDefaults.date);
   const [pickupTimeStart, setPickupTimeStart] = useState(pickupDefaults.time);
+  const extending = pickupQuery.extending;
   const [loanHours, setLoanHours] = useState(4);
   const [pickupTimeEnd, setPickupTimeEnd] = useState(
     addHoursToTime(pickupDefaults.time, MAX_PICKUP_WINDOW_HOURS)
@@ -154,9 +191,10 @@ export default function ReserveToolPage() {
           return;
         }
 
-        const res = await fetch(
+        const token = await getIdToken();
+        const res = await authFetch(
           `/api/tools/${encodeURIComponent(kind.catalogId)}/availability?${qs}`,
-          { signal: controller.signal }
+          { token, signal: controller.signal }
         );
         if (!res.ok) throw new Error("שגיאה בבדיקת זמינות");
         const data = (await res.json()) as WindowAvailability;
@@ -184,6 +222,7 @@ export default function ReserveToolPage() {
     loanHours,
     returnDate,
     returnTimeEnd,
+    getIdToken,
   ]);
 
   // Which loan durations still have stock for the chosen start + quantity.
@@ -203,9 +242,10 @@ export default function ReserveToolPage() {
             loanDurationHours: String(h),
           });
           try {
-            const res = await fetch(
+            const token = await getIdToken();
+            const res = await authFetch(
               `/api/tools/${encodeURIComponent(kind.catalogId)}/availability?${qs}`,
-              { signal: controller.signal }
+              { token, signal: controller.signal }
             );
             if (!res.ok) return { h, ok: false };
             const data = (await res.json()) as WindowAvailability;
@@ -227,7 +267,7 @@ export default function ReserveToolPage() {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [kind, isFixedHours, pickupDate, pickupTimeStart, quantity, hourOptions]);
+  }, [kind, isFixedHours, pickupDate, pickupTimeStart, quantity, hourOptions, getIdToken]);
 
   function handlePickupStartChange(value: string) {
     setPickupTimeStart(value);
@@ -404,6 +444,11 @@ export default function ReserveToolPage() {
         <div className="h-1.5 bg-gradient-to-l from-kerem-500 to-kerem-700" />
         <CardBody className="py-6">
           <h1 className="text-2xl font-bold text-stone-900">שריון {kind.name}</h1>
+          {extending && (
+            <Alert variant="info" className="mt-3">
+              הארכת השאלה פעילה — שריון חדש (חיוב נפרד) מתחיל בתום ההשאלה הנוכחית, בלי להחזיר את הכלי בינתיים.
+            </Alert>
+          )}
           <p className="mt-2 text-sm text-[var(--muted)]">
             {isFixedHours
               ? `בחרו מתי לקחת ולכמה זמן. שריון עתידי לא נועל את המלאי מיד — אפשר להשאיל עד ${RESERVATION_HARD_LOCK_HOURS} שעה לפני הלקיחה הבאה.`
@@ -694,7 +739,6 @@ export default function ReserveToolPage() {
                 !pickupDate ||
                 !pickupTimeStart ||
                 (!isFixedHours && !returnDate) ||
-                kind.availableUnits === 0 ||
                 windowBlocked ||
                 (isFixedHours && displayedHours.length === 0)
               }

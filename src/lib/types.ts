@@ -683,6 +683,25 @@ export interface PayboxSettings {
   growPageCode?: string;
 }
 
+/** Physical access codes for the cooperative site (caravan + club room lock). */
+export interface AccessCodesRecord {
+  caravanCode: string;
+  caravanNote: string;
+  clubRoomCode: string;
+  clubRoomNote: string;
+  clubRoomUpdatedAt: string | null;
+}
+
+/** Member-facing payload — club room code is omitted unless the caller is a paid member. */
+export interface AccessCodesPublicView {
+  caravanCode: string | null;
+  caravanNote: string | null;
+  clubRoomVisible: boolean;
+  clubRoomCode: string | null;
+  clubRoomNote: string | null;
+  clubRoomUpdatedAt: string | null;
+}
+
 export type PaymentStatus = "pending" | "paid" | "failed" | "refunded";
 export type PaymentProvider = "paybox_group" | "grow" | "credit";
 

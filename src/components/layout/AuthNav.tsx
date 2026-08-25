@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthProvider";
-import { isAdminMember, isGemachAdmin, isPlatformAdmin } from "@/lib/admin";
+import { isAdminMember, isBoardMember, isGemachAdmin, isPlatformAdmin } from "@/lib/admin";
+import { isPaidMember } from "@/lib/membership";
 import { formatCredits } from "@/lib/pots";
 import { cn } from "@/lib/cn";
 import type { Member } from "@/lib/types";
@@ -29,22 +30,33 @@ const gemachAdminNavItems = [
 
 const addGemachNavItem = { href: "/gemach/new", label: "הוסף גמ״ח" };
 
+const accessNavItem = { href: "/access", label: "גישה" };
+
 function adminNavItemsForMember(member: Member) {
   if (isPlatformAdmin(member)) return platformAdminNavItems;
   if (isGemachAdmin(member)) return gemachAdminNavItems;
   return [];
 }
 
+function navItemsForMember(member: Member | null, userPresent: boolean) {
+  const items = [...baseNavItems];
+  if (member && (isPaidMember(member) || isBoardMember(member))) {
+    items.splice(3, 0, accessNavItem);
+  }
+  if (member && isAdminMember(member)) {
+    return [...items, ...adminNavItemsForMember(member)];
+  }
+  if (userPresent) {
+    return [...items, addGemachNavItem];
+  }
+  return items;
+}
+
 export function AuthNav() {
   const { user, member, loading, configured, signOut } = useAuth();
   const pathname = usePathname();
   const isLoginPage = pathname.startsWith("/login");
-  const navItems =
-    member && isAdminMember(member)
-      ? [...baseNavItems, ...adminNavItemsForMember(member)]
-      : user
-        ? [...baseNavItems, addGemachNavItem]
-        : baseNavItems;
+  const navItems = navItemsForMember(member, Boolean(user));
 
   if (isLoginPage) {
     return (

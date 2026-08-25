@@ -23,6 +23,15 @@ export interface ReservationWithTool {
   tool: Tool | null;
 }
 
+function extendReservationHref(loan: Loan, tool: Tool | null): string | null {
+  const catalogId = tool?.kindId ?? tool?.id;
+  if (!catalogId) return null;
+  const params = new URLSearchParams({ extend: "1" });
+  if (loan.dueReturnDate) params.set("pickupDate", loan.dueReturnDate);
+  if (loan.dueReturnTimeEnd) params.set("pickupTimeStart", loan.dueReturnTimeEnd);
+  return `/tools/${catalogId}/reserve?${params.toString()}`;
+}
+
 export function formatActivityDate(iso?: string) {
   return formatDateHe(iso, Boolean(iso?.includes("T")));
 }
@@ -117,6 +126,7 @@ export function LoanCard({ loan, tool, getToken, onPhotoAdded }: LoanCardProps) 
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const extraPhotos = loan.additionalPhotoUrls?.length ?? 0;
+  const extendHref = extendReservationHref(loan, tool);
 
   async function handleExtraPhoto(file: File) {
     if (!getToken) return;
@@ -195,6 +205,14 @@ export function LoanCard({ loan, tool, getToken, onPhotoAdded }: LoanCardProps) 
               </Button>
             </>
           )}
+          {loan.status === "active" && extendHref && (
+            <Link
+              href={extendHref}
+              className="rounded-xl border border-kerem-300 bg-white px-4 py-2 text-sm font-semibold text-kerem-800 shadow-sm transition hover:bg-kerem-50"
+            >
+              הארכת השאלה
+            </Link>
+          )}
           {loan.status === "active" && (
             <Link
               href={`/return/${loan.id}`}
@@ -236,6 +254,7 @@ export function LoanGroupCard({ items, getToken, onPhotoAdded }: LoanGroupCardPr
     docCount > 1
       ? `/return/${loan.id}?loanIds=${encodeURIComponent(loanIds.join(","))}`
       : `/return/${loan.id}`;
+  const extendHref = extendReservationHref(loan, tool);
 
   async function handleExtraPhoto(file: File) {
     if (!getToken) return;
@@ -321,6 +340,14 @@ export function LoanGroupCard({ items, getToken, onPhotoAdded }: LoanGroupCardPr
                 {uploading ? "מעלה…" : "צילום נוסף"}
               </Button>
             </>
+          )}
+          {loan.status === "active" && extendHref && (
+            <Link
+              href={extendHref}
+              className="rounded-xl border border-kerem-300 bg-white px-4 py-2 text-sm font-semibold text-kerem-800 shadow-sm transition hover:bg-kerem-50"
+            >
+              הארכת השאלה
+            </Link>
           )}
           {loan.status === "active" && (
             <Link

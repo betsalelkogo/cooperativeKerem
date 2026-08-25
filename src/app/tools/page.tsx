@@ -1,5 +1,6 @@
 import { ToolsCatalog } from "@/components/tools/ToolsCatalog";
 import { AddGemachPromo } from "@/components/gemach/AddGemachPromo";
+import { CaravanCodeBanner } from "@/components/access/CaravanCodeBanner";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { getToolKindsWithAvailability, getAllGemachim } from "@/lib/firestore/repository";
 
@@ -19,6 +20,7 @@ export default async function ToolsPage() {
       />
 
       <AddGemachPromo />
+      <CaravanCodeBanner />
 
       {kinds.length === 0 ? (
         <p className="text-center text-[var(--muted)]">

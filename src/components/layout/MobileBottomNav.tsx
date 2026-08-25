@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthProvider";
-import { isAdminMember, isGemachAdmin, isPlatformAdmin } from "@/lib/admin";
+import { isAdminMember, isBoardMember, isGemachAdmin, isPlatformAdmin } from "@/lib/admin";
+import { isPaidMember } from "@/lib/membership";
 import { cn } from "@/lib/cn";
+import type { Member } from "@/lib/types";
 
 const baseTabs = [
   { href: "/tools", label: "כלים", icon: "🔧", match: (p: string) => p.startsWith("/tools") },
@@ -22,6 +24,13 @@ const baseTabs = [
   },
 ];
 
+const accessTab = {
+  href: "/access",
+  label: "גישה",
+  icon: "🔑",
+  match: (p: string) => p.startsWith("/access"),
+};
+
 const platformAdminTab = {
   href: "/admin",
   label: "ניהול",
@@ -36,8 +45,6 @@ const gemachAdminTab = {
   match: (p: string) => p.startsWith("/admin/gemach"),
 };
 
-import type { Member } from "@/lib/types";
-
 function adminTabForMember(member: Member) {
   if (isPlatformAdmin(member)) return platformAdminTab;
   if (isGemachAdmin(member)) return gemachAdminTab;
@@ -50,7 +57,11 @@ export function MobileBottomNav() {
   const { member } = useAuth();
   const pathname = usePathname();
   const adminTab = member && isAdminMember(member) ? adminTabForMember(member) : null;
-  const tabs = adminTab ? [...baseTabs, adminTab] : baseTabs;
+  const tabs = [
+    ...baseTabs,
+    ...(member && (isPaidMember(member) || isBoardMember(member)) ? [accessTab] : []),
+    ...(adminTab ? [adminTab] : []),
+  ];
 
   const hidden = HIDDEN_PREFIXES.some((p) => pathname.startsWith(p));
   if (hidden) return null;

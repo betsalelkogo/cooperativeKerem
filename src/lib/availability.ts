@@ -12,6 +12,19 @@ export interface ReservationWindow {
   returnTimeEnd?: string;
 }
 
+/** All active reservations keyed by physical unit id. */
+export type ReservationsByTool = Map<string, Reservation[]>;
+
+export type AvailabilityOptions = {
+  ignoreReservationId?: string;
+  /**
+   * Current borrower's member id. Their own active loan does not block a
+   * follow-on reservation (extension) on the same unit.
+   */
+  ignoreLoanMemberId?: string;
+  preferToolIds?: string[];
+};
+
 function windowStartMs(w: ReservationWindow): number {
   const t = w.pickupTimeStart ?? "00:00";
   return reservationDateTime(w.pickupDate, t).getTime();
@@ -79,34 +92,49 @@ function isActiveReservation(r: Reservation | undefined): r is Reservation {
   return Boolean(r && (r.status === "pending" || r.status === "confirmed"));
 }
 
+export function holdsForUnit(
+  reservationsByTool: ReservationsByTool,
+  unitId: string
+): Reservation[] {
+  return reservationsByTool.get(unitId) ?? [];
+}
+
+function isOwnActiveLoan(
+  loan: Loan | undefined,
+  memberId: string | undefined
+): boolean {
+  return Boolean(loan && memberId && loan.memberId === memberId);
+}
+
 /** Whether a unit can be booked for `schedule` (status + no overlapping hold). */
 export function isUnitAvailableInWindow(
   unit: Tool,
   schedule: ReservationWindow,
-  reservationsByTool: Map<string, Reservation>,
+  reservationsByTool: ReservationsByTool,
   loansByTool: Map<string, Loan>,
-  options?: { ignoreReservationId?: string }
+  options?: AvailabilityOptions
 ): boolean {
   if (unit.status === "maintenance" || unit.status === "disabled") return false;
 
-  const activeReservation = reservationsByTool.get(unit.id);
+  const holds = holdsForUnit(reservationsByTool, unit.id);
   const activeLoan = loansByTool.get(unit.id);
+  const ownLoan = isOwnActiveLoan(activeLoan, options?.ignoreLoanMemberId);
 
-  if (unit.status === "on_loan") {
+  if (unit.status === "on_loan" && !ownLoan) {
     if (!activeLoan) return false;
     const freeAt = loanFreeAtMs(activeLoan);
-    return freeAt !== null && freeAt <= windowStartMs(schedule);
+    if (freeAt === null || freeAt > windowStartMs(schedule)) return false;
   }
 
-  // available or reserved — blocked only by an overlapping reservation hold
-  if (
-    isActiveReservation(activeReservation) &&
-    activeReservation.id !== options?.ignoreReservationId &&
-    scheduleOverlapsReservationHold(schedule, activeReservation)
-  ) {
-    return false;
-  }
+  const blockingHold = holds.some(
+    (reservation) =>
+      isActiveReservation(reservation) &&
+      reservation.id !== options?.ignoreReservationId &&
+      scheduleOverlapsReservationHold(schedule, reservation)
+  );
+  if (blockingHold) return false;
 
+  if (unit.status === "on_loan") return true;
   return unit.status === "available" || unit.status === "reserved";
 }
 
@@ -114,9 +142,9 @@ export function isUnitAvailableInWindow(
 export function countUnitsAvailableInWindow(
   units: Tool[],
   schedule: ReservationWindow,
-  reservationsByTool: Map<string, Reservation>,
+  reservationsByTool: ReservationsByTool,
   loansByTool: Map<string, Loan>,
-  options?: { ignoreReservationId?: string }
+  options?: AvailabilityOptions
 ): number {
   return units.filter((unit) =>
     isUnitAvailableInWindow(unit, schedule, reservationsByTool, loansByTool, options)
@@ -126,10 +154,10 @@ export function countUnitsAvailableInWindow(
 export function pickUnitsAvailableInWindow(
   units: Tool[],
   schedule: ReservationWindow,
-  reservationsByTool: Map<string, Reservation>,
+  reservationsByTool: ReservationsByTool,
   loansByTool: Map<string, Loan>,
   quantity: number,
-  options?: { ignoreReservationId?: string; preferToolIds?: string[] }
+  options?: AvailabilityOptions
 ): Tool[] {
   const free = units.filter((unit) =>
     isUnitAvailableInWindow(unit, schedule, reservationsByTool, loansByTool, options)
@@ -149,15 +177,15 @@ export function pickUnitsAvailableInWindow(
  */
 export function isUnitLendableNow(
   unit: Tool,
-  reservationsByTool: Map<string, Reservation>,
+  reservationsByTool: ReservationsByTool,
   loansByTool: Map<string, Loan>,
   now = new Date()
 ): boolean {
   if (unit.status === "maintenance" || unit.status === "disabled") return false;
   if (unit.status === "on_loan") return false;
 
-  const reservation = reservationsByTool.get(unit.id);
-  if (isActiveReservation(reservation) && isReservationHardLockDue(reservation, now)) {
+  const holds = holdsForUnit(reservationsByTool, unit.id);
+  if (holds.some((r) => isActiveReservation(r) && isReservationHardLockDue(r, now))) {
     return false;
   }
 
@@ -167,7 +195,7 @@ export function isUnitLendableNow(
 
 export function countUnitsLendableNow(
   units: Tool[],
-  reservationsByTool: Map<string, Reservation>,
+  reservationsByTool: ReservationsByTool,
   loansByTool: Map<string, Loan>,
   now = new Date()
 ): number {
@@ -179,21 +207,20 @@ export function countUnitsLendableNow(
 /** Units committed to an active reservation (soft or hard) and not currently on loan. */
 export function countUnitsReservedForFuture(
   units: Tool[],
-  reservationsByTool: Map<string, Reservation>,
+  reservationsByTool: ReservationsByTool,
   loansByTool: Map<string, Loan>
 ): number {
   let count = 0;
   for (const unit of units) {
     if (unit.status === "on_loan" || loansByTool.has(unit.id)) continue;
-    const reservation = reservationsByTool.get(unit.id);
-    if (isActiveReservation(reservation)) count += 1;
+    if (holdsForUnit(reservationsByTool, unit.id).some(isActiveReservation)) count += 1;
   }
   return count;
 }
 
 export function pickUnitsLendableNow(
   units: Tool[],
-  reservationsByTool: Map<string, Reservation>,
+  reservationsByTool: ReservationsByTool,
   loansByTool: Map<string, Loan>,
   quantity: number,
   now = new Date()
@@ -206,12 +233,13 @@ export function pickUnitsLendableNow(
 /** Active reservations that touch any of these units. */
 export function activeReservationsForUnits(
   units: Tool[],
-  reservationsByTool: Map<string, Reservation>
+  reservationsByTool: ReservationsByTool
 ): Reservation[] {
   const byId = new Map<string, Reservation>();
   for (const unit of units) {
-    const r = reservationsByTool.get(unit.id);
-    if (isActiveReservation(r)) byId.set(r.id, r);
+    for (const r of holdsForUnit(reservationsByTool, unit.id)) {
+      if (isActiveReservation(r)) byId.set(r.id, r);
+    }
   }
   return [...byId.values()];
 }
@@ -245,4 +273,18 @@ export function reservationHoldBounds(reservation: Reservation): {
     hardLockAt: reservationHardLockStart(reservation),
     holdEnd: new Date(reservationHoldEndMs(reservation)),
   };
+}
+
+/** Latest return date among holds (YYYY-MM-DD), if any. */
+export function latestHoldReturnDate(holds: Reservation[]): string | undefined {
+  let latest: string | undefined;
+  for (const r of holds) {
+    if (r.returnDate && (!latest || r.returnDate > latest)) latest = r.returnDate;
+  }
+  return latest;
+}
+
+export function primaryHold(holds: Reservation[]): Reservation | undefined {
+  if (holds.length === 0) return undefined;
+  return holds.reduce((best, r) => (r.createdAt > best.createdAt ? r : best));
 }

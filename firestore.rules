@@ -87,7 +87,8 @@ service cloud.firestore {
     }
 
     match /settings/{docId} {
-      allow read: if request.auth != null;
+      // Club room lock codes live in access-codes and must never be client-readable.
+      allow read: if request.auth != null && docId != "access-codes";
       allow write: if false;
     }
 

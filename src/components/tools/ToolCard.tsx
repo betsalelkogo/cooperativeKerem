@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { ToolKindWithAvailability } from "@/lib/types";
-import { inventoryLabel } from "@/lib/tool-kinds";
+import { inventoryLabel, isKindReservable } from "@/lib/tool-kinds";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Card, CardBody, CardFooter } from "@/components/ui/Card";
 import { InstantLoanButton } from "@/components/tools/InstantLoanButton";
@@ -128,7 +128,7 @@ export function ToolCard({ kind }: { kind: ToolKindWithAvailability }) {
             {priceLabel}
           </p>
         </div>
-        {kind.availableUnits > 0 ? (
+        {isKindReservable(kind) ? (
           <div className="flex flex-wrap justify-end gap-2">
             <Link
               href={`/tools/${kind.catalogId}`}
@@ -136,17 +136,24 @@ export function ToolCard({ kind }: { kind: ToolKindWithAvailability }) {
             >
               פרטים
             </Link>
-            <InstantLoanButton
-              kindId={kind.catalogId}
-              availableUnits={kind.availableUnits}
-              compact
-            />
+            {kind.availableUnits > 0 && (
+              <InstantLoanButton
+                kindId={kind.catalogId}
+                availableUnits={kind.availableUnits}
+                compact
+              />
+            )}
             <Link
               href={`/tools/${kind.catalogId}/reserve`}
               className="rounded-xl bg-kerem-700 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-kerem-700/20 transition hover:bg-kerem-800 group-hover:shadow-lg"
             >
               שריון
             </Link>
+            {kind.availableUnits === 0 && (
+              <span className="w-full text-left text-xs font-medium text-[var(--muted)]">
+                {kind.availabilityLabel ?? "לא זמין עכשיו — אפשר לשריין למועד מאוחר יותר"}
+              </span>
+            )}
           </div>
         ) : (
           <div className="text-left">

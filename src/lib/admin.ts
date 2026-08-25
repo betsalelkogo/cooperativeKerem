@@ -103,7 +103,11 @@ export function canAccessAdminPath(
   if (pathname.startsWith("/admin/gemach")) {
     return isPlatformAdmin(member) || isGemachScopedAdmin(member);
   }
-  if (pathname.startsWith("/admin/board") || pathname.startsWith("/admin/finance")) {
+  if (
+    pathname.startsWith("/admin/board") ||
+    pathname.startsWith("/admin/finance") ||
+    pathname.startsWith("/admin/access")
+  ) {
     return isBoardMember(member);
   }
   if (pathname.startsWith("/admin/disputes")) {

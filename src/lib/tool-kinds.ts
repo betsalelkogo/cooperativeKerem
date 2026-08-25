@@ -1,9 +1,12 @@
-import type { Tool, ToolStatus, ToolWithAvailability, ToolKindWithAvailability, ToolKindStats, Loan, Reservation } from "@/lib/types";
+import type { Tool, ToolStatus, ToolWithAvailability, ToolKindWithAvailability, ToolKindStats, Loan } from "@/lib/types";
 import { formatAvailableFromLabel } from "@/lib/dates";
 import {
   countUnitsLendableNow,
   countUnitsReservedForFuture,
+  holdsForUnit,
   isUnitLendableNow,
+  latestHoldReturnDate,
+  type ReservationsByTool,
 } from "@/lib/availability";
 
 /** Stable grouping key for a tool kind within a gemach. */
@@ -50,22 +53,32 @@ export function pickAvailableUnits(units: Tool[], quantity: number): Tool[] {
   return available.slice(0, Math.max(1, quantity));
 }
 
+function unitAvailableFrom(
+  tool: Tool,
+  loanByTool: Map<string, Loan>,
+  reservationByTool: ReservationsByTool
+): string | undefined {
+  const holdReturn = latestHoldReturnDate(holdsForUnit(reservationByTool, tool.id));
+  if (tool.status === "on_loan") {
+    const due = loanByTool.get(tool.id)?.dueReturnDate;
+    if (due && holdReturn) return due > holdReturn ? due : holdReturn;
+    return holdReturn ?? due;
+  }
+  if (tool.status === "reserved") return holdReturn;
+  return undefined;
+}
+
 function aggregateAvailability(
   units: Tool[],
   loanByTool: Map<string, Loan>,
-  reservationByTool: Map<string, Reservation>
+  reservationByTool: ReservationsByTool
 ): Pick<ToolWithAvailability, "availableFrom" | "availabilityLabel"> {
   const unavailable = units.filter((t) => t.status !== "available");
   if (unavailable.length === 0) return {};
 
   let earliest: string | undefined;
   for (const tool of unavailable) {
-    let availableFrom: string | undefined;
-    if (tool.status === "on_loan") {
-      availableFrom = loanByTool.get(tool.id)?.dueReturnDate;
-    } else if (tool.status === "reserved") {
-      availableFrom = reservationByTool.get(tool.id)?.returnDate;
-    }
+    const availableFrom = unitAvailableFrom(tool, loanByTool, reservationByTool);
     if (availableFrom && (!earliest || availableFrom < earliest)) {
       earliest = availableFrom;
     }
@@ -78,7 +91,7 @@ function aggregateAvailability(
 export function buildToolKindWithAvailability(
   units: Tool[],
   loanByTool: Map<string, Loan>,
-  reservationByTool: Map<string, Reservation>,
+  reservationByTool: ReservationsByTool,
   extras?: Partial<ToolWithAvailability> & { location?: string; stats?: ToolKindStats }
 ): ToolKindWithAvailability | null {
   if (units.length === 0) return null;
@@ -139,6 +152,13 @@ export function inventoryLabel(kind: Pick<ToolKindWithAvailability, "totalUnits"
     return `${kind.availableUnits} מתוך ${kind.totalUnits} זמינים עכשיו`;
   }
   return `${kind.totalUnits} יחידות — אין זמינות כרגע`;
+}
+
+/** Future windows can still be booked while a unit is out or reserved. */
+export function isKindReservable(
+  kind: Pick<ToolKindWithAvailability, "status" | "totalUnits">
+): boolean {
+  return kind.totalUnits > 0 && kind.status !== "maintenance" && kind.status !== "disabled";
 }
 
 export function aggregateKindStatus(units: Pick<Tool, "status">[]): ToolStatus {

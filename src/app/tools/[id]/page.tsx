@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getToolKindWithAvailability } from "@/lib/firestore/repository";
-import { inventoryLabel } from "@/lib/tool-kinds";
+import { inventoryLabel, isKindReservable } from "@/lib/tool-kinds";
 import { formatNIS } from "@/lib/pots";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { BackLink } from "@/components/ui/PageHeader";
@@ -197,24 +197,29 @@ export default async function ToolDetailPage({
           )}
 
           <div className="flex flex-wrap gap-3">
+            {isKindReservable(kind) && (
+              <Link
+                href={`/tools/${kind.catalogId}/reserve`}
+                className="inline-flex flex-1 items-center justify-center rounded-xl bg-kerem-700 py-3.5 text-base font-bold text-white shadow-md shadow-kerem-700/25 transition hover:bg-kerem-800 sm:flex-none sm:px-8"
+              >
+                שריון {kind.totalUnits > 1 ? "יחידות" : "הכלי"}
+              </Link>
+            )}
             {kind.availableUnits > 0 && (
-              <>
-                <Link
-                  href={`/tools/${kind.catalogId}/reserve`}
-                  className="inline-flex flex-1 items-center justify-center rounded-xl bg-kerem-700 py-3.5 text-base font-bold text-white shadow-md shadow-kerem-700/25 transition hover:bg-kerem-800 sm:flex-none sm:px-8"
-                >
-                  שריון {kind.totalUnits > 1 ? "יחידות" : "הכלי"}
-                </Link>
-                <InstantLoanButton
-                  kindId={kind.catalogId}
-                  availableUnits={kind.availableUnits}
-                />
-              </>
+              <InstantLoanButton
+                kindId={kind.catalogId}
+                availableUnits={kind.availableUnits}
+              />
             )}
           </div>
           {kind.availableUnits > 0 && (
             <p className="mt-2 text-xs text-[var(--muted)]">
               «השאלה מיידית» — דילוג על שלב השריון: הכלי נלקח עכשיו ומועבר ישירות לתשלום ולקיחה.
+            </p>
+          )}
+          {isKindReservable(kind) && kind.availableUnits === 0 && (
+            <p className="mt-2 text-xs text-[var(--muted)]">
+              הכלי מושאל או שמור עכשיו — אפשר לשריין חלון אחרי ההחזרה, או להאריך אם הוא כבר אצלכם.
             </p>
           )}
         </CardBody>

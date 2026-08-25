@@ -25,12 +25,14 @@ const platformTabs = [
   { href: "/admin/pots", label: "קופות", match: (p: string) => p.startsWith("/admin/pots") },
   { href: "/admin/board", label: "לוגיסטיקה", match: (p: string) => p.startsWith("/admin/board") },
   { href: "/admin/finance", label: "כספים", match: (p: string) => p.startsWith("/admin/finance") },
+  { href: "/admin/access", label: "קודי גישה", match: (p: string) => p.startsWith("/admin/access") },
   disputesTab,
 ];
 
 const boardTabs = [
   { href: "/admin/board", label: "לוגיסטיקה", match: (p: string) => p.startsWith("/admin/board") },
   { href: "/admin/finance", label: "כספים", match: (p: string) => p.startsWith("/admin/finance") },
+  { href: "/admin/access", label: "קודי גישה", match: (p: string) => p.startsWith("/admin/access") },
   disputesTab,
 ];
 

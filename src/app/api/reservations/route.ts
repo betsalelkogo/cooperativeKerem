@@ -3,6 +3,7 @@ import { getUidFromRequest } from "@/lib/firebase/admin";
 import {
   createReservation,
   getReservationsByMember,
+  getLoansByMember,
   getToolById,
   getToolKindWithAvailability,
   getGemachById,
@@ -187,11 +188,26 @@ export async function POST(request: Request) {
       };
     }
 
+    const memberLoans = await getLoansByMember(memberId);
+    const preferToolIds = memberLoans.flatMap((loan) => {
+      if (
+        loan.status !== "active" &&
+        loan.status !== "checkout_pending" &&
+        loan.status !== "return_pending"
+      ) {
+        return [];
+      }
+      return loan.toolIds?.length ? loan.toolIds : loan.toolId ? [loan.toolId] : [];
+    });
+
     const units = await pickAvailableToolUnits(catalogKey, quantity, {
       pickupDate: schedule.pickupDate,
       pickupTimeStart: schedule.pickupTimeStart,
       returnDate: schedule.returnDate,
       returnTimeEnd: schedule.returnTimeEnd,
+    }, {
+      ignoreLoanMemberId: memberId,
+      preferToolIds,
     });
 
     if (units.length === 0) {

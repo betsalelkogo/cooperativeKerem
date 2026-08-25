@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getUidFromRequest } from "@/lib/firebase/admin";
 import { getKindScheduleAvailability } from "@/lib/firestore/repository";
 import { computeFixedHoursReservation } from "@/lib/reservation-times";
 
@@ -9,6 +10,7 @@ export async function GET(
   try {
     const { id } = await params;
     const { searchParams } = new URL(request.url);
+    const memberId = await getUidFromRequest(request);
 
     const pickupDate = searchParams.get("pickupDate") ?? undefined;
     const pickupTimeStart = searchParams.get("pickupTimeStart") ?? undefined;
@@ -44,7 +46,11 @@ export async function GET(
       };
     }
 
-    const availability = await getKindScheduleAvailability(id, schedule);
+    const availability = await getKindScheduleAvailability(
+      id,
+      schedule,
+      memberId ? { ignoreLoanMemberId: memberId } : undefined
+    );
     return NextResponse.json({ ...availability, schedule });
   } catch (err) {
     const message = err instanceof Error ? err.message : "שגיאת שרת";

@@ -21,6 +21,7 @@ import type {
   MemberPayment,
   PayboxPayout,
   PayboxSettings,
+  AccessCodesRecord,
   Reservation,
   Tool,
   ToolKindStats,
@@ -98,11 +99,16 @@ import {
   countUnitsLendableNow,
   countUnitsReservedForFuture,
   findNextHoldAfter,
+  holdsForUnit,
   isReservationHardLockDue,
+  latestHoldReturnDate,
   pickUnitsAvailableInWindow,
   pickUnitsLendableNow,
+  primaryHold,
   reservationHardLockStart,
   RESERVATION_HARD_LOCK_HOURS,
+  type AvailabilityOptions,
+  type ReservationsByTool,
   type ReservationWindow,
 } from "@/lib/availability";
 import { formatReservationDateTimeHe, reservationDateTime } from "@/lib/israel-time";
@@ -171,6 +177,11 @@ function newId(prefix: string) {
 function reservationToolIds(reservation: Reservation): string[] {
   if (reservation.toolIds?.length) return reservation.toolIds;
   return reservation.toolId ? [reservation.toolId] : [];
+}
+
+function loanToolIds(loan: Loan): string[] {
+  if (loan.toolIds?.length) return loan.toolIds;
+  return loan.toolId ? [loan.toolId] : [];
 }
 
 function reservationFromDoc(id: string, data: DocumentData): Reservation {
@@ -247,8 +258,7 @@ function buildActiveHolders(loans: Loan[], reservations: Reservation[]) {
 
   const loanByTool = new Map<string, Loan>();
   for (const loan of activeLoans) {
-    const ids = loan.toolIds?.length ? loan.toolIds : loan.toolId ? [loan.toolId] : [];
-    for (const toolId of ids) {
+    for (const toolId of loanToolIds(loan)) {
       const existing = loanByTool.get(toolId);
       if (!existing || loanPriority[loan.status] > loanPriority[existing.status]) {
         loanByTool.set(toolId, loan);
@@ -256,14 +266,12 @@ function buildActiveHolders(loans: Loan[], reservations: Reservation[]) {
     }
   }
 
-  const reservationByTool = new Map<string, Reservation>();
+  const reservationByTool: ReservationsByTool = new Map();
   for (const reservation of activeReservations) {
-    const ids = reservationToolIds(reservation);
-    for (const toolId of ids) {
-      const existing = reservationByTool.get(toolId);
-      if (!existing || reservation.createdAt > existing.createdAt) {
-        reservationByTool.set(toolId, reservation);
-      }
+    for (const toolId of reservationToolIds(reservation)) {
+      const list = reservationByTool.get(toolId) ?? [];
+      list.push(reservation);
+      reservationByTool.set(toolId, list);
     }
   }
 
@@ -273,17 +281,18 @@ function buildActiveHolders(loans: Loan[], reservations: Reservation[]) {
 function availabilityForTool(
   tool: Tool,
   loanByTool: Map<string, Loan>,
-  reservationByTool: Map<string, Reservation>
+  reservationByTool: ReservationsByTool
 ): Pick<ToolWithAvailability, "availableFrom" | "availabilityLabel"> {
   if (tool.status === "available") return {};
 
+  const holdReturn = latestHoldReturnDate(holdsForUnit(reservationByTool, tool.id));
   let availableFrom: string | undefined;
   if (tool.status === "on_loan") {
-    const loan = loanByTool.get(tool.id);
-    availableFrom = loan?.dueReturnDate;
+    const due = loanByTool.get(tool.id)?.dueReturnDate;
+    if (due && holdReturn) availableFrom = due > holdReturn ? due : holdReturn;
+    else availableFrom = holdReturn ?? due;
   } else if (tool.status === "reserved") {
-    const reservation = reservationByTool.get(tool.id);
-    availableFrom = reservation?.returnDate;
+    availableFrom = holdReturn;
   }
 
   const availabilityLabel = availableFrom
@@ -977,7 +986,8 @@ export async function syncReservationHardLocks(): Promise<{
 export async function pickAvailableToolUnits(
   catalogKey: string,
   quantity: number,
-  schedule?: ReservationWindow
+  schedule?: ReservationWindow,
+  options?: AvailabilityOptions
 ): Promise<Tool[]> {
   await expireStaleNoShowReservations();
   await syncReservationHardLocks();
@@ -995,7 +1005,8 @@ export async function pickAvailableToolUnits(
       schedule,
       reservationByTool,
       loanByTool,
-      quantity
+      quantity,
+      options
     );
   }
 
@@ -1843,10 +1854,7 @@ export async function getAdminDashboard(options?: {
 
   const { activeLoans, activeReservations, loanByTool, reservationByTool } =
     buildActiveHolders(
-      loans.filter((l) => {
-        const ids = l.toolIds?.length ? l.toolIds : l.toolId ? [l.toolId] : [];
-        return ids.some((id) => toolIds.has(id));
-      }),
+      loans.filter((l) => loanToolIds(l).some((id) => toolIds.has(id))),
       reservations.filter((r) =>
         reservationToolIds(r).some((id) => toolIds.has(id))
       )
@@ -1871,7 +1879,9 @@ export async function getAdminDashboard(options?: {
 
     const unitRows = units.map((tool) => {
       const loan = loanByTool.get(tool.id);
-      const reservation = loan ? undefined : reservationByTool.get(tool.id);
+      const reservation = loan
+        ? undefined
+        : primaryHold(holdsForUnit(reservationByTool, tool.id));
       const holderId = loan?.memberId ?? reservation?.memberId;
       const member = holderId ? memberMap.get(holderId) : undefined;
       return {
@@ -2789,7 +2799,11 @@ async function claimToolsForCheckout(reservation: Reservation): Promise<string[]
     reservationByTool,
     loanByTool,
     quantity,
-    { ignoreReservationId: reservation.id, preferToolIds: preferred }
+    {
+      ignoreReservationId: reservation.id,
+      ignoreLoanMemberId: reservation.memberId,
+      preferToolIds: preferred,
+    }
   );
 
   if (claimed.length < quantity) {
@@ -2836,6 +2850,20 @@ export async function createLoanFromCheckout(params: {
   const perUnitDevice = quantity > 0 ? split.deviceAmount / quantity : 0;
   const loanId = params.loanId ?? newId("loan");
   const txnId = newId("txn");
+
+  const memberLoans = await getLoansByMember(params.reservation.memberId);
+  const claimedSet = new Set(toolIds);
+  const supersededLoans = memberLoans.filter((existing) => {
+    if (existing.id === loanId) return false;
+    if (
+      existing.status !== "active" &&
+      existing.status !== "checkout_pending" &&
+      existing.status !== "return_pending"
+    ) {
+      return false;
+    }
+    return loanToolIds(existing).some((id) => claimedSet.has(id));
+  });
 
   const transaction: Transaction = {
     id: txnId,
@@ -2889,6 +2917,14 @@ export async function createLoanFromCheckout(params: {
       },
       { merge: true }
     );
+  }
+
+  for (const previous of supersededLoans) {
+    batch.update(db.collection("loans").doc(previous.id), {
+      status: "returned",
+      returnConditionNotes: "נסגר אוטומטית עקב שריון הארכה",
+      returnedAt: FieldValue.serverTimestamp(),
+    });
   }
 
   batch.set(db.collection("transactions").doc(txnId), {
@@ -3281,6 +3317,54 @@ export async function getPayboxSettings(): Promise<PayboxSettings> {
     groupName: (data.groupName as string) || undefined,
     growPageCode: (data.growPageCode as string) || defaults.growPageCode,
   };
+}
+
+const ACCESS_CODES_DOC = "access-codes";
+
+function emptyAccessCodes(): AccessCodesRecord {
+  return {
+    caravanCode: "",
+    caravanNote: "",
+    clubRoomCode: "",
+    clubRoomNote: "",
+    clubRoomUpdatedAt: null,
+  };
+}
+
+export async function getAccessCodes(): Promise<AccessCodesRecord> {
+  const snap = await getAdminDb().collection("settings").doc(ACCESS_CODES_DOC).get();
+  if (!snap.exists) return emptyAccessCodes();
+  const data = snap.data() ?? {};
+  return {
+    caravanCode: typeof data.caravanCode === "string" ? data.caravanCode : "",
+    caravanNote: typeof data.caravanNote === "string" ? data.caravanNote : "",
+    clubRoomCode: typeof data.clubRoomCode === "string" ? data.clubRoomCode : "",
+    clubRoomNote: typeof data.clubRoomNote === "string" ? data.clubRoomNote : "",
+    clubRoomUpdatedAt: data.clubRoomUpdatedAt ? tsToIso(data.clubRoomUpdatedAt) : null,
+  };
+}
+
+export async function updateAccessCodes(params: {
+  caravanCode: string;
+  caravanNote: string;
+  clubRoomCode: string;
+  clubRoomNote: string;
+}): Promise<AccessCodesRecord> {
+  const existing = await getAccessCodes();
+  const roomChanged = params.clubRoomCode !== existing.clubRoomCode;
+  const ref = getAdminDb().collection("settings").doc(ACCESS_CODES_DOC);
+  const payload: Record<string, unknown> = {
+    caravanCode: params.caravanCode,
+    caravanNote: params.caravanNote,
+    clubRoomCode: params.clubRoomCode,
+    clubRoomNote: params.clubRoomNote,
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+  if (roomChanged) {
+    payload.clubRoomUpdatedAt = FieldValue.serverTimestamp();
+  }
+  await ref.set(payload, { merge: true });
+  return getAccessCodes();
 }
 
 // ─── Member payments (PayBox group) ──────────────────────────────────────────
@@ -3863,9 +3947,10 @@ export async function countKindAvailabilityInWindow(
     pickupTimeStart?: string;
     returnDate: string;
     returnTimeEnd?: string;
-  }
+  },
+  options?: Pick<AvailabilityOptions, "ignoreLoanMemberId">
 ): Promise<number> {
-  const detail = await getKindScheduleAvailability(catalogKey, schedule);
+  const detail = await getKindScheduleAvailability(catalogKey, schedule, options);
   return detail.availableUnits;
 }
 
@@ -3890,7 +3975,8 @@ export type KindScheduleAvailability = {
 /** Window availability + next blocking hold for the reserve UI. */
 export async function getKindScheduleAvailability(
   catalogKey: string,
-  schedule: ReservationWindow
+  schedule: ReservationWindow,
+  options?: Pick<AvailabilityOptions, "ignoreLoanMemberId">
 ): Promise<KindScheduleAvailability> {
   await syncReservationHardLocks();
   const [tools, loans, reservations] = await Promise.all([
@@ -3905,7 +3991,8 @@ export async function getKindScheduleAvailability(
     units,
     schedule,
     reservationByTool,
-    loanByTool
+    loanByTool,
+    options
   );
   const lendableNow = countUnitsLendableNow(units, reservationByTool, loanByTool);
   const reservedForFuture = countUnitsReservedForFuture(
