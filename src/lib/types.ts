@@ -343,6 +343,8 @@ export interface AdminLateReturnRow {
   toolName: string;
   gemachId: string;
   gemachName?: string;
+  /** Actual pickup (checkout) or scheduled pickup if checkout time is missing. */
+  borrowedFrom?: string;
   dueAt: string;
   returnedAt: string;
   lateMinutes: number;

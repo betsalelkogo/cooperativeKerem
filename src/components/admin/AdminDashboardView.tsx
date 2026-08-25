@@ -185,9 +185,9 @@ export function AdminDashboardView({
                 <tr className="border-b border-[var(--border)] bg-warm-50 text-right">
                   <th className="px-4 py-3 font-semibold text-stone-700">משתמש</th>
                   <th className="px-4 py-3 font-semibold text-stone-700">כלי</th>
+                  <th className="px-4 py-3 font-semibold text-stone-700">זמני השאלה</th>
                   <th className="px-4 py-3 font-semibold text-stone-700">איחור</th>
                   <th className="px-4 py-3 font-semibold text-stone-700">קנס</th>
-                  <th className="px-4 py-3 font-semibold text-stone-700">הוחזר</th>
                   <th className="px-4 py-3 font-semibold text-stone-700">סטטוס</th>
                   <th className="px-4 py-3 font-semibold text-stone-700">פעולה</th>
                 </tr>
@@ -200,11 +200,17 @@ export function AdminDashboardView({
                       <p className="text-xs text-[var(--muted)]">{fee.memberEmail}</p>
                     </td>
                     <td className="px-4 py-3 font-medium text-stone-900">{fee.toolName}</td>
+                    <td className="px-4 py-3 text-stone-800">
+                      <p>
+                        השאיל מ-
+                        {formatDateTime(fee.borrowedFrom)} עד {formatDateTime(fee.dueAt)}
+                      </p>
+                      <p className="mt-0.5 text-[var(--muted)]">
+                        הוחזר ב-{formatDateTime(fee.returnedAt)}
+                      </p>
+                    </td>
                     <td className="px-4 py-3 text-red-700">{fee.lateDurationLabel}</td>
                     <td className="px-4 py-3 font-semibold">{formatNIS(fee.amount)}</td>
-                    <td className="px-4 py-3 text-[var(--muted)]">
-                      {formatDateTime(fee.returnedAt)}
-                    </td>
                     <td className="px-4 py-3">
                       <span className="rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-800">
                         לא שולם

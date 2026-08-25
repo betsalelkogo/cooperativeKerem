@@ -40,6 +40,7 @@ import {
   calculateLateFeeAmount,
   computeLateness,
   formatLateDuration,
+  loanBorrowedFromIso,
 } from "@/lib/late-fees";
 import {
   isFirstPayout,
@@ -1945,10 +1946,15 @@ export async function getAdminDashboard(options?: {
     })
     .filter((row): row is NonNullable<typeof row> => row !== null);
 
+  const loanById = new Map(loans.map((l) => [l.id, l]));
+  const reservationById = new Map(reservations.map((r) => [r.id, r]));
+
   const lateReturnFees = unpaidLateFees.map((fee) => {
     const tool = allToolMap.get(fee.toolId);
     const member = memberMap.get(fee.memberId);
     const gemach = gemachMap.get(fee.gemachId);
+    const loan = loanById.get(fee.loanId);
+    const reservation = reservationById.get(fee.reservationId);
     return {
       id: fee.id,
       loanId: fee.loanId,
@@ -1959,6 +1965,7 @@ export async function getAdminDashboard(options?: {
       toolName: tool?.name ?? fee.toolId,
       gemachId: fee.gemachId,
       gemachName: gemach ? displayGemachName(gemach) : undefined,
+      borrowedFrom: loanBorrowedFromIso(loan, reservation),
       dueAt: fee.dueAt,
       returnedAt: fee.returnedAt,
       lateMinutes: fee.lateMinutes,

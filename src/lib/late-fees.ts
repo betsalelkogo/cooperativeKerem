@@ -85,6 +85,19 @@ export function calculateLateFeeAmount(lateMinutes: number): number {
   return hours * getLateFeePerHour();
 }
 
+export function loanBorrowedFromIso(
+  loan?: Pick<Loan, "checkedOutAt"> | null,
+  reservation?: Pick<Reservation, "pickupDate" | "pickupTimeStart"> | null
+): string | undefined {
+  if (loan?.checkedOutAt) return loan.checkedOutAt;
+  if (!reservation?.pickupDate) return undefined;
+  const start = reservationDateTime(
+    reservation.pickupDate,
+    reservation.pickupTimeStart ?? "00:00"
+  );
+  return Number.isNaN(start.getTime()) ? undefined : start.toISOString();
+}
+
 export function formatLateDuration(lateMinutes: number): string {
   if (lateMinutes <= 0) return "";
   const hours = Math.floor(lateMinutes / 60);

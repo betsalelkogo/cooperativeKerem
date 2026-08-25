@@ -17,6 +17,7 @@ import { REQUIRE_QR_SCAN } from "@/lib/features";
 import { DEFECT_CATEGORIES } from "@/lib/defects";
 import type { DefectCategory, LateReturnFee, Loan, Tool } from "@/lib/types";
 import { formatLateDuration } from "@/lib/late-fees";
+import { formatDateHe } from "@/lib/dates";
 import { formatNIS } from "@/lib/pots";
 
 type Step = "qr" | "items" | "condition" | "photo" | "done";
@@ -348,7 +349,9 @@ export default function ReturnPage() {
             <Alert variant="warning">
               <p className="font-bold text-orange-900">⚠️ החזרה באיחור</p>
               <p className="mt-2 text-sm">
-                החזרתם את הכלי באיחור של{" "}
+                השאלתם מ-{formatDateHe(loan.checkedOutAt ?? lateFee.dueAt, true)} עד{" "}
+                {formatDateHe(lateFee.dueAt, true)}. הוחזר ב-
+                {formatDateHe(lateFee.returnedAt, true)} — איחור של{" "}
                 <strong>{formatLateDuration(lateFee.lateMinutes)}</strong>.
               </p>
               <p className="mt-1 text-sm">
