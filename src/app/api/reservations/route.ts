@@ -3,10 +3,10 @@ import { getUidFromRequest } from "@/lib/firebase/admin";
 import {
   createReservation,
   getReservationsByMember,
-  getLoansByMember,
   getToolById,
   getToolKindWithAvailability,
   getGemachById,
+  activeLoanToolIdsForMember,
   getMemberById,
   memberHasOpenPeerDebt,
   pickAvailableToolUnits,
@@ -112,12 +112,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "הכלי לא נמצא" }, { status: 404 });
     }
 
-    const tool = await getToolById(kind.representativeToolId);
-    if (!tool) {
-      return NextResponse.json({ error: "הכלי לא נמצא" }, { status: 404 });
-    }
-
-    const gemach = await getGemachById(tool.gemachId);
+    const gemach = await getGemachById(kind.gemachId);
     if (!gemach) {
       return NextResponse.json({ error: "גמ״ח לא נמצא" }, { status: 404 });
     }
@@ -134,7 +129,10 @@ export async function POST(request: Request) {
       // minutes in the past to keep the pickup window open; duration = default.
       const { date: todayIL, minutes } = israelNowParts();
       const startTime = minutesToTime(Math.max(0, minutes - 5));
-      const hours = resolveToolDefaultLoanHours(tool, gemach);
+      const hours = resolveToolDefaultLoanHours(
+        { defaultLoanHours: kind.defaultLoanHours },
+        gemach
+      );
       schedule = computeFixedHoursReservation(todayIL, startTime, hours);
     } else if (mode === "fixed_hours") {
       const resolvedPickup = pickupDate ?? date;
@@ -150,7 +148,13 @@ export async function POST(request: Request) {
         resolvedPickup,
         pickupTimeStart,
         hours,
-        { tool, gemach }
+        {
+          tool: {
+            defaultLoanHours: kind.defaultLoanHours,
+            maxLoanHours: kind.maxLoanHours,
+          },
+          gemach,
+        }
       );
       if (timeError) {
         return NextResponse.json({ error: timeError }, { status: 400 });
@@ -188,17 +192,7 @@ export async function POST(request: Request) {
       };
     }
 
-    const memberLoans = await getLoansByMember(memberId);
-    const preferToolIds = memberLoans.flatMap((loan) => {
-      if (
-        loan.status !== "active" &&
-        loan.status !== "checkout_pending" &&
-        loan.status !== "return_pending"
-      ) {
-        return [];
-      }
-      return loan.toolIds?.length ? loan.toolIds : loan.toolId ? [loan.toolId] : [];
-    });
+    const preferToolIds = await activeLoanToolIdsForMember(memberId);
 
     const units = await pickAvailableToolUnits(catalogKey, quantity, {
       pickupDate: schedule.pickupDate,
@@ -226,6 +220,7 @@ export async function POST(request: Request) {
       );
     }
 
+    const tool = units[0];
     const { feeAmount, cooperativeFeeAmount } = resolveTotalReservationFee(
       gemach,
       tool,

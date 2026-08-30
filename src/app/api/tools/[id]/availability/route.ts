@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { getUidFromRequest } from "@/lib/firebase/admin";
-import { getKindScheduleAvailability } from "@/lib/firestore/repository";
+import {
+  getKindScheduleAvailability,
+  getKindScheduleAvailabilityForHours,
+} from "@/lib/firestore/repository";
 import { computeFixedHoursReservation } from "@/lib/reservation-times";
 
 export async function GET(
@@ -17,12 +20,39 @@ export async function GET(
     const returnDate = searchParams.get("returnDate") ?? undefined;
     const returnTimeEnd = searchParams.get("returnTimeEnd") ?? undefined;
     const loanDurationHoursRaw = searchParams.get("loanDurationHours");
+    const hoursRaw = searchParams.get("hours");
 
     if (!pickupDate || !pickupTimeStart) {
       return NextResponse.json(
         { error: "נדרשים תאריך ושעת התחלה" },
         { status: 400 }
       );
+    }
+
+    const options = memberId ? { ignoreLoanMemberId: memberId } : undefined;
+
+    if (hoursRaw) {
+      const hours = hoursRaw
+        .split(",")
+        .map((v) => Number(v))
+        .filter((n) => Number.isFinite(n) && n > 0);
+      if (hours.length === 0) {
+        return NextResponse.json({ error: "משכי השאלה אינם תקינים" }, { status: 400 });
+      }
+      const rows = await getKindScheduleAvailabilityForHours(
+        id,
+        pickupDate,
+        pickupTimeStart,
+        hours,
+        options
+      );
+      const selectedHours = loanDurationHoursRaw ? Number(loanDurationHoursRaw) : hours[0];
+      const selected =
+        rows.find((r) => r.hours === selectedHours)?.availability ?? rows[0]?.availability;
+      return NextResponse.json({
+        ...selected,
+        byHours: Object.fromEntries(rows.map((r) => [r.hours, r.availability])),
+      });
     }
 
     let schedule = {
@@ -46,11 +76,7 @@ export async function GET(
       };
     }
 
-    const availability = await getKindScheduleAvailability(
-      id,
-      schedule,
-      memberId ? { ignoreLoanMemberId: memberId } : undefined
-    );
+    const availability = await getKindScheduleAvailability(id, schedule, options);
     return NextResponse.json({ ...availability, schedule });
   } catch (err) {
     const message = err instanceof Error ? err.message : "שגיאת שרת";

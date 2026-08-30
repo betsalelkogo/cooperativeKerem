@@ -34,6 +34,7 @@ import {
   TERMS_REQUIRED_CODE,
 } from "@/lib/membership";
 import { RESERVATION_HARD_LOCK_HOURS } from "@/lib/availability";
+import { findCachedKind, rememberKind } from "@/lib/client-catalog";
 
 type WindowAvailability = {
   availableUnits: number;
@@ -48,6 +49,7 @@ type WindowAvailability = {
     hardLockAtLabel: string;
     mustReturnByLabel: string;
   };
+  byHours?: Record<string, WindowAvailability>;
 };
 
 function initialPickup(searchParams: URLSearchParams): {
@@ -137,6 +139,9 @@ function ReserveToolForm() {
   });
   const [quantity, setQuantity] = useState(1);
   const [windowAvail, setWindowAvail] = useState<WindowAvailability | null>(null);
+  const [availByHours, setAvailByHours] = useState<Record<string, WindowAvailability> | null>(
+    null
+  );
   const [availLoading, setAvailLoading] = useState(false);
   const [viableHours, setViableHours] = useState<number[] | null>(null);
 
@@ -152,12 +157,20 @@ function ReserveToolForm() {
   }, [kind?.gemachDefaultLoanHours]);
 
   useEffect(() => {
+    const cached = findCachedKind(params.id);
+    if (cached) {
+      setKind(cached);
+      return;
+    }
     fetch(`/api/tools/${params.id}`)
       .then((res) => {
         if (!res.ok) throw new Error("הכלי לא נמצא");
         return res.json();
       })
-      .then(setKind)
+      .then((data: ToolKindWithAvailability) => {
+        rememberKind(data);
+        setKind(data);
+      })
       .catch((err) => setLoadError(err.message));
   }, [params.id]);
 
@@ -170,7 +183,7 @@ function ReserveToolForm() {
     }
   }, [isFixedHours, pickupDate, pickupTimeStart, loanHours]);
 
-  // Live window availability for the selected schedule (soft holds + loans).
+  // One availability request covers the selected window and all duration options.
   useEffect(() => {
     if (!kind || !pickupDate || !pickupTimeStart) return;
 
@@ -183,6 +196,7 @@ function ReserveToolForm() {
           pickupTimeStart,
         });
         if (isFixedHours) {
+          qs.set("hours", hourOptions.join(","));
           qs.set("loanDurationHours", String(loanHours));
         } else if (returnDate && returnTimeEnd) {
           qs.set("returnDate", returnDate);
@@ -199,10 +213,22 @@ function ReserveToolForm() {
         );
         if (!res.ok) throw new Error("שגיאה בבדיקת זמינות");
         const data = (await res.json()) as WindowAvailability;
-        setWindowAvail(data);
+        if (data.byHours) setAvailByHours(data.byHours);
+        else setAvailByHours(null);
+        const selected = data.byHours?.[String(loanHours)] ?? data;
+        setWindowAvail(selected);
         setQuantity((q) =>
-          data.availableUnits > 0 ? Math.min(q, data.availableUnits) : q
+          selected.availableUnits > 0 ? Math.min(q, selected.availableUnits) : q
         );
+        if (data.byHours) {
+          const okHours = hourOptions.filter(
+            (h) => (data.byHours?.[String(h)]?.availableUnits ?? 0) > 0
+          );
+          setViableHours(okHours);
+          setLoanHours((current) =>
+            okHours.length > 0 && !okHours.includes(current) ? okHours[0] : current
+          );
+        }
       } catch (err) {
         if ((err as { name?: string }).name === "AbortError") return;
         setWindowAvail(null);
@@ -220,55 +246,25 @@ function ReserveToolForm() {
     isFixedHours,
     pickupDate,
     pickupTimeStart,
-    loanHours,
     returnDate,
     returnTimeEnd,
+    hourOptions,
     getIdToken,
   ]);
 
-  // Which loan durations still have stock for the chosen start + quantity.
   useEffect(() => {
-    if (!kind || !isFixedHours || !pickupDate || !pickupTimeStart) {
-      setViableHours(null);
-      return;
-    }
-
-    const controller = new AbortController();
-    const timer = setTimeout(async () => {
-      const results = await Promise.all(
-        hourOptions.map(async (h) => {
-          const qs = new URLSearchParams({
-            pickupDate,
-            pickupTimeStart,
-            loanDurationHours: String(h),
-          });
-          try {
-            const token = await getIdToken();
-            const res = await authFetch(
-              `/api/tools/${encodeURIComponent(kind.catalogId)}/availability?${qs}`,
-              { token, signal: controller.signal }
-            );
-            if (!res.ok) return { h, ok: false };
-            const data = (await res.json()) as WindowAvailability;
-            return { h, ok: data.availableUnits >= quantity };
-          } catch {
-            return { h, ok: false };
-          }
-        })
-      );
-      if (controller.signal.aborted) return;
-      const okHours = results.filter((r) => r.ok).map((r) => r.h);
-      setViableHours(okHours);
-      setLoanHours((current) =>
-        okHours.length > 0 && !okHours.includes(current) ? okHours[0] : current
-      );
-    }, 300);
-
-    return () => {
-      controller.abort();
-      clearTimeout(timer);
-    };
-  }, [kind, isFixedHours, pickupDate, pickupTimeStart, quantity, hourOptions, getIdToken]);
+    if (!availByHours) return;
+    const selected = availByHours[String(loanHours)];
+    if (!selected) return;
+    setWindowAvail(selected);
+    setQuantity((q) =>
+      selected.availableUnits > 0 ? Math.min(q, selected.availableUnits) : q
+    );
+    const okHours = hourOptions.filter(
+      (h) => (availByHours[String(h)]?.availableUnits ?? 0) >= quantity
+    );
+    setViableHours(okHours);
+  }, [availByHours, loanHours, hourOptions, quantity]);
 
   function handlePickupStartChange(value: string) {
     setPickupTimeStart(value);

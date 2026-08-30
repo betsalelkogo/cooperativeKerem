@@ -24,7 +24,6 @@ import type {
   AccessCodesRecord,
   Reservation,
   Tool,
-  ToolKindStats,
   ToolWithAvailability,
   Transaction,
   DevicePot,
@@ -113,6 +112,7 @@ import {
   type ReservationWindow,
 } from "@/lib/availability";
 import { formatReservationDateTimeHe, reservationDateTime } from "@/lib/israel-time";
+import { computeFixedHoursReservation } from "@/lib/reservation-times";
 import {
   isReservationNoShowExpired,
   reservationPickupStart,
@@ -279,6 +279,125 @@ function buildActiveHolders(loans: Loan[], reservations: Reservation[]) {
   return { activeLoans, activeReservations, loanByTool, reservationByTool };
 }
 
+const ACTIVE_LOAN_STATUSES = ["active", "checkout_pending", "return_pending"] as const;
+const ACTIVE_RESERVATION_STATUSES = ["pending", "confirmed"] as const;
+
+const queryMemo = new Map<string, { at: number; value: Promise<unknown> }>();
+const QUERY_MEMO_MS = 120_000;
+const MAINTAIN_MEMO_MS = 45_000;
+const emptyHolders = () =>
+  buildActiveHolders([], []);
+
+function memoQuery<T>(key: string, fn: () => Promise<T>, ttlMs = QUERY_MEMO_MS): Promise<T> {
+  const now = Date.now();
+  const hit = queryMemo.get(key);
+  if (hit && now - hit.at < ttlMs) return hit.value as Promise<T>;
+  const value = fn().catch((err) => {
+    queryMemo.delete(key);
+    throw err;
+  });
+  queryMemo.set(key, { at: now, value });
+  return value;
+}
+
+function rememberQuery<T>(key: string, value: T) {
+  queryMemo.set(key, { at: Date.now(), value: Promise.resolve(value) });
+}
+
+function invalidateQueryMemo() {
+  queryMemo.clear();
+}
+
+async function getActiveLoans(): Promise<Loan[]> {
+  return memoQuery("activeLoans", async () => {
+    const snap = await getAdminDb()
+      .collection("loans")
+      .where("status", "in", [...ACTIVE_LOAN_STATUSES])
+      .get();
+    return snap.docs.map((d) => loanFromDoc(d.id, d.data())).filter(Boolean);
+  });
+}
+
+async function getActiveReservations(): Promise<Reservation[]> {
+  return memoQuery("activeReservations", async () => {
+    const snap = await getAdminDb()
+      .collection("reservations")
+      .where("status", "in", [...ACTIVE_RESERVATION_STATUSES])
+      .get();
+    return snap.docs.map((d) => reservationFromDoc(d.id, d.data())).filter(Boolean);
+  });
+}
+
+async function getHoldsForAvailability() {
+  const [loans, reservations] = await Promise.all([
+    getActiveLoans(),
+    getActiveReservations(),
+  ]);
+  return { loans, reservations, ...buildActiveHolders(loans, reservations) };
+}
+
+async function getToolsByIds(ids: string[]): Promise<Tool[]> {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (unique.length === 0) return [];
+  const db = getAdminDb();
+  const tools: Tool[] = [];
+  for (let i = 0; i < unique.length; i += 100) {
+    const chunk = unique.slice(i, i + 100);
+    const snaps = await db.getAll(...chunk.map((id) => db.collection("tools").doc(id)));
+    for (const snap of snaps) {
+      if (!snap.exists) continue;
+      const tool = toolFromDoc(snap.id, snap.data()!);
+      if (tool) tools.push(tool);
+    }
+  }
+  return tools;
+}
+
+async function getToolsForCatalogKey(catalogKey: string): Promise<Tool[]> {
+  return memoQuery(`toolsByKind:${catalogKey}`, async () => {
+    const db = getAdminDb();
+    const byKindSnap = await db.collection("tools").where("kindId", "==", catalogKey).get();
+    if (!byKindSnap.empty) {
+      return byKindSnap.docs
+        .map((doc) => toolFromDoc(doc.id, doc.data()))
+        .filter((tool): tool is Tool => Boolean(tool));
+    }
+
+    const byIdSnap = await db.collection("tools").doc(catalogKey).get();
+    if (!byIdSnap.exists) return [];
+    const tool = toolFromDoc(byIdSnap.id, byIdSnap.data()!);
+    if (!tool) return [];
+    const kindId = tool.kindId ?? tool.id;
+    if (kindId === catalogKey) return [tool];
+
+    const siblingSnap = await db.collection("tools").where("kindId", "==", kindId).get();
+    const byId = new Map<string, Tool>([[tool.id, tool]]);
+    for (const doc of siblingSnap.docs) {
+      const sibling = toolFromDoc(doc.id, doc.data());
+      if (sibling && sibling.gemachId === tool.gemachId) {
+        byId.set(sibling.id, sibling);
+      }
+    }
+    return [...byId.values()];
+  });
+}
+
+export async function activeLoanToolIdsForMember(memberId: string): Promise<string[]> {
+  const loans = await getActiveLoans();
+  return loans.filter((l) => l.memberId === memberId).flatMap((l) => loanToolIds(l));
+}
+
+async function maintainReservationState(): Promise<void> {
+  await memoQuery(
+    "maintainReservationState",
+    async () => {
+      await expireStaleNoShowReservations();
+      return null;
+    },
+    MAINTAIN_MEMO_MS
+  );
+}
+
 function availabilityForTool(
   tool: Tool,
   loanByTool: Map<string, Loan>,
@@ -392,6 +511,11 @@ function enrichToolsWithGemach(
 export async function getAllGemachim(options?: {
   includeInactive?: boolean;
 }): Promise<Gemach[]> {
+  const includeInactive = Boolean(options?.includeInactive);
+  return memoQuery(`gemachim:${includeInactive}`, () => loadAllGemachim(includeInactive));
+}
+
+async function loadAllGemachim(includeInactive: boolean): Promise<Gemach[]> {
   const snap = await getAdminDb().collection("gemachim").get();
   if (snap.empty) {
     return [
@@ -409,25 +533,40 @@ export async function getAllGemachim(options?: {
     ];
   }
   const all = snap.docs.map((d) => gemachFromDoc(d.id, d.data()));
-  return options?.includeInactive ? all : all.filter((g) => g.active);
+  for (const gemach of all) {
+    rememberQuery(`gemach:${gemach.id}`, gemach);
+  }
+  return includeInactive ? all : all.filter((g) => g.active);
 }
 
 export async function getGemachById(id: string): Promise<Gemach | null> {
-  const snap = await getAdminDb().collection("gemachim").doc(id).get();
-  if (!snap.exists) {
-    if (id === PLATFORM_GEMACH_ID) {
-      return {
-        id: PLATFORM_GEMACH_ID,
-        name: PLATFORM_GEMACH_DISPLAY_NAME,
-        slug: "kerem",
-        pricingMode: "loan_fee",
-        isPlatform: true,
-        active: true,
-      };
+  return memoQuery(`gemach:${id}`, async () => {
+    const cachedLists = ["gemachim:false", "gemachim:true"]
+      .map((key) => queryMemo.get(key))
+      .filter((hit): hit is { at: number; value: Promise<unknown> } => Boolean(hit));
+    for (const hit of cachedLists) {
+      if (Date.now() - hit.at >= QUERY_MEMO_MS) continue;
+      const list = (await hit.value) as Gemach[];
+      const found = list.find((g) => g.id === id);
+      if (found) return found;
     }
-    return null;
-  }
-  return gemachFromDoc(snap.id, snap.data()!);
+
+    const snap = await getAdminDb().collection("gemachim").doc(id).get();
+    if (!snap.exists) {
+      if (id === PLATFORM_GEMACH_ID) {
+        return {
+          id: PLATFORM_GEMACH_ID,
+          name: PLATFORM_GEMACH_DISPLAY_NAME,
+          slug: "kerem",
+          pricingMode: "loan_fee",
+          isPlatform: true,
+          active: true,
+        };
+      }
+      return null;
+    }
+    return gemachFromDoc(snap.id, snap.data()!);
+  });
 }
 
 export async function createGemachAndAssignAdmin(params: {
@@ -588,7 +727,7 @@ export async function closeGemachPermanently(gemachId: string): Promise<{
   const tools = (await getAllTools()).filter((t) => t.gemachId === gemachId);
   const toolIds = new Set(tools.map((t) => t.id));
 
-  const loans = await getAllLoans();
+  const loans = await getActiveLoans();
   const activeLoans = loans.filter(
     (l) =>
       toolIds.has(l.toolId) &&
@@ -603,7 +742,7 @@ export async function closeGemachPermanently(gemachId: string): Promise<{
   }
 
   const db = getAdminDb();
-  const reservations = await getAllReservations();
+  const reservations = await getActiveReservations();
   const reservationsToCancel = reservations.filter(
     (r) =>
       toolIds.has(r.toolId) &&
@@ -742,9 +881,8 @@ export async function updateToolKindDetails(params: {
     throw new Error(validationError);
   }
 
-  const tools = await getAllTools();
-  const units = tools.filter(
-    (t) => t.gemachId === params.gemachId && (t.kindId ?? t.id) === params.kindId
+  const units = (await getToolsForCatalogKey(params.kindId)).filter(
+    (t) => t.gemachId === params.gemachId
   );
   if (units.length === 0) {
     throw new Error("הכלי לא נמצא");
@@ -855,22 +993,16 @@ export { resolveReservationFee };
 // ─── Tools ───────────────────────────────────────────────────────────────────
 
 export async function getAllTools(): Promise<Tool[]> {
-  const snap = await getAdminDb().collection("tools").get();
-  return snap.docs.map((d) => toolFromDoc(d.id, d.data())).filter(Boolean);
+  return memoQuery("allTools", async () => {
+    const snap = await getAdminDb().collection("tools").get();
+    return snap.docs.map((d) => toolFromDoc(d.id, d.data())).filter(Boolean);
+  });
 }
 
 export async function getToolKindsWithAvailability(): Promise<ToolKindWithAvailability[]> {
-  await expireStaleNoShowReservations();
-  await syncReservationHardLocks();
-  const [tools, loans, reservations, gemachim] = await Promise.all([
-    getAllTools(),
-    getAllLoans(),
-    getAllReservations(),
-    getAllGemachim(),
-  ]);
-
+  const [tools, gemachim] = await Promise.all([getAllTools(), getAllGemachim()]);
   const gemachMap = new Map(gemachim.map((g) => [g.id, g]));
-  const { loanByTool, reservationByTool } = buildActiveHolders(loans, reservations);
+  const { loanByTool, reservationByTool } = emptyHolders();
   const groups = groupToolsByKind(tools);
 
   return [...groups.values()]
@@ -888,43 +1020,22 @@ export async function getToolKindsWithAvailability(): Promise<ToolKindWithAvaila
 export async function getToolKindWithAvailability(
   catalogKey: string
 ): Promise<ToolKindWithAvailability | null> {
-  await expireStaleNoShowReservations();
-  await syncReservationHardLocks();
-  const [tools, loans, reservations] = await Promise.all([
-    getAllTools(),
-    getAllLoans(),
-    getAllReservations(),
-  ]);
-  const units = resolveKindUnits(tools, catalogKey);
+  const units = await getToolsForCatalogKey(catalogKey);
   if (units.length === 0) return null;
 
   const gemach = await getGemachById(units[0].gemachId);
   if (!gemach?.active) return null;
-  const { loanByTool, reservationByTool } = buildActiveHolders(loans, reservations);
+  const { loanByTool, reservationByTool } = emptyHolders();
 
   return buildToolKindWithAvailability(units, loanByTool, reservationByTool, {
-    ...(gemach ? gemachCatalogFields(gemach, units[0]) : {}),
-    location: units[0].location ?? gemach?.location,
-    stats: computeToolKindStats(units, loans),
+    ...gemachCatalogFields(gemach, units[0]),
+    location: units[0].location ?? gemach.location,
+    stats: {
+      totalLoans: 0,
+      activeLoans: units.filter((u) => u.status === "on_loan").length,
+      uniqueBorrowers: 0,
+    },
   });
-}
-
-function computeToolKindStats(units: Tool[], loans: Loan[]): ToolKindStats {
-  const unitIds = new Set(units.map((u) => u.id));
-  const kindLoans = loans.filter(
-    (l) =>
-      unitIds.has(l.toolId) || (l.toolIds?.some((id) => unitIds.has(id)) ?? false)
-  );
-  const activeLoans = kindLoans.filter(
-    (l) => l.status === "active" || l.status === "return_pending" || l.status === "checkout_pending"
-  );
-  const borrowers = new Set(kindLoans.map((l) => l.memberId));
-  const unitsOf = (l: Loan) => l.quantity ?? l.toolIds?.length ?? 1;
-  return {
-    totalLoans: kindLoans.reduce((sum, l) => sum + unitsOf(l), 0),
-    activeLoans: activeLoans.reduce((sum, l) => sum + unitsOf(l), 0),
-    uniqueBorrowers: borrowers.size,
-  };
 }
 
 /**
@@ -936,11 +1047,12 @@ export async function syncReservationHardLocks(): Promise<{
   released: number;
 }> {
   const now = new Date();
-  const [tools, reservations] = await Promise.all([getAllTools(), getAllReservations()]);
-  const toolMap = new Map(tools.map((t) => [t.id, t]));
+  const reservations = await getActiveReservations();
   const active = reservations.filter(
     (r) => r.status === "pending" || r.status === "confirmed"
   );
+  const tools = await getToolsByIds(active.flatMap((r) => reservationToolIds(r)));
+  const toolMap = new Map(tools.map((t) => [t.id, t]));
 
   const hardLockedToolIds = new Set<string>();
   for (const r of active) {
@@ -990,15 +1102,12 @@ export async function pickAvailableToolUnits(
   schedule?: ReservationWindow,
   options?: AvailabilityOptions
 ): Promise<Tool[]> {
-  await expireStaleNoShowReservations();
-  await syncReservationHardLocks();
-  const [tools, loans, reservations] = await Promise.all([
-    getAllTools(),
-    getAllLoans(),
-    getAllReservations(),
+  await maintainReservationState();
+  const [units, holds] = await Promise.all([
+    getToolsForCatalogKey(catalogKey),
+    getHoldsForAvailability(),
   ]);
-  const units = resolveKindUnits(tools, catalogKey);
-  const { loanByTool, reservationByTool } = buildActiveHolders(loans, reservations);
+  const { loanByTool, reservationByTool } = holds;
 
   if (schedule) {
     return pickUnitsAvailableInWindow(
@@ -1023,15 +1132,14 @@ export async function pickAvailableToolUnit(
 }
 
 export async function getToolsWithAvailability(): Promise<ToolWithAvailability[]> {
-  const [tools, loans, reservations, gemachim] = await Promise.all([
+  const [tools, holds, gemachim] = await Promise.all([
     getAllTools(),
-    getAllLoans(),
-    getAllReservations(),
+    getHoldsForAvailability(),
     getAllGemachim(),
   ]);
 
   const gemachMap = new Map(gemachim.map((g) => [g.id, g]));
-  const { loanByTool, reservationByTool } = buildActiveHolders(loans, reservations);
+  const { loanByTool, reservationByTool } = holds;
 
   return tools
     .filter((tool) => gemachMap.has(tool.gemachId))
@@ -1056,13 +1164,12 @@ export async function getToolWithAvailability(id: string): Promise<ToolWithAvail
   const tool = await getToolById(id);
   if (!tool) return null;
 
-  const [loans, reservations, gemach] = await Promise.all([
-    getAllLoans(),
-    getAllReservations(),
+  const [holds, gemach] = await Promise.all([
+    getHoldsForAvailability(),
     getGemachById(tool.gemachId),
   ]);
   const gemachMap = new Map(gemach ? [[gemach.id, gemach]] : []);
-  const { loanByTool, reservationByTool } = buildActiveHolders(loans, reservations);
+  const { loanByTool, reservationByTool } = holds;
 
   const [enriched] = enrichToolsWithGemach([tool], gemachMap);
   return {
@@ -1090,6 +1197,7 @@ export async function getToolByQrCode(qrCode: string): Promise<Tool | null> {
 
 export async function updateToolStatus(id: string, status: Tool["status"]) {
   await getAdminDb().collection("tools").doc(id).update({ status });
+  invalidateQueryMemo();
 }
 
 /** Bulk status change for all idle units of a tool kind. */
@@ -1098,9 +1206,8 @@ export async function updateToolKindStatus(params: {
   kindId: string;
   status: "available" | "disabled" | "maintenance";
 }): Promise<{ updated: number }> {
-  const tools = await getAllTools();
-  const units = tools.filter(
-    (t) => t.gemachId === params.gemachId && (t.kindId ?? t.id) === params.kindId
+  const units = (await getToolsForCatalogKey(params.kindId)).filter(
+    (t) => t.gemachId === params.gemachId
   );
   if (units.length === 0) {
     throw new Error("הכלי לא נמצא");
@@ -1132,6 +1239,7 @@ export async function updateToolKindStatus(params: {
   }
 
   await batch.commit();
+  invalidateQueryMemo();
   return { updated };
 }
 
@@ -1314,11 +1422,13 @@ export async function createReservation(
       : {}),
     createdAt: now,
   });
+  invalidateQueryMemo();
   return { ...data, id, createdAt: new Date().toISOString() };
 }
 
 export async function updateReservationStatus(id: string, status: Reservation["status"]) {
   await getAdminDb().collection("reservations").doc(id).update({ status });
+  invalidateQueryMemo();
 }
 
 async function releaseReservedToolsForReservation(
@@ -1344,17 +1454,10 @@ async function releaseReservedToolsForReservation(
     });
 
     if (!hasOtherActive) {
-      const multiSnap = await db.collection("reservations").get();
-      hasOtherActive = multiSnap.docs.some((doc) => {
-        if (doc.id === reservationId) return false;
-        const data = doc.data();
-        const status = data.status as Reservation["status"];
-        if (status !== "pending" && status !== "confirmed") return false;
-        const ids = Array.isArray(data.toolIds)
-          ? (data.toolIds as string[])
-          : [data.toolId as string];
-        return ids.includes(toolId);
-      });
+      const active = await getActiveReservations();
+      hasOtherActive = active.some(
+        (r) => r.id !== reservationId && reservationToolIds(r).includes(toolId)
+      );
     }
 
     if (!hasOtherActive) {
@@ -1405,19 +1508,8 @@ export async function autoCancelNoShowReservation(
 /** Cancel all active reservations past the no-show pickup deadline. */
 export async function expireStaleNoShowReservations(): Promise<number> {
   const now = new Date();
-  const reservations = await getAllReservations();
-  const db = getAdminDb();
-  const loanSnap = await db.collection("loans").get();
-  const reservationIdsWithLoans = new Set(
-    loanSnap.docs
-      .map((d) => d.data().reservationId as string | undefined)
-      .filter((id): id is string => Boolean(id))
-  );
-
-  const expired = reservations.filter(
-    (r) =>
-      isReservationNoShowExpired(r, now) && !reservationIdsWithLoans.has(r.id)
-  );
+  const reservations = await getActiveReservations();
+  const expired = reservations.filter((r) => isReservationNoShowExpired(r, now));
 
   let count = 0;
   for (const r of expired) {
@@ -1425,7 +1517,6 @@ export async function expireStaleNoShowReservations(): Promise<number> {
     if (result?.status === "cancelled") count += 1;
   }
 
-  // Soft future holds: release premature locks; hard-lock when within 1h of pickup.
   await syncReservationHardLocks();
   return count;
 }
@@ -1588,7 +1679,6 @@ export async function getAllReservations(): Promise<Reservation[]> {
 }
 
 export async function getReservationsByMember(memberId: string): Promise<Reservation[]> {
-  await expireStaleNoShowReservations();
   const snap = await getAdminDb()
     .collection("reservations")
     .where("memberId", "==", memberId)
@@ -1839,8 +1929,8 @@ export async function getAdminDashboard(options?: {
   const [allTools, loans, reservations, gemachim, scopedGemach, openTickets, unpaidLateFees] =
     await Promise.all([
     getAllTools(),
-    getAllLoans(),
-    getAllReservations(),
+    getActiveLoans(),
+    getActiveReservations(),
     options?.includeGemachim ? getAllGemachim({ includeInactive: true }) : Promise.resolve([]),
     gemachId ? getGemachById(gemachId) : Promise.resolve(null),
     listMaintenanceTickets({ status: "open" }),
@@ -2072,11 +2162,17 @@ export async function getMemberHistory(memberId: string): Promise<AdminMemberHis
   const member = await getMemberById(memberId);
   if (!member) return null;
 
-  const [loans, reservations, allTools] = await Promise.all([
+  const [loans, reservations] = await Promise.all([
     getLoansByMember(memberId),
     getReservationsByMember(memberId),
-    getAllTools(),
   ]);
+  const historyToolIds = [
+    ...new Set([
+      ...loans.flatMap((l) => loanToolIds(l)),
+      ...reservations.flatMap((r) => reservationToolIds(r)),
+    ]),
+  ];
+  const allTools = await getToolsByIds(historyToolIds);
   const toolMap = new Map(allTools.map((t) => [t.id, t]));
 
   const sortedLoans = [...loans].sort(
@@ -2792,13 +2888,11 @@ async function claimToolsForCheckout(reservation: Reservation): Promise<string[]
     returnTimeEnd: reservation.returnTimeEnd,
   };
 
-  const [tools, loans, reservations] = await Promise.all([
-    getAllTools(),
-    getAllLoans(),
-    getAllReservations(),
+  const [units, holds] = await Promise.all([
+    getToolsForCatalogKey(catalogKey),
+    getHoldsForAvailability(),
   ]);
-  const units = resolveKindUnits(tools, catalogKey);
-  const { loanByTool, reservationByTool } = buildActiveHolders(loans, reservations);
+  const { loanByTool, reservationByTool } = holds;
 
   const claimed = pickUnitsAvailableInWindow(
     units,
@@ -3311,19 +3405,21 @@ export async function getPotsOverview() {
 // ─── PayBox settings ─────────────────────────────────────────────────────────
 
 export async function getPayboxSettings(): Promise<PayboxSettings> {
-  const snap = await getAdminDb().collection("settings").doc("paybox").get();
-  if (!snap.exists) return getDefaultPayboxSettings();
+  return memoQuery("payboxSettings", async () => {
+    const snap = await getAdminDb().collection("settings").doc("paybox").get();
+    if (!snap.exists) return getDefaultPayboxSettings();
 
-  const data = snap.data()!;
-  const defaults = getDefaultPayboxSettings();
-  return {
-    enabled: (data.enabled as boolean) ?? defaults.enabled,
-    operationsGroupUrl:
-      (data.operationsGroupUrl as string) || defaults.operationsGroupUrl,
-    deviceGroupUrl: (data.deviceGroupUrl as string) || defaults.deviceGroupUrl,
-    groupName: (data.groupName as string) || undefined,
-    growPageCode: (data.growPageCode as string) || defaults.growPageCode,
-  };
+    const data = snap.data()!;
+    const defaults = getDefaultPayboxSettings();
+    return {
+      enabled: (data.enabled as boolean) ?? defaults.enabled,
+      operationsGroupUrl:
+        (data.operationsGroupUrl as string) || defaults.operationsGroupUrl,
+      deviceGroupUrl: (data.deviceGroupUrl as string) || defaults.deviceGroupUrl,
+      groupName: (data.groupName as string) || undefined,
+      growPageCode: (data.growPageCode as string) || defaults.growPageCode,
+    };
+  });
 }
 
 const ACCESS_CODES_DOC = "access-codes";
@@ -3339,16 +3435,18 @@ function emptyAccessCodes(): AccessCodesRecord {
 }
 
 export async function getAccessCodes(): Promise<AccessCodesRecord> {
-  const snap = await getAdminDb().collection("settings").doc(ACCESS_CODES_DOC).get();
-  if (!snap.exists) return emptyAccessCodes();
-  const data = snap.data() ?? {};
-  return {
-    caravanCode: typeof data.caravanCode === "string" ? data.caravanCode : "",
-    caravanNote: typeof data.caravanNote === "string" ? data.caravanNote : "",
-    clubRoomCode: typeof data.clubRoomCode === "string" ? data.clubRoomCode : "",
-    clubRoomNote: typeof data.clubRoomNote === "string" ? data.clubRoomNote : "",
-    clubRoomUpdatedAt: data.clubRoomUpdatedAt ? tsToIso(data.clubRoomUpdatedAt) : null,
-  };
+  return memoQuery("accessCodes", async () => {
+    const snap = await getAdminDb().collection("settings").doc(ACCESS_CODES_DOC).get();
+    if (!snap.exists) return emptyAccessCodes();
+    const data = snap.data() ?? {};
+    return {
+      caravanCode: typeof data.caravanCode === "string" ? data.caravanCode : "",
+      caravanNote: typeof data.caravanNote === "string" ? data.caravanNote : "",
+      clubRoomCode: typeof data.clubRoomCode === "string" ? data.clubRoomCode : "",
+      clubRoomNote: typeof data.clubRoomNote === "string" ? data.clubRoomNote : "",
+      clubRoomUpdatedAt: data.clubRoomUpdatedAt ? tsToIso(data.clubRoomUpdatedAt) : null,
+    };
+  });
 }
 
 export async function updateAccessCodes(params: {
@@ -3371,6 +3469,7 @@ export async function updateAccessCodes(params: {
     payload.clubRoomUpdatedAt = FieldValue.serverTimestamp();
   }
   await ref.set(payload, { merge: true });
+  invalidateQueryMemo();
   return getAccessCodes();
 }
 
@@ -3875,8 +3974,8 @@ export async function getBoardDashboardData(): Promise<BoardDashboardData> {
   const [tools, loans, reservations, disputes, tickets, lateFees, opsPot, devicePots, payouts] =
     await Promise.all([
       getAllTools(),
-      getAllLoans(),
-      getAllReservations(),
+      getActiveLoans(),
+      getActiveReservations(),
       getAllDisputes(),
       listMaintenanceTickets(),
       listLateReturnFees(),
@@ -3979,21 +4078,13 @@ export type KindScheduleAvailability = {
   };
 };
 
-/** Window availability + next blocking hold for the reserve UI. */
-export async function getKindScheduleAvailability(
-  catalogKey: string,
+function computeKindScheduleAvailability(
+  units: Tool[],
+  loanByTool: Map<string, Loan>,
+  reservationByTool: ReservationsByTool,
   schedule: ReservationWindow,
   options?: Pick<AvailabilityOptions, "ignoreLoanMemberId">
-): Promise<KindScheduleAvailability> {
-  await syncReservationHardLocks();
-  const [tools, loans, reservations] = await Promise.all([
-    getAllTools(),
-    getAllLoans(),
-    getAllReservations(),
-  ]);
-  const units = resolveKindUnits(tools, catalogKey);
-  const { loanByTool, reservationByTool } = buildActiveHolders(loans, reservations);
-
+): KindScheduleAvailability {
   const availableUnits = countUnitsAvailableInWindow(
     units,
     schedule,
@@ -4038,6 +4129,58 @@ export async function getKindScheduleAvailability(
     hardLockHours: RESERVATION_HARD_LOCK_HOURS,
     nextHold,
   };
+}
+
+/** Window availability + next blocking hold for the reserve UI. */
+export async function getKindScheduleAvailability(
+  catalogKey: string,
+  schedule: ReservationWindow,
+  options?: Pick<AvailabilityOptions, "ignoreLoanMemberId">
+): Promise<KindScheduleAvailability> {
+  const [units, holds] = await Promise.all([
+    getToolsForCatalogKey(catalogKey),
+    getHoldsForAvailability(),
+  ]);
+  return computeKindScheduleAvailability(
+    units,
+    holds.loanByTool,
+    holds.reservationByTool,
+    schedule,
+    options
+  );
+}
+
+/** One Firestore load, many hour windows — used by the reserve form. */
+export async function getKindScheduleAvailabilityForHours(
+  catalogKey: string,
+  pickupDate: string,
+  pickupTimeStart: string,
+  hours: number[],
+  options?: Pick<AvailabilityOptions, "ignoreLoanMemberId">
+): Promise<{ hours: number; availability: KindScheduleAvailability }[]> {
+  const [units, holds] = await Promise.all([
+    getToolsForCatalogKey(catalogKey),
+    getHoldsForAvailability(),
+  ]);
+  return hours.map((h) => {
+    const fixed = computeFixedHoursReservation(pickupDate, pickupTimeStart, h);
+    const schedule: ReservationWindow = {
+      pickupDate: fixed.pickupDate,
+      pickupTimeStart: fixed.pickupTimeStart,
+      returnDate: fixed.returnDate,
+      returnTimeEnd: fixed.returnTimeEnd,
+    };
+    return {
+      hours: h,
+      availability: computeKindScheduleAvailability(
+        units,
+        holds.loanByTool,
+        holds.reservationByTool,
+        schedule,
+        options
+      ),
+    };
+  });
 }
 
 export { getAdminDb } from "@/lib/firebase/admin-app";
