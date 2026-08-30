@@ -235,7 +235,7 @@ export default function CheckoutPage() {
       {step === "done" && (
         <Card className="border-kerem-200 bg-kerem-50 text-center">
           <CardBody className="py-10">
-            <span className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-kerem-700 text-3xl text-white shadow-lg">
+            <span className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-kerem-700 text-3xl text-white">
               ✓
             </span>
             <p className="text-xl font-bold text-kerem-900">הכלי שוחרר!</p>

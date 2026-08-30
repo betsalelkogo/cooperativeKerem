@@ -76,6 +76,8 @@ export function InstantLoanButton({
           data.code === PEER_DEBT_REQUIRED_CODE
         ) {
           setGateCode(data.code);
+          setLoading(false);
+          return;
         }
         throw new Error(data.error ?? "לא ניתן להתחיל השאלה מיידית");
       }
@@ -89,9 +91,9 @@ export function InstantLoanButton({
   function gateBanner() {
     if (!gateCode) return null;
     if (gateCode === PEER_DEBT_REQUIRED_CODE) {
-      return <PeerDebtBanner className="mt-2 w-full" />;
+      return <PeerDebtBanner />;
     }
-    return <JoinMembershipBanner reason={gateCode} className="mt-2 w-full" />;
+    return <JoinMembershipBanner reason={gateCode} />;
   }
 
   // ── Quantity chooser (shown after clicking when more than one unit is free) ──
@@ -144,7 +146,7 @@ export function InstantLoanButton({
             disabled={loading}
             className="flex-1 rounded-xl bg-kerem-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-kerem-800 disabled:opacity-60"
           >
-            {loading ? "מתחיל…" : `⚡ קח ${quantity} ועבור לתשלום`}
+            {loading ? "מתחיל…" : `קח ${quantity} ועבור לתשלום`}
           </button>
           <button
             type="button"
@@ -158,7 +160,9 @@ export function InstantLoanButton({
             ביטול
           </button>
         </div>
-        {error && <p className="text-xs font-medium text-red-700">{error}</p>}
+        {error && !gateCode && (
+          <p className="text-xs font-medium text-red-700">{error}</p>
+        )}
         {gateBanner()}
       </div>
     );
@@ -166,34 +170,36 @@ export function InstantLoanButton({
 
   if (compact) {
     return (
-      <>
+      <div className="w-full min-w-0 space-y-2">
         <button
           type="button"
           onClick={handleTrigger}
           disabled={loading}
-          className="rounded-xl border border-kerem-300 bg-white px-3 py-2 text-sm font-semibold text-kerem-800 shadow-sm transition hover:bg-kerem-50 disabled:opacity-60"
+          className="rounded-xl border border-kerem-300 bg-white px-3 py-2 text-sm font-semibold text-kerem-800 transition hover:bg-kerem-50 disabled:opacity-60"
         >
-          {loading ? "מתחיל…" : "⚡ מיידית"}
+          {loading ? "מתחיל…" : "מיידית"}
         </button>
-        {error && (
-          <p className="w-full text-right text-xs font-medium text-red-700">{error}</p>
+        {error && !gateCode && (
+          <p className="break-words text-right text-xs font-medium text-red-700">{error}</p>
         )}
         {gateBanner()}
-      </>
+      </div>
     );
   }
 
   return (
-    <div className="flex-1 sm:flex-none">
+    <div className="w-full min-w-0 space-y-3">
       <button
         type="button"
         onClick={handleTrigger}
         disabled={loading}
-        className="inline-flex w-full items-center justify-center rounded-xl border border-kerem-300 bg-white py-3.5 text-base font-bold text-kerem-800 shadow-sm transition hover:bg-kerem-50 disabled:opacity-60 sm:px-8"
+        className="inline-flex w-full items-center justify-center rounded-xl border border-kerem-300 bg-white py-3.5 text-base font-bold text-kerem-800 transition hover:bg-kerem-50 disabled:opacity-60 sm:w-auto sm:px-8"
       >
-        {loading ? "מתחיל…" : "⚡ השאלה מיידית"}
+        {loading ? "מתחיל…" : "השאלה מיידית"}
       </button>
-      {error && <p className="mt-2 text-sm font-medium text-red-700">{error}</p>}
+      {error && !gateCode && (
+        <p className="break-words text-sm font-medium leading-relaxed text-red-700">{error}</p>
+      )}
       {gateBanner()}
     </div>
   );

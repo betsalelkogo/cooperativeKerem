@@ -10,6 +10,7 @@ import { isPaidMember } from "@/lib/membership";
 export function CaravanCodeBanner() {
   const { getIdToken, member } = useAuth();
   const [code, setCode] = useState<string | null>(null);
+  const [revealed, setRevealed] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -31,17 +32,33 @@ export function CaravanCodeBanner() {
 
   if (!code) return null;
 
+  const canSeeClub = Boolean(member && (isPaidMember(member) || isBoardMember(member)));
+
   return (
-    <div className="mb-6 rounded-2xl border border-kerem-200 bg-kerem-50/70 px-4 py-3">
-      <p className="text-xs font-bold text-kerem-800">קוד קרוואן</p>
-      <p className="mt-1 font-mono text-2xl font-bold tracking-[0.3em] text-kerem-950" dir="ltr">
-        {code}
-      </p>
-      {member && (isPaidMember(member) || isBoardMember(member)) && (
-        <Link href="/access" className="mt-2 inline-block text-sm font-semibold text-kerem-800 underline">
-          קוד חדר המועדון →
-        </Link>
-      )}
+    <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--border)] bg-white px-4 py-3">
+      <div>
+        <p className="text-xs font-bold text-[var(--muted)]">קוד קרוואן</p>
+        <p className="mt-0.5 font-mono text-lg font-bold tracking-[0.28em] text-stone-900" dir="ltr">
+          {revealed ? code : "••••••"}
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setRevealed((v) => !v)}
+          className="rounded-xl border border-[var(--border)] bg-warm-50 px-3 py-2 text-sm font-semibold text-stone-700 transition hover:bg-warm-100"
+        >
+          {revealed ? "הסתרה" : "הצגה"}
+        </button>
+        {canSeeClub && (
+          <Link
+            href="/access"
+            className="text-sm font-semibold text-kerem-800 underline-offset-2 hover:underline"
+          >
+            חדר המועדון
+          </Link>
+        )}
+      </div>
     </div>
   );
 }

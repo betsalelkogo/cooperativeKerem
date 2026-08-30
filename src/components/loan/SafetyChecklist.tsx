@@ -21,10 +21,10 @@ export function SafetyChecklist({ rules, onComplete }: SafetyChecklistProps) {
   }
 
   return (
-    <Card className="overflow-hidden border-amber-200/80">
-      <div className="bg-gradient-to-l from-amber-500 to-orange-500 px-6 py-4">
-        <h3 className="text-lg font-bold text-white">⚠️ רשימת בטיחות</h3>
-        <p className="mt-0.5 text-sm text-amber-100">
+    <Card className="overflow-hidden">
+      <div className="bg-kerem-800 px-6 py-4">
+        <h3 className="text-lg font-bold text-white">רשימת בטיחות</h3>
+        <p className="mt-0.5 text-sm text-kerem-100">
           יש לאשר את כל הכללים לפני לקיחת הכלי
         </p>
       </div>

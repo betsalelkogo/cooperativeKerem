@@ -2,7 +2,7 @@ import { cn } from "@/lib/cn";
 
 const variants = {
   primary:
-    "bg-kerem-700 text-white shadow-md shadow-kerem-700/20 hover:bg-kerem-800 hover:shadow-lg hover:shadow-kerem-700/25 active:scale-[0.98]",
+    "bg-kerem-700 text-white hover:bg-kerem-800 active:scale-[0.98]",
   secondary:
     "border border-[var(--border)] bg-white text-stone-700 shadow-sm hover:bg-warm-50 hover:border-stone-300 active:scale-[0.98]",
   ghost: "text-kerem-700 hover:bg-kerem-50 active:scale-[0.98]",

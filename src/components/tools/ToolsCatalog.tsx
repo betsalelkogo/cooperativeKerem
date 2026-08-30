@@ -57,7 +57,7 @@ export function ToolsCatalog({ kinds, gemachim = [] }: ToolsCatalogProps) {
       )}
 
       <div className="mb-6 flex justify-end">
-        <div className="rounded-xl bg-kerem-50 px-4 py-2 text-center ring-1 ring-kerem-200">
+        <div className="rounded-xl border border-[var(--border)] bg-white px-4 py-2 text-center">
           <p className="text-2xl font-bold text-kerem-800">{availableUnits}</p>
           <p className="text-xs font-medium text-kerem-600">יחידות זמינות</p>
         </div>

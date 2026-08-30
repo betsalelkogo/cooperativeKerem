@@ -22,8 +22,8 @@ export function QrScanner({ onScan }: QrScannerProps) {
     <Card>
       <CardBody>
         <div className="mb-4 flex items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 text-xl">
-            📱
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-warm-100 text-sm font-bold text-stone-700">
+            QR
           </span>
           <div>
             <h3 className="font-bold text-stone-900">סריקת קוד QR</h3>

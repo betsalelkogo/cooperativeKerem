@@ -30,10 +30,10 @@ export function ItemChecklist({
   }
 
   return (
-    <Card className="overflow-hidden border-sky-200/80">
-      <div className="bg-gradient-to-l from-sky-600 to-blue-600 px-6 py-4">
+    <Card className="overflow-hidden">
+      <div className="bg-kerem-800 px-6 py-4">
         <h3 className="text-lg font-bold text-white">{title}</h3>
-        <p className="mt-0.5 text-sm text-sky-100">{description}</p>
+        <p className="mt-0.5 text-sm text-kerem-100">{description}</p>
       </div>
       <CardBody>
         <ul className="space-y-3">

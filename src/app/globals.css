@@ -1,18 +1,23 @@
 @import "tailwindcss";
 
 @theme {
-  --color-kerem-50: #f0f7f3;
-  --color-kerem-100: #dceee3;
-  --color-kerem-200: #bbddc8;
-  --color-kerem-500: #2d8a5e;
-  --color-kerem-600: #1f6b47;
-  --color-kerem-700: #185538;
-  --color-kerem-800: #13442d;
-  --color-kerem-900: #0f3624;
+  --color-kerem-50: #f3f4f6;
+  --color-kerem-100: #e4e7ed;
+  --color-kerem-200: #c5cbd6;
+  --color-kerem-300: #8f99ad;
+  --color-kerem-400: #5a6780;
+  --color-kerem-500: #3a4860;
+  --color-kerem-600: #2a3650;
+  --color-kerem-700: #1e2b42;
+  --color-kerem-800: #162033;
+  --color-kerem-900: #0e1524;
   --color-warm-50: #faf8f5;
   --color-warm-100: #f3ede4;
   --color-warm-200: #e8ddd0;
-  --color-accent: #c8956c;
+  --color-accent: #c46a3a;
+  --color-accent-50: #faf1ea;
+  --color-accent-100: #f3d9c8;
+  --color-accent-800: #8a3d1f;
   --font-sans: var(--font-heebo), system-ui, sans-serif;
 }
 
@@ -22,9 +27,9 @@
   --card: #ffffff;
   --border: #e8e2d9;
   --muted: #6b6560;
-  --primary: #185538;
-  --primary-hover: #13442d;
-  --ring: #2d8a5e;
+  --primary: #1e2b42;
+  --primary-hover: #162033;
+  --ring: #3a4860;
 }
 
 body {
@@ -32,8 +37,8 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans);
   background-image:
-    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(45, 138, 94, 0.08), transparent),
-    radial-gradient(ellipse 60% 40% at 100% 100%, rgba(200, 149, 108, 0.06), transparent);
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(30, 43, 66, 0.07), transparent),
+    radial-gradient(ellipse 60% 40% at 100% 100%, rgba(196, 106, 58, 0.07), transparent);
   background-attachment: fixed;
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior-y: none;
@@ -56,8 +61,8 @@ textarea {
 }
 
 ::selection {
-  background: #bbddc8;
-  color: #0f3624;
+  background: #c5cbd6;
+  color: #0e1524;
 }
 
 input[type="date"] {

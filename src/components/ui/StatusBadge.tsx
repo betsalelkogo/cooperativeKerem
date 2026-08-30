@@ -4,9 +4,9 @@ import { cn } from "@/lib/cn";
 
 const statusStyles: Record<ToolStatus, string> = {
   available: "bg-kerem-100 text-kerem-800 ring-kerem-200",
-  reserved: "bg-amber-100 text-amber-800 ring-amber-200",
-  on_loan: "bg-sky-100 text-sky-800 ring-sky-200",
-  maintenance: "bg-orange-100 text-orange-800 ring-orange-200",
+  reserved: "bg-accent-50 text-accent-800 ring-accent-100",
+  on_loan: "bg-warm-100 text-stone-700 ring-warm-200",
+  maintenance: "bg-accent-100 text-accent-800 ring-accent-100",
   disabled: "bg-red-100 text-red-800 ring-red-200",
 };
 

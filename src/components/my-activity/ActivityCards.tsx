@@ -53,11 +53,11 @@ export function ReservationCard({
   const checkoutGate = canStartCheckout(reservation, tool);
 
   return (
-    <Card className="border-amber-200 bg-amber-50/40">
+    <Card>
       <CardBody className="flex flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-2xl">
-            📅
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-accent-50 text-sm font-bold text-accent-800">
+            שריון
           </span>
           <div>
             <p className="font-bold text-stone-900">{tool?.name ?? reservation.toolId}</p>
@@ -149,11 +149,11 @@ export function LoanCard({ loan, tool, getToken, onPhotoAdded }: LoanCardProps) 
   }
 
   return (
-    <Card className="transition hover:shadow-md">
+    <Card>
       <CardBody className="flex flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-warm-100 text-2xl">
-            🔧
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-kerem-100 text-sm font-bold text-kerem-800">
+            השאלה
           </span>
           <div>
             <p className="font-bold text-stone-900">{tool?.name ?? loan.toolId}</p>
@@ -277,13 +277,13 @@ export function LoanGroupCard({ items, getToken, onPhotoAdded }: LoanGroupCardPr
   }
 
   return (
-    <Card className="transition hover:shadow-md">
+    <Card>
       <CardBody className="flex flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
-          <span className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-warm-100 text-2xl">
-            🔧
+          <span className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-kerem-100 text-sm font-bold text-kerem-800">
+            השאלה
             {count > 1 && (
-              <span className="absolute -left-2 -top-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-kerem-700 px-1.5 text-xs font-bold text-white shadow">
+              <span className="absolute -left-2 -top-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-kerem-700 px-1.5 text-xs font-bold text-white">
                 ×{count}
               </span>
             )}

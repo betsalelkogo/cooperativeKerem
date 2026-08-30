@@ -81,10 +81,10 @@ export function JoinMembershipBanner({
 
   return (
     <div
-      className={`rounded-xl border border-kerem-200 bg-kerem-50/70 p-4 ${className}`}
+      className={`min-w-0 rounded-xl border border-kerem-200 bg-kerem-50/70 p-4 ${className}`}
     >
       <p className="text-sm font-bold text-stone-900">{title}</p>
-      <p className="mt-1 text-xs leading-relaxed text-[var(--muted)]">
+      <p className="mt-1 break-words text-xs leading-relaxed text-[var(--muted)]">
         אפשר לגלוש ולהשתמש בגמ״חים שותפים בלי תשלום. להשאלת כלי מהקואופרטיב — אשרו את
         התקנון ושלמו דמי הצטרפות (מ־₪{MEMBERSHIP_JOIN_MIN_NIS}). לאחר התשלום מנהל יאשר
         את החברות.
@@ -100,7 +100,7 @@ export function JoinMembershipBanner({
               תקנון
             </Link>
             {termsOk ? (
-              <span className="rounded-lg bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-800">
+              <span className="rounded-lg bg-kerem-100 px-2 py-1 text-xs font-semibold text-kerem-800">
                 תקנון אושר
               </span>
             ) : (

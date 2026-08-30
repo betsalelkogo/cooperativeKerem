@@ -48,7 +48,7 @@ function LoginContent() {
   return (
     <div className="mx-auto flex min-h-[70vh] max-w-md flex-col justify-center px-2">
       <div className="mb-8 text-center">
-        <SiteLogo size="lg" priority className="mx-auto mb-4 shadow-lg shadow-stone-900/10" />
+        <SiteLogo size="lg" priority className="mx-auto mb-4" />
         <h1 className="text-3xl font-bold text-stone-900">כרם רעים</h1>
         <p className="mt-2 text-lg font-medium text-kerem-800">קואופרטיב הציוד</p>
         <p className="mt-3 text-sm text-[var(--muted)]">
@@ -56,7 +56,7 @@ function LoginContent() {
         </p>
       </div>
 
-      <Card className="shadow-lg shadow-stone-900/5">
+      <Card>
         <CardBody className="py-8">
           <GoogleSignInButton label="התחברות עם Google" />
           <p className="mt-6 text-center text-xs leading-relaxed text-[var(--muted)]">

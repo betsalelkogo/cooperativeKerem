@@ -116,10 +116,9 @@ export function AuthNav() {
           {user && member && (
             <Link
               href="/account"
-              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-800 transition hover:bg-emerald-100"
+              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl border border-kerem-200 bg-kerem-50 px-3 py-2 text-sm font-bold text-kerem-800 transition hover:bg-kerem-100"
               title="העו״ש שלי — היתרה"
             >
-              <span aria-hidden>💰</span>
               {formatCredits(member.creditBalance ?? 0)}
             </Link>
           )}
@@ -136,7 +135,7 @@ export function AuthNav() {
           ) : configured ? (
             <Link
               href="/login"
-              className="min-h-[44px] rounded-xl bg-kerem-700 px-4 py-2.5 text-sm font-semibold text-white shadow-md active:bg-kerem-800"
+              className="min-h-[44px] rounded-xl bg-kerem-700 px-4 py-2.5 text-sm font-semibold text-white active:bg-kerem-800"
             >
               התחברות
             </Link>

@@ -1,88 +1,63 @@
 import Link from "next/link";
 import type { ToolKindWithAvailability } from "@/lib/types";
-import { inventoryLabel, isKindReservable } from "@/lib/tool-kinds";
+import { inventoryLabel } from "@/lib/tool-kinds";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Card, CardBody, CardFooter } from "@/components/ui/Card";
-import { InstantLoanButton } from "@/components/tools/InstantLoanButton";
+import { ToolBorrowActions } from "@/components/tools/ToolBorrowActions";
 import { ExpandableText } from "@/components/ui/ExpandableText";
 import { cn } from "@/lib/cn";
 
-const categoryMeta: Record<string, { icon: string; gradient: string }> = {
-  "כלי עבודה חשמליים": { icon: "⚡", gradient: "from-amber-400 to-orange-500" },
-  ניקוי: { icon: "💧", gradient: "from-sky-400 to-blue-500" },
-  גישה: { icon: "🪜", gradient: "from-violet-400 to-purple-500" },
-  "תינוקות וילדים": { icon: "👶", gradient: "from-pink-400 to-rose-500" },
-  "ריהוט ואירועים": { icon: "🪑", gradient: "from-stone-400 to-stone-600" },
-  "כיסאות ושולחנות": { icon: "🪑", gradient: "from-amber-500 to-yellow-600" },
-  גינון: { icon: "🌿", gradient: "from-green-400 to-emerald-600" },
-};
-
-const defaultMeta = { icon: "🔧", gradient: "from-kerem-400 to-kerem-600" };
-
 export function ToolCard({ kind }: { kind: ToolKindWithAvailability }) {
-  const meta = categoryMeta[kind.category] ?? defaultMeta;
   const priceLabel = kind.priceLabel ?? "—";
   const stockLabel = inventoryLabel(kind);
 
   return (
-    <Card className="group overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:shadow-stone-900/10">
+    <Card className="group overflow-hidden transition-colors hover:border-kerem-200">
       {kind.imageUrl ? (
         <div className="relative h-36 overflow-hidden bg-warm-100">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={kind.imageUrl}
             alt={kind.name}
-            className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+            className="h-full w-full object-cover"
           />
         </div>
       ) : (
-        <div className={cn("h-1.5 bg-gradient-to-l", meta.gradient)} />
+        <div className="h-1 bg-kerem-600" />
       )}
       <CardBody className="pb-4">
         <div className="mb-4 flex items-start justify-between gap-3">
-          <div className="flex items-start gap-3">
-            {!kind.imageUrl && (
-              <span
-                className={cn(
-                  "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-xl text-white shadow-md",
-                  meta.gradient
-                )}
-              >
-                {meta.icon}
-              </span>
-            )}
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
-                  {kind.category}
-                </p>
-                {kind.gemachName && (
-                  <span
-                    className={cn(
-                      "rounded-full px-2 py-0.5 text-[10px] font-bold ring-1 ring-inset",
-                      kind.isPartnerGemach
-                        ? "bg-amber-100 text-amber-800 ring-amber-200"
-                        : "bg-kerem-100 text-kerem-800 ring-kerem-200"
-                    )}
-                  >
-                    {kind.isPartnerGemach ? `★ ${kind.gemachName}` : kind.gemachName}
-                  </span>
-                )}
-                {kind.totalUnits > 1 && (
-                  <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold text-sky-800 ring-1 ring-inset ring-sky-200">
-                    {kind.totalUnits} יחידות
-                  </span>
-                )}
-              </div>
-              <h3 className="text-lg font-bold text-stone-900">
-                <Link
-                  href={`/tools/${kind.catalogId}`}
-                  className="hover:text-kerem-800 hover:underline"
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+                {kind.category}
+              </p>
+              {kind.gemachName && (
+                <span
+                  className={cn(
+                    "rounded-full px-2 py-0.5 text-[10px] font-bold ring-1 ring-inset",
+                    kind.isPartnerGemach
+                      ? "bg-accent-50 text-accent-800 ring-accent-100"
+                      : "bg-kerem-100 text-kerem-800 ring-kerem-200"
+                  )}
                 >
-                  {kind.name}
-                </Link>
-              </h3>
+                    {kind.gemachName}
+                </span>
+              )}
+              {kind.totalUnits > 1 && (
+                <span className="rounded-full bg-kerem-50 px-2 py-0.5 text-[10px] font-bold text-kerem-800 ring-1 ring-inset ring-kerem-200">
+                  {kind.totalUnits} יחידות
+                </span>
+              )}
             </div>
+            <h3 className="mt-1 text-lg font-bold text-stone-900">
+              <Link
+                href={`/tools/${kind.catalogId}`}
+                className="hover:text-kerem-800 hover:underline"
+              >
+                {kind.name}
+              </Link>
+            </h3>
           </div>
           <StatusBadge status={kind.status} />
         </div>
@@ -98,23 +73,17 @@ export function ToolCard({ kind }: { kind: ToolKindWithAvailability }) {
             rel="noopener noreferrer"
             className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-kerem-700 transition hover:text-kerem-800 hover:underline"
           >
-            <span aria-hidden>▶</span>
             סרטון הדרכה
           </a>
         )}
         {kind.location && (
-          <p className="mt-2 flex items-start gap-1.5 text-xs text-stone-600">
-            <span className="shrink-0" aria-hidden>
-              📍
-            </span>
-            <span>{kind.location}</span>
-          </p>
+          <p className="mt-2 text-xs text-stone-600">{kind.location}</p>
         )}
         {stockLabel && (
-          <p className="mt-2 text-xs font-semibold text-sky-700">{stockLabel}</p>
+          <p className="mt-2 text-xs font-semibold text-kerem-800">{stockLabel}</p>
         )}
       </CardBody>
-      <CardFooter className="flex items-center justify-between bg-warm-50/50">
+      <CardFooter className="flex flex-col gap-3 bg-warm-50/60 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-xs text-[var(--muted)]">
             {kind.gemachPricingMode === "free" ? "מחיר" : "דמי השאלה"}
@@ -122,49 +91,13 @@ export function ToolCard({ kind }: { kind: ToolKindWithAvailability }) {
           <p
             className={cn(
               "font-bold",
-              kind.gemachPricingMode === "free" ? "text-emerald-700" : "text-kerem-700"
+              kind.gemachPricingMode === "free" ? "text-kerem-700" : "text-kerem-800"
             )}
           >
             {priceLabel}
           </p>
         </div>
-        {isKindReservable(kind) ? (
-          <div className="flex flex-wrap justify-end gap-2">
-            <Link
-              href={`/tools/${kind.catalogId}`}
-              className="rounded-xl border border-[var(--border)] bg-white px-3 py-2 text-sm font-semibold text-stone-700 transition hover:bg-warm-50"
-            >
-              פרטים
-            </Link>
-            {kind.availableUnits > 0 && (
-              <InstantLoanButton
-                kindId={kind.catalogId}
-                availableUnits={kind.availableUnits}
-                compact
-              />
-            )}
-            <Link
-              href={`/tools/${kind.catalogId}/reserve`}
-              className="rounded-xl bg-kerem-700 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-kerem-700/20 transition hover:bg-kerem-800 group-hover:shadow-lg"
-            >
-              שריון
-            </Link>
-            {kind.availableUnits === 0 && (
-              <span className="w-full text-left text-xs font-medium text-[var(--muted)]">
-                {kind.availabilityLabel ?? "לא זמין עכשיו — אפשר לשריין למועד מאוחר יותר"}
-              </span>
-            )}
-          </div>
-        ) : (
-          <div className="text-left">
-            <span className="block text-sm text-[var(--muted)]">לא זמין</span>
-            {kind.availabilityLabel && (
-              <span className="mt-0.5 block text-xs font-semibold text-amber-700">
-                {kind.availabilityLabel}
-              </span>
-            )}
-          </div>
-        )}
+        <ToolBorrowActions kind={kind} variant="card" />
       </CardFooter>
     </Card>
   );

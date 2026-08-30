@@ -234,8 +234,8 @@ export async function POST(request: Request) {
 
     const member = await getMemberById(memberId);
 
-    // Cooperative tools: terms + paid membership (`isAmember`). Partner gemachim
-    // stay usable for browsing/borrowing without joining the cooperative.
+    // Cooperative tools require terms + paid membership. Partner gemachim stay
+    // open for browsing and borrowing without joining the cooperative.
     if (isPlatformGemach(gemach)) {
       if (!hasAcceptedTerms(member)) {
         return NextResponse.json(

@@ -11,6 +11,7 @@ export function AccessCodeCard({
   note,
   updatedAt,
   emptyLabel,
+  tone = "caravan",
 }: {
   title: string;
   hint?: string;
@@ -18,6 +19,7 @@ export function AccessCodeCard({
   note: string | null;
   updatedAt?: string | null;
   emptyLabel: string;
+  tone?: "caravan" | "club";
 }) {
   const [revealed, setRevealed] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -33,6 +35,11 @@ export function AccessCodeCard({
     }
   }
 
+  const well =
+    tone === "club"
+      ? "bg-kerem-900 text-kerem-50"
+      : "bg-warm-100 text-stone-900";
+
   return (
     <Card>
       <CardBody className="py-5">
@@ -43,12 +50,14 @@ export function AccessCodeCard({
 
         {code ? (
           <>
-            <p
-              className="mt-4 text-center font-mono text-4xl font-bold tracking-[0.35em] text-stone-900"
-              dir="ltr"
-            >
-              {revealed ? code : "••••••"}
-            </p>
+            <div className={`mt-4 rounded-xl px-4 py-6 ${well}`}>
+              <p
+                className="text-center font-mono text-3xl font-bold tracking-[0.35em] sm:text-4xl"
+                dir="ltr"
+              >
+                {revealed ? code : "••••••"}
+              </p>
+            </div>
             <div className="mt-4 flex flex-wrap justify-center gap-2">
               <Button type="button" variant="secondary" size="sm" onClick={() => setRevealed((v) => !v)}>
                 {revealed ? "הסתרה" : "הצגת הקוד"}

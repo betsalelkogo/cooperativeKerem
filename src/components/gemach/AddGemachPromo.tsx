@@ -12,7 +12,7 @@ export function AddGemachPromo() {
   if (member && hasOwnedGemachim(member)) return null;
 
   return (
-    <Card className="mb-8 overflow-hidden border-amber-200 bg-gradient-to-l from-amber-50 to-orange-50">
+    <Card className="mb-8 overflow-hidden">
       <CardBody className="flex flex-col gap-4 py-5 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-lg font-bold text-stone-900">יש לכם גמ״ח קהילתי?</p>
@@ -22,7 +22,7 @@ export function AddGemachPromo() {
         </div>
         <Link
           href="/gemach/new"
-          className="shrink-0 rounded-xl bg-amber-600 px-5 py-3 text-center text-sm font-semibold text-white shadow-md transition hover:bg-amber-700"
+          className="shrink-0 rounded-xl bg-kerem-700 px-5 py-3 text-center text-sm font-semibold text-white transition hover:bg-kerem-800"
         >
           הוסיפו את הגמ״ח שלכם
         </Link>

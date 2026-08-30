@@ -1,13 +1,12 @@
 import { notFound } from "next/navigation";
-import Link from "next/link";
 import { getToolKindWithAvailability } from "@/lib/firestore/repository";
-import { inventoryLabel, isKindReservable } from "@/lib/tool-kinds";
+import { inventoryLabel } from "@/lib/tool-kinds";
 import { formatNIS } from "@/lib/pots";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { BackLink } from "@/components/ui/PageHeader";
 import { Card, CardBody } from "@/components/ui/Card";
 import { ToolImageGallery } from "@/components/tools/ToolImageGallery";
-import { InstantLoanButton } from "@/components/tools/InstantLoanButton";
+import { ToolBorrowActions } from "@/components/tools/ToolBorrowActions";
 import { ExpandableText } from "@/components/ui/ExpandableText";
 import { youtubeEmbedUrl } from "@/lib/tools-admin";
 
@@ -53,8 +52,8 @@ export default async function ToolDetailPage({
     <div className="mx-auto max-w-2xl">
       <BackLink href="/tools">חזרה לכלים</BackLink>
 
-      <Card className="overflow-hidden shadow-md">
-        <div className="h-2 bg-gradient-to-l from-kerem-500 to-kerem-700" />
+      <Card>
+        <div className="h-1 bg-kerem-600" />
         <CardBody className="py-6">
           <ToolImageGallery
             imageUrl={kind.imageUrl}
@@ -69,17 +68,17 @@ export default async function ToolDetailPage({
                   {kind.category}
                 </p>
                 {popular && (
-                  <span className="rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-bold text-violet-800 ring-1 ring-violet-200">
-                    ★ {popular}
+                  <span className="rounded-full bg-accent-50 px-2.5 py-0.5 text-xs font-bold text-accent-800 ring-1 ring-accent-100">
+                    {popular}
                   </span>
                 )}
               </div>
               <h1 className="mt-1 text-3xl font-bold text-stone-900">{kind.name}</h1>
               {kind.gemachName && (
-                <p className="mt-1 text-sm text-amber-800">{kind.gemachName}</p>
+                <p className="mt-1 text-sm text-kerem-800">{kind.gemachName}</p>
               )}
               {kind.totalUnits > 1 && (
-                <p className="mt-2 text-sm font-medium text-sky-700">
+                <p className="mt-2 text-sm font-medium text-kerem-800">
                   {kind.totalUnits} יחידות במלאי
                   {kind.availableUnits > 0 && ` · ${kind.availableUnits} זמינות עכשיו`}
                 </p>
@@ -104,10 +103,10 @@ export default async function ToolDetailPage({
           </div>
 
           {stockLabel && kind.availableUnits === 0 && (
-            <p className="mb-4 rounded-xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 ring-1 ring-amber-200">
+            <p className="mb-4 rounded-xl bg-warm-50 px-4 py-3 text-sm font-medium text-stone-800 ring-1 ring-warm-200">
               {stockLabel}
               {kind.availableFrom && (
-                <span className="mr-2 text-amber-700">
+                <span className="mr-2 text-accent-800">
                   ({new Date(`${kind.availableFrom}T00:00:00`).toLocaleDateString("he-IL")})
                 </span>
               )}
@@ -148,8 +147,8 @@ export default async function ToolDetailPage({
           )}
 
           {kind.purpose && (
-            <div className="mb-4 rounded-xl border border-sky-200 bg-sky-50/50 px-4 py-3">
-              <p className="text-xs font-bold text-sky-900">ייעוד מומלץ</p>
+            <div className="mb-4 rounded-xl border border-kerem-200 bg-kerem-50/50 px-4 py-3">
+              <p className="text-xs font-bold text-kerem-900">ייעוד מומלץ</p>
               <p className="mt-1 text-sm text-stone-800">{kind.purpose}</p>
             </div>
           )}
@@ -179,9 +178,7 @@ export default async function ToolDetailPage({
 
           {kind.safetyRules.length > 0 && (
             <div className="mb-6">
-              <h2 className="mb-3 flex items-center gap-2 font-bold text-stone-900">
-                <span>⚠️</span> כללי בטיחות
-              </h2>
+              <h2 className="mb-3 font-bold text-stone-900">כללי בטיחות</h2>
               <ul className="space-y-2">
                 {kind.safetyRules.map((rule) => (
                   <li
@@ -196,32 +193,7 @@ export default async function ToolDetailPage({
             </div>
           )}
 
-          <div className="flex flex-wrap gap-3">
-            {isKindReservable(kind) && (
-              <Link
-                href={`/tools/${kind.catalogId}/reserve`}
-                className="inline-flex flex-1 items-center justify-center rounded-xl bg-kerem-700 py-3.5 text-base font-bold text-white shadow-md shadow-kerem-700/25 transition hover:bg-kerem-800 sm:flex-none sm:px-8"
-              >
-                שריון {kind.totalUnits > 1 ? "יחידות" : "הכלי"}
-              </Link>
-            )}
-            {kind.availableUnits > 0 && (
-              <InstantLoanButton
-                kindId={kind.catalogId}
-                availableUnits={kind.availableUnits}
-              />
-            )}
-          </div>
-          {kind.availableUnits > 0 && (
-            <p className="mt-2 text-xs text-[var(--muted)]">
-              «השאלה מיידית» — דילוג על שלב השריון: הכלי נלקח עכשיו ומועבר ישירות לתשלום ולקיחה.
-            </p>
-          )}
-          {isKindReservable(kind) && kind.availableUnits === 0 && (
-            <p className="mt-2 text-xs text-[var(--muted)]">
-              הכלי מושאל או שמור עכשיו — אפשר לשריין חלון אחרי ההחזרה, או להאריך אם הוא כבר אצלכם.
-            </p>
-          )}
+          <ToolBorrowActions kind={kind} />
         </CardBody>
       </Card>
     </div>

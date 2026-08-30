@@ -28,6 +28,7 @@ import { PeerDebtBanner } from "@/components/membership/PeerDebtBanner";
 import type { GemachReservationMode, ToolKindWithAvailability } from "@/lib/types";
 import { LOAN_HOUR_CANDIDATES } from "@/lib/gemach";
 import {
+  isPaidMember,
   MEMBERSHIP_REQUIRED_CODE,
   PEER_DEBT_REQUIRED_CODE,
   TERMS_REQUIRED_CODE,
@@ -93,7 +94,7 @@ function ReserveToolForm() {
   const params = useParams<{ id: string }>();
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { getIdToken } = useAuth();
+  const { member, loading: authLoading, getIdToken } = useAuth();
   const pickupQuery = useMemo(
     () => initialPickup(searchParams),
     [searchParams]
@@ -402,6 +403,7 @@ function ReserveToolForm() {
           data.code === PEER_DEBT_REQUIRED_CODE
         ) {
           setGateCode(data.code);
+          return;
         }
         throw new Error(data.error ?? "השריון נכשל");
       }
@@ -416,10 +418,24 @@ function ReserveToolForm() {
   }
 
   if (loadError) return <Alert variant="error">{loadError}</Alert>;
-  if (!kind) {
+  if (!kind || authLoading) {
     return (
       <div className="flex justify-center py-20">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-kerem-200 border-t-kerem-700" />
+      </div>
+    );
+  }
+
+  if (!kind.isPartnerGemach && !isPaidMember(member)) {
+    return (
+      <div className="mx-auto max-w-md">
+        <BackLink href={`/tools/${kind.catalogId}`}>חזרה ל{kind.name}</BackLink>
+        <Card>
+          <CardBody className="py-6">
+            <h1 className="mb-4 text-2xl font-bold text-stone-900">שריון {kind.name}</h1>
+            <JoinMembershipBanner reason={MEMBERSHIP_REQUIRED_CODE} />
+          </CardBody>
+        </Card>
       </div>
     );
   }
@@ -440,8 +456,8 @@ function ReserveToolForm() {
     <div className="mx-auto max-w-md">
       <BackLink href={`/tools/${kind.catalogId}`}>חזרה ל{kind.name}</BackLink>
 
-      <Card className="shadow-md">
-        <div className="h-1.5 bg-gradient-to-l from-kerem-500 to-kerem-700" />
+      <Card>
+        <div className="h-1 bg-kerem-600" />
         <CardBody className="py-6">
           <h1 className="text-2xl font-bold text-stone-900">שריון {kind.name}</h1>
           {extending && (
@@ -455,12 +471,12 @@ function ReserveToolForm() {
               : `בחרו חלונות איסוף והחזרה. שריון עתידי משאיר את הכלים זמינים עד ${RESERVATION_HARD_LOCK_HOURS} שעה לפני האיסוף.`}
           </p>
           {kind.gemachName && (
-            <p className="mt-1 text-xs font-medium text-amber-800">
-              {kind.isPartnerGemach ? `★ ${kind.gemachName}` : kind.gemachName}
+            <p className="mt-1 text-xs font-medium text-accent-800">
+              {kind.gemachName}
             </p>
           )}
           {stockLabel && kind.availableUnits > 0 && (
-            <p className="mt-2 text-sm font-medium text-sky-700">{stockLabel}</p>
+            <p className="mt-2 text-sm font-medium text-kerem-700">{stockLabel}</p>
           )}
           {windowAvail && windowAvail.reservedForFuture > 0 && (
             <p className="mt-1 text-xs text-amber-800">
@@ -502,9 +518,9 @@ function ReserveToolForm() {
             )}
             {isFixedHours ? (
               <>
-                <fieldset className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/40 p-4">
+                <fieldset className="space-y-3 rounded-xl border border-warm-200 bg-warm-50/70 p-4">
                   <legend className="px-1 text-sm font-bold text-stone-900">
-                    📅 תחילת השאלה
+                    תחילת השאלה
                   </legend>
                   <div>
                     <label htmlFor="pickupDate" className="mb-1.5 block text-sm font-semibold text-stone-800">
@@ -561,7 +577,7 @@ function ReserveToolForm() {
                 </fieldset>
 
                 {fixedSchedule && (
-                  <div className="rounded-xl border border-sky-200 bg-sky-50/60 p-4 text-sm">
+                  <div className="rounded-xl border border-kerem-200 bg-kerem-50/50 p-4 text-sm">
                     <p className="font-bold text-stone-900">סיכום השריון</p>
                     <p className="mt-2 text-[var(--muted)]">
                       <span className="font-medium text-stone-800">משך:</span>{" "}
@@ -576,7 +592,7 @@ function ReserveToolForm() {
                       {formatDateHe(fixedSchedule.returnDate)} · {fixedSchedule.returnTimeEnd}
                     </p>
                     {windowAvail && (
-                      <p className="mt-2 font-medium text-sky-900">
+                      <p className="mt-2 font-medium text-kerem-900">
                         {availLoading
                           ? "בודק זמינות…"
                           : `${windowAvail.availableUnits} יחידות פנויות בחלון זה`}
@@ -596,8 +612,8 @@ function ReserveToolForm() {
               </>
             ) : (
               <>
-                <fieldset className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/40 p-4">
-                  <legend className="px-1 text-sm font-bold text-stone-900">📅 חלון איסוף</legend>
+                <fieldset className="space-y-3 rounded-xl border border-warm-200 bg-warm-50/70 p-4">
+                  <legend className="px-1 text-sm font-bold text-stone-900">חלון איסוף</legend>
                   <div>
                     <label htmlFor="pickupDate" className="mb-1.5 block text-sm font-semibold text-stone-800">
                       תאריך
@@ -647,8 +663,8 @@ function ReserveToolForm() {
                   </div>
                 </fieldset>
 
-                <fieldset className="space-y-3 rounded-xl border border-sky-200 bg-sky-50/40 p-4">
-                  <legend className="px-1 text-sm font-bold text-stone-900">🔁 חלון החזרה</legend>
+                <fieldset className="space-y-3 rounded-xl border border-kerem-200 bg-kerem-50/40 p-4">
+                  <legend className="px-1 text-sm font-bold text-stone-900">חלון החזרה</legend>
                   <div>
                     <label htmlFor="returnDate" className="mb-1.5 block text-sm font-semibold text-stone-800">
                       תאריך
@@ -694,8 +710,8 @@ function ReserveToolForm() {
                 </fieldset>
 
                 {windowAvail && (
-                  <div className="rounded-xl border border-sky-200 bg-sky-50/60 p-4 text-sm">
-                    <p className="font-medium text-sky-900">
+                  <div className="rounded-xl border border-kerem-200 bg-kerem-50/50 p-4 text-sm">
+                    <p className="font-medium text-kerem-900">
                       {availLoading
                         ? "בודק זמינות…"
                         : `${windowAvail.availableUnits} יחידות פנויות בחלון זה`}
@@ -724,7 +740,7 @@ function ReserveToolForm() {
                 תאריך, או הפחיתו כמות.
               </Alert>
             )}
-            {error && <Alert variant="error">{error}</Alert>}
+            {error && !gateCode && <Alert variant="error">{error}</Alert>}
             {gateCode === PEER_DEBT_REQUIRED_CODE ? (
               <PeerDebtBanner />
             ) : (

@@ -13,7 +13,7 @@ export function Alert({
     error: "border-red-200 bg-red-50 text-red-800",
     success: "border-kerem-200 bg-kerem-50 text-kerem-800",
     warning: "border-amber-200 bg-amber-50 text-amber-900",
-    info: "border-sky-200 bg-sky-50 text-sky-900",
+    info: "border-kerem-200 bg-kerem-50 text-kerem-900",
   };
 
   return (

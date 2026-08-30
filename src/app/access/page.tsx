@@ -70,11 +70,12 @@ export default function AccessPage() {
               note={data.clubRoomNote}
               updatedAt={data.clubRoomUpdatedAt}
               emptyLabel="קוד החדר עדיין לא הוגדר. פנו למנהל."
+              tone="club"
             />
           ) : (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
-              <p className="text-sm font-bold text-amber-950">קוד חדר המועדון</p>
-              <p className="mt-1 text-sm leading-relaxed text-amber-900">
+            <div className="rounded-2xl border border-warm-200 bg-warm-50 p-4">
+              <p className="text-sm font-bold text-stone-900">קוד חדר המועדון</p>
+              <p className="mt-1 text-sm leading-relaxed text-stone-700">
                 מנעול הקומבינציה של החדר גלוי לחברי המועדון בלבד.
               </p>
               <div className="mt-3">
