@@ -1243,6 +1243,53 @@ export async function updateToolKindStatus(params: {
   return { updated };
 }
 
+/** Permanently remove a cooperative tool kind. Platform/cooperative admin only. */
+export async function deleteToolKind(params: {
+  gemachId: string;
+  kindId: string;
+}): Promise<{ deleted: number }> {
+  if (params.gemachId !== PLATFORM_GEMACH_ID) {
+    throw new Error("רק מנהל הקואופרטיב יכול למחוק כלים");
+  }
+
+  const units = (await getToolsForCatalogKey(params.kindId)).filter(
+    (t) => t.gemachId === params.gemachId
+  );
+  if (units.length === 0) {
+    throw new Error("הכלי לא נמצא");
+  }
+
+  const unitIds = new Set(units.map((u) => u.id));
+  const [loans, reservations] = await Promise.all([
+    getActiveLoans(),
+    getActiveReservations(),
+  ]);
+
+  const busyLoans = loans.filter((l) =>
+    loanToolIds(l).some((id) => unitIds.has(id))
+  );
+  if (busyLoans.length > 0) {
+    throw new Error("לא ניתן למחוק — יש השאלות פעילות על הכלי");
+  }
+
+  const busyReservations = reservations.filter((r) =>
+    reservationToolIds(r).some((id) => unitIds.has(id))
+  );
+  if (busyReservations.length > 0) {
+    throw new Error("לא ניתן למחוק — יש שריונים פעילים על הכלי");
+  }
+
+  const db = getAdminDb();
+  const batch = db.batch();
+  for (const tool of units) {
+    batch.delete(db.collection("tools").doc(tool.id));
+    batch.delete(db.collection("device_pots").doc(tool.id));
+  }
+  await batch.commit();
+  invalidateQueryMemo();
+  return { deleted: units.length };
+}
+
 export async function updateToolStatusScoped(params: {
   toolId: string;
   status: Tool["status"];
@@ -3241,6 +3288,33 @@ export async function markLateReturnFeePaid(
     paidAt: new Date().toISOString(),
     markedPaidBy,
   };
+}
+
+export async function updateLateReturnFeeAmount(
+  feeId: string,
+  amount: number,
+  updatedBy: string
+): Promise<LateReturnFee> {
+  if (!Number.isFinite(amount) || amount < 0 || amount > 50_000) {
+    throw new Error("סכום הקנס אינו תקין");
+  }
+  const rounded = Math.round(amount);
+
+  const ref = getAdminDb().collection("late_return_fees").doc(feeId);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error("רשומת קנס לא נמצאה");
+
+  const existing = lateReturnFeeFromDoc(feeId, snap.data()!);
+  if (existing.cancelled) throw new Error("הקנס בוטל — לא ניתן לערוך");
+  if (existing.paid) throw new Error("הקנס כבר שולם — לא ניתן לערוך");
+
+  await ref.update({
+    amount: rounded,
+    amountUpdatedAt: FieldValue.serverTimestamp(),
+    amountUpdatedBy: updatedBy,
+  });
+
+  return { ...existing, amount: rounded };
 }
 
 /** Waive an incorrect or disputed late fee (does not collect payment). */

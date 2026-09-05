@@ -138,6 +138,7 @@ function ReserveToolForm() {
     return DEFAULT_RETURN_END;
   });
   const [quantity, setQuantity] = useState(1);
+  const [quantityDraft, setQuantityDraft] = useState("1");
   const [windowAvail, setWindowAvail] = useState<WindowAvailability | null>(null);
   const [availByHours, setAvailByHours] = useState<Record<string, WindowAvailability> | null>(
     null
@@ -217,9 +218,12 @@ function ReserveToolForm() {
         else setAvailByHours(null);
         const selected = data.byHours?.[String(loanHours)] ?? data;
         setWindowAvail(selected);
-        setQuantity((q) =>
-          selected.availableUnits > 0 ? Math.min(q, selected.availableUnits) : q
-        );
+        setQuantity((q) => {
+          const next =
+            selected.availableUnits > 0 ? Math.min(q, selected.availableUnits) : q;
+          setQuantityDraft(String(next));
+          return next;
+        });
         if (data.byHours) {
           const okHours = hourOptions.filter(
             (h) => (data.byHours?.[String(h)]?.availableUnits ?? 0) > 0
@@ -257,14 +261,17 @@ function ReserveToolForm() {
     const selected = availByHours[String(loanHours)];
     if (!selected) return;
     setWindowAvail(selected);
-    setQuantity((q) =>
-      selected.availableUnits > 0 ? Math.min(q, selected.availableUnits) : q
-    );
+    setQuantity((q) => {
+      const next =
+        selected.availableUnits > 0 ? Math.min(q, selected.availableUnits) : q;
+      setQuantityDraft(String(next));
+      return next;
+    });
     const okHours = hourOptions.filter(
-      (h) => (availByHours[String(h)]?.availableUnits ?? 0) >= quantity
+      (h) => (availByHours[String(h)]?.availableUnits ?? 0) > 0
     );
     setViableHours(okHours);
-  }, [availByHours, loanHours, hourOptions, quantity]);
+  }, [availByHours, loanHours, hourOptions]);
 
   function handlePickupStartChange(value: string) {
     setPickupTimeStart(value);
@@ -359,6 +366,18 @@ function ReserveToolForm() {
       }
     }
 
+    const cap = Math.min(
+      windowAvail?.availableUnits ?? kind.availableUnits,
+      500
+    );
+    const parsedQty = Number(quantityDraft);
+    const submitQuantity =
+      Number.isFinite(parsedQty) && parsedQty > 0
+        ? Math.min(Math.floor(parsedQty), Math.max(1, cap))
+        : 1;
+    setQuantity(submitQuantity);
+    setQuantityDraft(String(submitQuantity));
+
     setLoading(true);
     setError("");
 
@@ -367,14 +386,14 @@ function ReserveToolForm() {
       const body = isFixedHours
         ? {
             kindId: kind.catalogId,
-            quantity,
+            quantity: submitQuantity,
             pickupDate: effectivePickupDate,
             pickupTimeStart: effectivePickupTimeStart,
             loanDurationHours: loanHours,
           }
         : {
             kindId: kind.catalogId,
-            quantity,
+            quantity: submitQuantity,
             pickupDate: effectivePickupDate,
             pickupTimeStart: effectivePickupTimeStart,
             pickupTimeEnd: effectivePickupTimeEnd,
@@ -489,18 +508,26 @@ function ReserveToolForm() {
                 </label>
                 <input
                   id="quantity"
-                  type="number"
-                  min={1}
-                  max={Math.max(1, maxQuantity)}
-                  value={quantity}
-                  onChange={(e) =>
-                    setQuantity(
-                      Math.min(
-                        Math.max(1, Number(e.target.value) || 1),
-                        Math.max(1, maxQuantity)
-                      )
-                    )
-                  }
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  autoComplete="off"
+                  value={quantityDraft}
+                  onChange={(e) => {
+                    const raw = e.target.value.replace(/[^\d]/g, "");
+                    setQuantityDraft(raw);
+                    if (raw === "") return;
+                    const n = Number(raw);
+                    if (Number.isFinite(n) && n > 0) setQuantity(n);
+                  }}
+                  onBlur={() => {
+                    const cap = Math.max(1, maxQuantity);
+                    const n = Number(quantityDraft);
+                    const next =
+                      Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), cap) : 1;
+                    setQuantity(next);
+                    setQuantityDraft(String(next));
+                  }}
                   className="w-full rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm focus:border-kerem-400 focus:outline-none focus:ring-2 focus:ring-kerem-200"
                 />
                 <p className="mt-1 text-xs text-[var(--muted)]">

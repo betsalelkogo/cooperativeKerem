@@ -6,6 +6,7 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Alert } from "@/components/ui/Alert";
 import { authFetch } from "@/lib/api-client";
 import { buildGemachFilterOptions, PLATFORM_GEMACH_ID } from "@/lib/gemach";
+import { clearCachedCatalog } from "@/lib/client-catalog";
 import type { AdminDashboardToolKindRow, Gemach } from "@/lib/types";
 
 interface AdminToolKindsTableProps {
@@ -74,6 +75,31 @@ export function AdminToolKindsTable({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "עדכון נכשל");
+      onUpdated?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "שגיאה");
+    } finally {
+      setLoadingKey(null);
+    }
+  }
+
+  async function deleteKind(kindId: string, name: string) {
+    if (!gemachId || !cooperativeOnly) return;
+    const ok = window.confirm(
+      `למחוק את "${name}" וכל היחידות שלו מהקטלוג? לא ניתן לשחזר.`
+    );
+    if (!ok) return;
+    setLoadingKey(`${kindId}:delete`);
+    setError("");
+    try {
+      const token = await getToken();
+      const res = await authFetch(
+        `/api/admin/gemach/tools/${encodeURIComponent(kindId)}?gemachId=${encodeURIComponent(gemachId)}`,
+        { method: "DELETE", token }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "מחיקה נכשלה");
+      clearCachedCatalog();
       onUpdated?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "שגיאה");
@@ -277,6 +303,16 @@ export function AdminToolKindsTable({
                                 className="rounded-lg bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700 hover:bg-orange-100 disabled:opacity-50"
                               >
                                 תחזוקה
+                              </button>
+                            )}
+                            {cooperativeOnly && (
+                              <button
+                                type="button"
+                                disabled={!!busy}
+                                onClick={() => deleteKind(tool.kindId, tool.name)}
+                                className="rounded-lg bg-red-50 px-2 py-1 text-xs font-semibold text-red-800 hover:bg-red-100 disabled:opacity-50"
+                              >
+                                מחק
                               </button>
                             )}
                           </div>

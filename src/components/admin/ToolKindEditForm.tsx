@@ -1,7 +1,9 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { authFetch } from "@/lib/api-client";
+import { clearCachedCatalog } from "@/lib/client-catalog";
 import { compressImageFile } from "@/lib/compress-image";
 import {
   gemachPricingModeLabels,
@@ -22,6 +24,8 @@ interface ToolKindEditFormProps {
   gemachDefaultLocation?: string;
   getToken: () => Promise<string | null>;
   onSaved: () => void;
+  canDelete?: boolean;
+  afterDeleteHref?: string;
 }
 
 export function ToolKindEditForm({
@@ -30,7 +34,10 @@ export function ToolKindEditForm({
   gemachDefaultLocation,
   getToken,
   onSaved,
+  canDelete = false,
+  afterDeleteHref = "/admin",
 }: ToolKindEditFormProps) {
+  const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState(kind.name);
   const [description, setDescription] = useState(kind.description);
@@ -74,6 +81,7 @@ export function ToolKindEditForm({
   const [imageDirty, setImageDirty] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
 
   const showFees = kind.pricingMode === "loan_fee";
@@ -160,6 +168,31 @@ export function ToolKindEditForm({
       setError(err instanceof Error ? err.message : "שגיאה");
     } finally {
       setUploadingImage(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!canDelete) return;
+    const ok = window.confirm(
+      `למחוק את "${kind.name}" וכל היחידות שלו מהקטלוג? לא ניתן לשחזר.`
+    );
+    if (!ok) return;
+    setDeleting(true);
+    setError("");
+    try {
+      const token = await getToken();
+      const res = await authFetch(
+        `/api/admin/gemach/tools/${encodeURIComponent(kind.kindId)}?gemachId=${encodeURIComponent(gemachId)}`,
+        { method: "DELETE", token }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "מחיקה נכשלה");
+      clearCachedCatalog();
+      router.push(afterDeleteHref);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "שגיאה");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -612,9 +645,21 @@ export function ToolKindEditForm({
             {gemachPricingModeLabels[kind.pricingMode]}
           </p>
 
-          <Button type="submit" size="lg" disabled={saving || uploadingImage} className="w-full">
+          <Button type="submit" size="lg" disabled={saving || uploadingImage || deleting} className="w-full">
             {saving ? "שומר…" : "שמור שינויים"}
           </Button>
+          {canDelete && (
+            <Button
+              type="button"
+              variant="danger"
+              size="lg"
+              disabled={saving || uploadingImage || deleting}
+              className="w-full"
+              onClick={handleDelete}
+            >
+              {deleting ? "מוחק…" : "מחק כלי"}
+            </Button>
+          )}
         </form>
       </CardBody>
     </Card>

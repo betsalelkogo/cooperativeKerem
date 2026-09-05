@@ -32,6 +32,7 @@ export function InstantLoanButton({
   const [gateCode, setGateCode] = useState<string | null>(null);
   const [choosing, setChoosing] = useState(false);
   const [quantity, setQuantity] = useState(1);
+  const [quantityDraft, setQuantityDraft] = useState("1");
 
   const maxQuantity = Math.min(Math.max(1, availableUnits), 500);
   const canChooseQuantity = maxQuantity > 1;
@@ -39,6 +40,13 @@ export function InstantLoanButton({
   function clampQuantity(value: number) {
     if (!Number.isFinite(value) || value < 1) return 1;
     return Math.min(Math.floor(value), maxQuantity);
+  }
+
+  function commitQuantity(raw: string) {
+    const next = clampQuantity(Number(raw));
+    setQuantity(next);
+    setQuantityDraft(String(next));
+    return next;
   }
 
   function handleTrigger() {
@@ -113,7 +121,7 @@ export function InstantLoanButton({
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => setQuantity((q) => clampQuantity(q - 1))}
+            onClick={() => commitQuantity(String(quantity - 1))}
             disabled={quantity <= 1}
             className="h-10 w-10 rounded-xl border border-[var(--border)] bg-white text-lg font-bold text-stone-700 disabled:opacity-40"
             aria-label="פחות"
@@ -121,17 +129,25 @@ export function InstantLoanButton({
             −
           </button>
           <input
-            type="number"
-            min={1}
-            max={maxQuantity}
-            value={quantity}
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            autoComplete="off"
+            value={quantityDraft}
             aria-label="כמות יחידות"
-            onChange={(e) => setQuantity(clampQuantity(Number(e.target.value)))}
+            onChange={(e) => {
+              const raw = e.target.value.replace(/[^\d]/g, "");
+              setQuantityDraft(raw);
+              if (raw === "") return;
+              const n = Number(raw);
+              if (Number.isFinite(n) && n > 0) setQuantity(n);
+            }}
+            onBlur={() => commitQuantity(quantityDraft)}
             className="h-10 w-16 rounded-xl border border-[var(--border)] bg-white text-center text-base font-semibold focus:border-kerem-400 focus:outline-none focus:ring-2 focus:ring-kerem-200"
           />
           <button
             type="button"
-            onClick={() => setQuantity((q) => clampQuantity(q + 1))}
+            onClick={() => commitQuantity(String(quantity + 1))}
             disabled={quantity >= maxQuantity}
             className="h-10 w-10 rounded-xl border border-[var(--border)] bg-white text-lg font-bold text-stone-700 disabled:opacity-40"
             aria-label="עוד"
@@ -142,7 +158,7 @@ export function InstantLoanButton({
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => book(quantity)}
+            onClick={() => book(commitQuantity(quantityDraft))}
             disabled={loading}
             className="flex-1 rounded-xl bg-kerem-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-kerem-800 disabled:opacity-60"
           >

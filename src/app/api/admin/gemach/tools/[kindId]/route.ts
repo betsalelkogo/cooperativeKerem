@@ -2,15 +2,17 @@ import { NextResponse } from "next/server";
 import {
   requireAdmin,
   requireGemachAdmin,
+  requirePlatformAdmin,
   resolveGemachAdminScope,
 } from "@/lib/firebase/admin-auth";
 import {
   getToolKindForAdmin,
   updateToolKindDetails,
   getGemachById,
+  deleteToolKind,
 } from "@/lib/firestore/repository";
 import { isPlatformAdmin } from "@/lib/admin";
-import { isPlatformGemach } from "@/lib/gemach";
+import { isPlatformGemach, PLATFORM_GEMACH_ID } from "@/lib/gemach";
 import { resolveToolImageUrl } from "@/lib/tool-image";
 import { normalizeYoutubeUrl, sanitizeSafetyRules } from "@/lib/tools-admin";
 
@@ -194,6 +196,32 @@ export async function PATCH(
       safetyRules: safetyRules === undefined ? undefined : (sanitizeSafetyRules(safetyRules) ?? []),
     });
 
+    return NextResponse.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "שגיאת שרת";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ kindId: string }> }
+) {
+  const adminAuth = await requirePlatformAdmin(request);
+  if (adminAuth instanceof NextResponse) return adminAuth;
+
+  try {
+    const { kindId } = await params;
+    const { searchParams } = new URL(request.url);
+    const gemachId = searchParams.get("gemachId") ?? PLATFORM_GEMACH_ID;
+    if (gemachId !== PLATFORM_GEMACH_ID) {
+      return NextResponse.json(
+        { error: "רק מנהל הקואופרטיב יכול למחוק כלים של הקואופרטיב" },
+        { status: 403 }
+      );
+    }
+
+    const result = await deleteToolKind({ gemachId, kindId });
     return NextResponse.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : "שגיאת שרת";

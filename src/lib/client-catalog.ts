@@ -36,6 +36,11 @@ export function findCachedKind(id: string): ToolKindWithAvailability | null {
   return catalog?.find((kind) => kindMatches(kind, id)) ?? null;
 }
 
+export function clearCachedCatalog() {
+  if (!canUseSession()) return;
+  sessionStorage.removeItem(CATALOG_KEY);
+}
+
 export function rememberKind(kind: ToolKindWithAvailability) {
   const catalog = readCachedCatalog() ?? [];
   const next = catalog.some((row) => kindMatches(row, kind.catalogId))

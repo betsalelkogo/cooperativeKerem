@@ -70,6 +70,8 @@ export default function PlatformEditToolPage() {
         gemachDefaultLocation={kind.gemachLocation}
         getToken={getIdToken}
         onSaved={() => router.push("/admin")}
+        canDelete
+        afterDeleteHref="/admin"
       />
     </div>
   );

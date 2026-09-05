@@ -8,13 +8,15 @@ import { BackLink, PageHeader } from "@/components/ui/PageHeader";
 import { Alert } from "@/components/ui/Alert";
 import { ToolKindEditForm } from "@/components/admin/ToolKindEditForm";
 import { useAdminGemachId } from "@/hooks/useAdminGemachId";
+import { isPlatformAdmin } from "@/lib/admin";
+import { PLATFORM_GEMACH_ID } from "@/lib/gemach";
 import type { AdminToolKindEdit } from "@/lib/types";
 
 export default function EditGemachToolPage() {
   const router = useRouter();
   const params = useParams();
   const kindId = params.kindId as string;
-  const { getIdToken } = useAuth();
+  const { member, getIdToken } = useAuth();
   const { gemachId, isPlatformCoopEdit, hrefWithGemachId } = useAdminGemachId();
 
   const [kind, setKind] = useState<AdminToolKindEdit | null>(null);
@@ -90,6 +92,10 @@ export default function EditGemachToolPage() {
         gemachDefaultLocation={kind.gemachLocation}
         getToken={getIdToken}
         onSaved={() => router.push(backHref)}
+        canDelete={Boolean(
+          member && isPlatformAdmin(member) && gemachId === PLATFORM_GEMACH_ID
+        )}
+        afterDeleteHref={backHref}
       />
     </div>
   );

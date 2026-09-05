@@ -94,6 +94,36 @@ export function AdminDashboardView({
 }: AdminDashboardViewProps) {
   const [busyLateFeeId, setBusyLateFeeId] = useState<string | null>(null);
   const [lateFeeError, setLateFeeError] = useState("");
+  const [editingFeeId, setEditingFeeId] = useState<string | null>(null);
+  const [editAmount, setEditAmount] = useState("");
+
+  async function saveLateFeeAmount(feeId: string) {
+    if (!getToken) return;
+    const amount = Number(editAmount);
+    if (!Number.isFinite(amount) || amount < 0) {
+      setLateFeeError("סכום הקנס אינו תקין");
+      return;
+    }
+    setBusyLateFeeId(feeId);
+    setLateFeeError("");
+    try {
+      const token = await getToken();
+      const res = await authFetch(`/api/admin/late-fees/${encodeURIComponent(feeId)}`, {
+        method: "PATCH",
+        token,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "amount", amount }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "עדכון נכשל");
+      setEditingFeeId(null);
+      onRefresh?.();
+    } catch (err) {
+      setLateFeeError(err instanceof Error ? err.message : "שגיאה");
+    } finally {
+      setBusyLateFeeId(null);
+    }
+  }
 
   async function updateLateFee(
     feeId: string,
@@ -210,7 +240,53 @@ export function AdminDashboardView({
                       </p>
                     </td>
                     <td className="px-4 py-3 text-red-700">{fee.lateDurationLabel}</td>
-                    <td className="px-4 py-3 font-semibold">{formatNIS(fee.amount)}</td>
+                    <td className="px-4 py-3 font-semibold">
+                      {editingFeeId === fee.id ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <input
+                            type="number"
+                            min={0}
+                            step={1}
+                            value={editAmount}
+                            onChange={(e) => setEditAmount(e.target.value)}
+                            className="w-24 rounded-lg border border-[var(--border)] px-2 py-1 text-sm"
+                            aria-label="סכום קנס"
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={busyLateFeeId === fee.id}
+                            onClick={() => saveLateFeeAmount(fee.id)}
+                          >
+                            שמור
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            disabled={busyLateFeeId === fee.id}
+                            onClick={() => setEditingFeeId(null)}
+                          >
+                            ביטול
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span>{formatNIS(fee.amount)}</span>
+                          <button
+                            type="button"
+                            className="text-xs font-semibold text-kerem-800 underline-offset-2 hover:underline"
+                            onClick={() => {
+                              setEditingFeeId(fee.id);
+                              setEditAmount(String(fee.amount));
+                              setLateFeeError("");
+                            }}
+                          >
+                            ערוך
+                          </button>
+                        </div>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <span className="rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-800">
                         לא שולם
