@@ -1,5 +1,22 @@
-import { FieldValue, type DocumentData } from "firebase-admin/firestore";
-import { getAdminDb, omitUndefined } from "@/lib/firebase/admin-app";
+import { getSql, withTransaction } from "@/lib/db/client";
+import {
+  toolFromRow,
+  gemachFromRow,
+  memberFromRow,
+  reservationFromRow,
+  loanFromRow,
+  paymentFromRow,
+  lateFeeFromRow,
+  ticketFromRow,
+  disputeFromRow,
+  ledgerFromRow,
+  peerLoanFromRow,
+  payoutFromRow,
+  devicePotFromRow,
+  operationsPotFromRow,
+  payboxSettingsFromData,
+  accessCodesFromData,
+} from "@/lib/db/mappers";
 import type {
   AdminDashboardData,
   AdminDisputeDetail,
@@ -26,8 +43,6 @@ import type {
   Tool,
   ToolWithAvailability,
   Transaction,
-  DevicePot,
-  OperationsPot,
   Gemach,
   GemachPricingMode,
   GemachReservationMode,
@@ -47,19 +62,15 @@ import {
   MEMBERSHIP_JOIN_MIN_NIS,
 } from "@/lib/membership";
 import {
-  resolveKindId,
   groupToolsByKind,
-  resolveKindUnits,
   buildToolKindWithAvailability,
   aggregateKindStatus,
 } from "@/lib/tool-kinds";
 import {
   PLATFORM_GEMACH_ID,
   PLATFORM_GEMACH_DISPLAY_NAME,
-  normalizeGemachId,
   formatToolPriceLabel,
   isPartnerGemach,
-  isPlatformGemach,
   resolveReservationFee,
   displayGemachName,
   resolveGemachReservationMode,
@@ -74,7 +85,6 @@ import {
   PARTNER_MAX_LOAN_HOURS,
 } from "@/lib/gemach";
 import { splitPayment, getOperationsPercent } from "@/lib/pots";
-import { getDefaultPayboxSettings } from "@/lib/paybox/config";
 import {
   roleFromMemberData,
   DEFAULT_MEMBER_ROLE,
@@ -82,8 +92,6 @@ import {
 } from "@/lib/admin";
 import {
   formatAvailableFromLabel,
-  reservationPickupDate,
-  reservationReturnDate,
 } from "@/lib/dates";
 import {
   kindIdForTool,
@@ -117,61 +125,32 @@ import {
   isReservationNoShowExpired,
   reservationPickupStart,
 } from "@/lib/reservation-expiry";
-import type { DefectCategory } from "@/lib/types";
 
-function tsToIso(value: unknown): string {
-  if (value && typeof value === "object" && "toDate" in value) {
-    return (value as { toDate: () => Date }).toDate().toISOString();
-  }
-  if (typeof value === "string") return value;
-  return new Date().toISOString();
+type QueryClient = {
+  query: (
+    queryText: string,
+    values?: unknown[]
+  ) => Promise<{ rows: Record<string, unknown>[] }>;
+};
+
+function asRecord(row: unknown): Record<string, unknown> {
+  return row as Record<string, unknown>;
 }
 
-function docWithId<T extends { id: string }>(
-  id: string,
-  data: DocumentData | undefined
-): T | null {
-  if (!data) return null;
-  const { seededAt: _, createdAt, updatedAt, ...rest } = data;
-  return {
-    id,
-    ...rest,
-    ...(createdAt ? { createdAt: tsToIso(createdAt) } : {}),
-    ...(updatedAt ? { updatedAt: tsToIso(updatedAt) } : {}),
-  } as T;
+function mapRows<T>(rows: unknown[], map: (row: Record<string, unknown>) => T): T[] {
+  return rows.map((row) => map(asRecord(row)));
 }
 
-function parseDefectRecord(value: unknown): DefectRecord | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const d = value as Record<string, unknown>;
-  const category = d.category as DefectCategory;
-  if (
-    category !== "broken" &&
-    category !== "missing_part" &&
-    category !== "wont_start" &&
-    category !== "battery" &&
-    category !== "other"
-  ) {
-    return undefined;
-  }
-  return {
-    category,
-    description: typeof d.description === "string" ? d.description : "",
-    responsibility:
-      d.responsibility === "member" ||
-      d.responsibility === "gemach" ||
-      d.responsibility === "unknown"
-        ? d.responsibility
-        : undefined,
-    reportedAt:
-      typeof d.reportedAt === "string" ? d.reportedAt : new Date().toISOString(),
-  };
+async function txRows(
+  client: QueryClient,
+  queryText: string,
+  values: unknown[] = []
+): Promise<Record<string, unknown>[]> {
+  const result = await client.query(queryText, values);
+  return result.rows;
 }
 
 function newId(prefix: string) {
-  // Timestamp keeps ids roughly sortable; the random suffix prevents
-  // collisions when several ids are minted within the same millisecond
-  // (e.g. the two ledger entries created for a peer credit transfer).
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
@@ -185,56 +164,38 @@ function loanToolIds(loan: Loan): string[] {
   return loan.toolId ? [loan.toolId] : [];
 }
 
-function reservationFromDoc(id: string, data: DocumentData): Reservation {
+function memberSummary(m: Member): AdminMemberSummary {
   return {
-    id,
-    memberId: (data.memberId as string) ?? "",
-    toolId: (data.toolId as string) ?? "",
-    pickupDate: reservationPickupDate(data),
-    pickupTimeStart: typeof data.pickupTimeStart === "string" ? data.pickupTimeStart : undefined,
-    pickupTimeEnd: typeof data.pickupTimeEnd === "string" ? data.pickupTimeEnd : undefined,
-    returnDate: reservationReturnDate(data),
-    returnTimeStart: typeof data.returnTimeStart === "string" ? data.returnTimeStart : undefined,
-    returnTimeEnd: typeof data.returnTimeEnd === "string" ? data.returnTimeEnd : undefined,
-    status: (data.status as Reservation["status"]) ?? "pending",
-    feeAmount: (data.feeAmount as number) ?? 0,
-    loanDurationHours:
-      typeof data.loanDurationHours === "number" ? data.loanDurationHours : undefined,
-    createdAt: data.createdAt ? tsToIso(data.createdAt) : new Date().toISOString(),
-    kindId: typeof data.kindId === "string" ? data.kindId : undefined,
-    quantity: typeof data.quantity === "number" ? data.quantity : undefined,
-    toolIds: Array.isArray(data.toolIds)
-      ? data.toolIds.filter((id): id is string => typeof id === "string")
-      : undefined,
-    groupId: typeof data.groupId === "string" ? data.groupId : undefined,
-    cooperativeFeeAmount:
-      typeof data.cooperativeFeeAmount === "number" ? data.cooperativeFeeAmount : undefined,
-    cancelReason:
-      data.cancelReason === "member" || data.cancelReason === "no_show"
-        ? data.cancelReason
-        : undefined,
-    cancelledAt: data.cancelledAt ? tsToIso(data.cancelledAt) : undefined,
+    id: m.id,
+    name: m.name,
+    firstName: m.firstName,
+    familyName: m.familyName,
+    email: m.email,
+    phone: m.phone,
+    isAmember: m.isAmember,
+    firstPayout: m.firstPayout,
+    role: m.role,
+    gemachAdminIds: m.gemachAdminIds,
+    creditBalance: m.creditBalance,
   };
 }
 
-function loanFromDoc(id: string, data: DocumentData): Loan {
-  const loan = docWithId<Loan>(id, data)!;
-  if (data.checkedOutAt) loan.checkedOutAt = tsToIso(data.checkedOutAt);
-  if (data.returnedAt) loan.returnedAt = tsToIso(data.returnedAt);
-  if (typeof data.dueReturnDate === "string") loan.dueReturnDate = data.dueReturnDate;
-  if (typeof data.dueReturnTimeEnd === "string") loan.dueReturnTimeEnd = data.dueReturnTimeEnd;
-  if (typeof data.groupId === "string") loan.groupId = data.groupId;
-  if (Array.isArray(data.toolIds) && data.toolIds.length) {
-    loan.toolIds = data.toolIds as string[];
-  }
-  if (typeof data.quantity === "number" && data.quantity > 0) {
-    loan.quantity = data.quantity;
-  }
-  if (typeof data.disputeId === "string") loan.disputeId = data.disputeId;
-  if (data.returnOk === true) loan.returnOk = true;
-  loan.checkoutDefect = parseDefectRecord(data.checkoutDefect);
-  loan.returnDefect = parseDefectRecord(data.returnDefect);
-  return loan;
+function platformGemachFallback(fullDefaults = false): Gemach {
+  return {
+    id: PLATFORM_GEMACH_ID,
+    name: PLATFORM_GEMACH_DISPLAY_NAME,
+    slug: "kerem",
+    pricingMode: "loan_fee",
+    isPlatform: true,
+    active: true,
+    ...(fullDefaults
+      ? {
+          reservationMode: "fixed_hours" as const,
+          defaultLoanHours: PLATFORM_DEFAULT_LOAN_HOURS,
+          maxLoanHours: PLATFORM_MAX_LOAN_HOURS,
+        }
+      : {}),
+  };
 }
 
 function buildActiveHolders(loans: Loan[], reservations: Reservation[]) {
@@ -279,14 +240,13 @@ function buildActiveHolders(loans: Loan[], reservations: Reservation[]) {
   return { activeLoans, activeReservations, loanByTool, reservationByTool };
 }
 
-const ACTIVE_LOAN_STATUSES = ["active", "checkout_pending", "return_pending"] as const;
-const ACTIVE_RESERVATION_STATUSES = ["pending", "confirmed"] as const;
+const ACTIVE_LOAN_STATUSES = ["active", "checkout_pending", "return_pending"];
+const ACTIVE_RESERVATION_STATUSES = ["pending", "confirmed"];
 
 const queryMemo = new Map<string, { at: number; value: Promise<unknown> }>();
 const QUERY_MEMO_MS = 120_000;
 const MAINTAIN_MEMO_MS = 45_000;
-const emptyHolders = () =>
-  buildActiveHolders([], []);
+const emptyHolders = () => buildActiveHolders([], []);
 
 function memoQuery<T>(key: string, fn: () => Promise<T>, ttlMs = QUERY_MEMO_MS): Promise<T> {
   const now = Date.now();
@@ -310,21 +270,17 @@ function invalidateQueryMemo() {
 
 async function getActiveLoans(): Promise<Loan[]> {
   return memoQuery("activeLoans", async () => {
-    const snap = await getAdminDb()
-      .collection("loans")
-      .where("status", "in", [...ACTIVE_LOAN_STATUSES])
-      .get();
-    return snap.docs.map((d) => loanFromDoc(d.id, d.data())).filter(Boolean);
+    const sql = getSql();
+    const rows = await sql`SELECT * FROM loans WHERE status = ANY(${ACTIVE_LOAN_STATUSES})`;
+    return mapRows(rows, loanFromRow);
   });
 }
 
 async function getActiveReservations(): Promise<Reservation[]> {
   return memoQuery("activeReservations", async () => {
-    const snap = await getAdminDb()
-      .collection("reservations")
-      .where("status", "in", [...ACTIVE_RESERVATION_STATUSES])
-      .get();
-    return snap.docs.map((d) => reservationFromDoc(d.id, d.data())).filter(Boolean);
+    const sql = getSql();
+    const rows = await sql`SELECT * FROM reservations WHERE status = ANY(${ACTIVE_RESERVATION_STATUSES})`;
+    return mapRows(rows, reservationFromRow);
   });
 }
 
@@ -339,46 +295,34 @@ async function getHoldsForAvailability() {
 async function getToolsByIds(ids: string[]): Promise<Tool[]> {
   const unique = [...new Set(ids.filter(Boolean))];
   if (unique.length === 0) return [];
-  const db = getAdminDb();
-  const tools: Tool[] = [];
-  for (let i = 0; i < unique.length; i += 100) {
-    const chunk = unique.slice(i, i + 100);
-    const snaps = await db.getAll(...chunk.map((id) => db.collection("tools").doc(id)));
-    for (const snap of snaps) {
-      if (!snap.exists) continue;
-      const tool = toolFromDoc(snap.id, snap.data()!);
-      if (tool) tools.push(tool);
-    }
-  }
-  return tools;
+  const sql = getSql();
+  const rows = await sql`SELECT * FROM tools WHERE id = ANY(${unique})`;
+  return mapRows(rows, toolFromRow);
 }
 
 async function getToolsForCatalogKey(catalogKey: string): Promise<Tool[]> {
   return memoQuery(`toolsByKind:${catalogKey}`, async () => {
-    const db = getAdminDb();
-    const byKindSnap = await db.collection("tools").where("kindId", "==", catalogKey).get();
-    if (!byKindSnap.empty) {
-      return byKindSnap.docs
-        .map((doc) => toolFromDoc(doc.id, doc.data()))
-        .filter((tool): tool is Tool => Boolean(tool));
+    const sql = getSql();
+    const byKind = await sql`SELECT * FROM tools WHERE kind_id = ${catalogKey}`;
+    if (byKind.length) {
+      return mapRows(byKind, toolFromRow);
     }
 
-    const byIdSnap = await db.collection("tools").doc(catalogKey).get();
-    if (!byIdSnap.exists) return [];
-    const tool = toolFromDoc(byIdSnap.id, byIdSnap.data()!);
-    if (!tool) return [];
+    const byId = await sql`SELECT * FROM tools WHERE id = ${catalogKey}`;
+    if (!byId.length) return [];
+    const tool = toolFromRow(asRecord(byId[0]));
     const kindId = tool.kindId ?? tool.id;
     if (kindId === catalogKey) return [tool];
 
-    const siblingSnap = await db.collection("tools").where("kindId", "==", kindId).get();
-    const byId = new Map<string, Tool>([[tool.id, tool]]);
-    for (const doc of siblingSnap.docs) {
-      const sibling = toolFromDoc(doc.id, doc.data());
-      if (sibling && sibling.gemachId === tool.gemachId) {
-        byId.set(sibling.id, sibling);
+    const siblings = await sql`SELECT * FROM tools WHERE kind_id = ${kindId}`;
+    const byIdMap = new Map<string, Tool>([[tool.id, tool]]);
+    for (const row of siblings) {
+      const sibling = toolFromRow(asRecord(row));
+      if (sibling.gemachId === tool.gemachId) {
+        byIdMap.set(sibling.id, sibling);
       }
     }
-    return [...byId.values()];
+    return [...byIdMap.values()];
   });
 }
 
@@ -422,56 +366,6 @@ function availabilityForTool(
   return { availableFrom, availabilityLabel };
 }
 
-function toolFromDoc(id: string, data: DocumentData): Tool {
-  const base = docWithId<Omit<Tool, "gemachId" | "kindId"> & { gemachId?: string; kindId?: string; unitLabel?: string }>(id, data)!;
-  return {
-    ...base,
-    gemachId: normalizeGemachId(data.gemachId),
-    kindId: resolveKindId(data, id),
-    unitLabel: typeof data.unitLabel === "string" ? data.unitLabel : undefined,
-    defaultLoanHours:
-      typeof data.defaultLoanHours === "number" ? data.defaultLoanHours : undefined,
-    maxLoanHours: typeof data.maxLoanHours === "number" ? data.maxLoanHours : undefined,
-    imageUrl: typeof data.imageUrl === "string" ? data.imageUrl : undefined,
-    adminNotes: typeof data.adminNotes === "string" ? data.adminNotes : undefined,
-    location: typeof data.location === "string" ? data.location : undefined,
-    brand: typeof data.brand === "string" ? data.brand : undefined,
-    supplier: typeof data.supplier === "string" ? data.supplier : undefined,
-    purpose: typeof data.purpose === "string" ? data.purpose : undefined,
-    productAge: typeof data.productAge === "number" ? data.productAge : undefined,
-    youtubeUrl: typeof data.youtubeUrl === "string" ? data.youtubeUrl : undefined,
-    imageUrls: Array.isArray(data.imageUrls)
-      ? data.imageUrls.filter((u): u is string => typeof u === "string")
-      : undefined,
-  };
-}
-
-function gemachFromDoc(id: string, data: DocumentData): Gemach {
-  const isPlatform = (data.isPlatform as boolean) ?? false;
-  return {
-    id,
-    name: (data.name as string) ?? id,
-    slug: (data.slug as string) ?? id,
-    description: (data.description as string) || undefined,
-    pricingMode: (data.pricingMode as Gemach["pricingMode"]) ?? "loan_fee",
-    maintenanceFee: (data.maintenanceFee as number) || undefined,
-    payboxGroupUrl:
-      typeof data.payboxGroupUrl === "string" && data.payboxGroupUrl
-        ? data.payboxGroupUrl
-        : undefined,
-    isPlatform,
-    active: (data.active as boolean) ?? true,
-    reservationMode: (data.reservationMode as Gemach["reservationMode"]) ?? undefined,
-    defaultLoanHours:
-      typeof data.defaultLoanHours === "number" ? data.defaultLoanHours : undefined,
-    maxLoanHours: typeof data.maxLoanHours === "number" ? data.maxLoanHours : undefined,
-    closedAt: data.closedAt ? tsToIso(data.closedAt) : undefined,
-    cooperativeFee:
-      typeof data.cooperativeFee === "number" ? data.cooperativeFee : undefined,
-    location: typeof data.location === "string" ? data.location : undefined,
-  };
-}
-
 function gemachCatalogFields(gemach: Gemach, tool?: Tool) {
   return {
     gemachName: displayGemachName(gemach),
@@ -506,8 +400,6 @@ function enrichToolsWithGemach(
   });
 }
 
-// ─── Gemachim ────────────────────────────────────────────────────────────────
-
 export async function getAllGemachim(options?: {
   includeInactive?: boolean;
 }): Promise<Gemach[]> {
@@ -516,23 +408,12 @@ export async function getAllGemachim(options?: {
 }
 
 async function loadAllGemachim(includeInactive: boolean): Promise<Gemach[]> {
-  const snap = await getAdminDb().collection("gemachim").get();
-  if (snap.empty) {
-    return [
-      {
-        id: PLATFORM_GEMACH_ID,
-        name: PLATFORM_GEMACH_DISPLAY_NAME,
-        slug: "kerem",
-        pricingMode: "loan_fee",
-        isPlatform: true,
-        active: true,
-        reservationMode: "fixed_hours",
-        defaultLoanHours: PLATFORM_DEFAULT_LOAN_HOURS,
-        maxLoanHours: PLATFORM_MAX_LOAN_HOURS,
-      },
-    ];
+  const sql = getSql();
+  const rows = await sql`SELECT * FROM gemachim`;
+  if (!rows.length) {
+    return [platformGemachFallback(true)];
   }
-  const all = snap.docs.map((d) => gemachFromDoc(d.id, d.data()));
+  const all = mapRows(rows, gemachFromRow);
   for (const gemach of all) {
     rememberQuery(`gemach:${gemach.id}`, gemach);
   }
@@ -551,21 +432,15 @@ export async function getGemachById(id: string): Promise<Gemach | null> {
       if (found) return found;
     }
 
-    const snap = await getAdminDb().collection("gemachim").doc(id).get();
-    if (!snap.exists) {
+    const sql = getSql();
+    const rows = await sql`SELECT * FROM gemachim WHERE id = ${id}`;
+    if (!rows.length) {
       if (id === PLATFORM_GEMACH_ID) {
-        return {
-          id: PLATFORM_GEMACH_ID,
-          name: PLATFORM_GEMACH_DISPLAY_NAME,
-          slug: "kerem",
-          pricingMode: "loan_fee",
-          isPlatform: true,
-          active: true,
-        };
+        return platformGemachFallback(false);
       }
       return null;
     }
-    return gemachFromDoc(snap.id, snap.data()!);
+    return gemachFromRow(asRecord(rows[0]));
   });
 }
 
@@ -581,71 +456,71 @@ export async function createGemachAndAssignAdmin(params: {
   cooperativeFee?: number;
   createdBy: string;
 }): Promise<{ gemach: Gemach; member: Member }> {
-  const db = getAdminDb();
-  const gemachRef = db.collection("gemachim").doc(params.id);
-  const memberRef = db.collection("members").doc(params.createdBy);
-
-  const [existingGemach, memberSnap] = await Promise.all([
-    gemachRef.get(),
-    memberRef.get(),
-  ]);
-
-  if (existingGemach.exists) {
-    throw new Error("מזהה גמ״ח כבר קיים — נסו מזהה אחר");
-  }
-  if (!memberSnap.exists) {
-    throw new Error("משתמש לא נמצא");
-  }
-
-  const memberData = memberSnap.data()!;
-  const role = roleFromMemberData(memberData);
-  const gemachAdminIds = gemachAdminIdsFromData(memberData);
-
   const reservationMode = params.reservationMode ?? "date_range";
 
-  const batch = db.batch();
-  batch.set(gemachRef, {
-    name: params.name.trim(),
-    slug: params.id,
-    description: params.description?.trim() || null,
-    pricingMode: params.pricingMode,
-    reservationMode,
-    ...(reservationMode === "fixed_hours"
-      ? {
-          defaultLoanHours: PARTNER_DEFAULT_LOAN_HOURS,
-          maxLoanHours: PARTNER_MAX_LOAN_HOURS,
-        }
-      : {}),
-    ...(params.pricingMode === "maintenance_only" && params.maintenanceFee !== undefined
-      ? { maintenanceFee: params.maintenanceFee }
-      : {}),
-    ...(params.payboxGroupUrl ? { payboxGroupUrl: params.payboxGroupUrl.trim() } : {}),
-    ...(params.location?.trim() ? { location: params.location.trim() } : {}),
-    ...(params.cooperativeFee !== undefined && params.cooperativeFee > 0
-      ? { cooperativeFee: params.cooperativeFee }
-      : {}),
-    isPlatform: false,
-    active: true,
-    createdBy: params.createdBy,
-    createdAt: FieldValue.serverTimestamp(),
-  });
+  return withTransaction(async (raw) => {
+    const client = raw as unknown as QueryClient;
+    const existing = await txRows(client, "SELECT id FROM gemachim WHERE id = $1", [params.id]);
+    if (existing.length) {
+      throw new Error("מזהה גמ״ח כבר קיים — נסו מזהה אחר");
+    }
+    const memberRows = await txRows(client, "SELECT * FROM members WHERE id = $1", [params.createdBy]);
+    if (!memberRows.length) {
+      throw new Error("משתמש לא נמצא");
+    }
 
-  const memberUpdates: Record<string, unknown> = {
-    gemachAdminIds: gemachAdminIds.includes(params.id)
+    const memberData = memberFromRow(memberRows[0]);
+    const role = memberData.role;
+    const gemachAdminIds = memberData.gemachAdminIds ?? [];
+
+    await client.query(
+      `INSERT INTO gemachim (
+        id, name, slug, description, pricing_mode, reservation_mode,
+        default_loan_hours, max_loan_hours, maintenance_fee, paybox_group_url,
+        location, cooperative_fee, is_platform, active
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6,
+        $7, $8, $9, $10,
+        $11, $12, FALSE, TRUE
+      )`,
+      [
+        params.id,
+        params.name.trim(),
+        params.id,
+        params.description?.trim() || null,
+        params.pricingMode,
+        reservationMode,
+        reservationMode === "fixed_hours" ? PARTNER_DEFAULT_LOAN_HOURS : null,
+        reservationMode === "fixed_hours" ? PARTNER_MAX_LOAN_HOURS : null,
+        params.pricingMode === "maintenance_only" && params.maintenanceFee !== undefined
+          ? params.maintenanceFee
+          : null,
+        params.payboxGroupUrl?.trim() || null,
+        params.location?.trim() || null,
+        params.cooperativeFee !== undefined && params.cooperativeFee > 0
+          ? params.cooperativeFee
+          : null,
+      ]
+    );
+
+    const nextAdminIds = gemachAdminIds.includes(params.id)
       ? gemachAdminIds
-      : [...gemachAdminIds, params.id],
-    updatedAt: FieldValue.serverTimestamp(),
-  };
-  if (role === "MEMBER") {
-    memberUpdates.role = "GEMACH_ADMIN";
-  }
-  batch.update(memberRef, memberUpdates);
+      : [...gemachAdminIds, params.id];
+    const nextRole = role === "MEMBER" ? "GEMACH_ADMIN" : role;
+    await client.query(
+      `UPDATE members
+       SET gemach_admin_ids = $1, role = $2, updated_at = NOW()
+       WHERE id = $3`,
+      [nextAdminIds, nextRole, params.createdBy]
+    );
 
-  await batch.commit();
-
-  const gemach = gemachFromDoc(params.id, (await gemachRef.get()).data()!);
-  const member = memberFromDoc(params.createdBy, (await memberRef.get()).data()!);
-  return { gemach, member };
+    const gemachOut = await txRows(client, "SELECT * FROM gemachim WHERE id = $1", [params.id]);
+    const memberOut = await txRows(client, "SELECT * FROM members WHERE id = $1", [params.createdBy]);
+    return {
+      gemach: gemachFromRow(gemachOut[0]),
+      member: memberFromRow(memberOut[0]),
+    };
+  });
 }
 
 export async function updateGemachSettings(params: {
@@ -659,57 +534,72 @@ export async function updateGemachSettings(params: {
   reservationMode?: GemachReservationMode;
   maintenanceFee?: number | null;
 }): Promise<Gemach> {
-  const ref = getAdminDb().collection("gemachim").doc(params.gemachId);
-  const snap = await ref.get();
-  if (!snap.exists) {
-    throw new Error("גמ״ח לא נמצא");
-  }
-
-  const updates: Record<string, unknown> = {
-    updatedAt: FieldValue.serverTimestamp(),
-  };
-
-  if (params.name !== undefined) {
-    updates.name = params.name.trim();
-  }
-  if (params.description !== undefined) {
-    updates.description = params.description.trim() || null;
-  }
-  if (params.payboxGroupUrl !== undefined) {
-    updates.payboxGroupUrl = params.payboxGroupUrl?.trim() || null;
-  }
-  if (params.cooperativeFee === null) {
-    updates.cooperativeFee = FieldValue.delete();
-  } else if (params.cooperativeFee !== undefined) {
-    updates.cooperativeFee = Math.max(0, params.cooperativeFee);
-  }
-  if (params.location === null) {
-    updates.location = FieldValue.delete();
-  } else if (params.location !== undefined) {
-    updates.location = params.location.trim() || null;
-  }
-  if (params.pricingMode !== undefined) {
-    updates.pricingMode = params.pricingMode;
-    if (params.pricingMode === "free") {
-      updates.maintenanceFee = FieldValue.delete();
-    } else if (params.pricingMode === "loan_fee") {
-      updates.cooperativeFee = FieldValue.delete();
-      updates.maintenanceFee = FieldValue.delete();
-    } else if (params.pricingMode === "maintenance_only") {
-      updates.cooperativeFee = FieldValue.delete();
+  return withTransaction(async (raw) => {
+    const client = raw as unknown as QueryClient;
+    const existing = await txRows(client, "SELECT * FROM gemachim WHERE id = $1", [params.gemachId]);
+    if (!existing.length) {
+      throw new Error("גמ״ח לא נמצא");
     }
-  }
-  if (params.reservationMode !== undefined) {
-    updates.reservationMode = params.reservationMode;
-  }
-  if (params.maintenanceFee === null) {
-    updates.maintenanceFee = FieldValue.delete();
-  } else if (params.maintenanceFee !== undefined) {
-    updates.maintenanceFee = Math.max(0, params.maintenanceFee);
-  }
 
-  await ref.update(updates);
-  return gemachFromDoc(params.gemachId, (await ref.get()).data()!);
+    const sets: string[] = ["updated_at = NOW()"];
+    const values: unknown[] = [];
+    let i = 1;
+
+    if (params.name !== undefined) {
+      sets.push(`name = $${i++}`);
+      values.push(params.name.trim());
+    }
+    if (params.description !== undefined) {
+      sets.push(`description = $${i++}`);
+      values.push(params.description.trim() || null);
+    }
+    if (params.payboxGroupUrl !== undefined) {
+      sets.push(`paybox_group_url = $${i++}`);
+      values.push(params.payboxGroupUrl?.trim() || null);
+    }
+    if (params.cooperativeFee === null) {
+      sets.push("cooperative_fee = NULL");
+    } else if (params.cooperativeFee !== undefined) {
+      sets.push(`cooperative_fee = $${i++}`);
+      values.push(Math.max(0, params.cooperativeFee));
+    }
+    if (params.location === null) {
+      sets.push("location = NULL");
+    } else if (params.location !== undefined) {
+      sets.push(`location = $${i++}`);
+      values.push(params.location.trim() || null);
+    }
+    if (params.pricingMode !== undefined) {
+      sets.push(`pricing_mode = $${i++}`);
+      values.push(params.pricingMode);
+      if (params.pricingMode === "free") {
+        sets.push("maintenance_fee = NULL");
+      } else if (params.pricingMode === "loan_fee") {
+        sets.push("cooperative_fee = NULL");
+        sets.push("maintenance_fee = NULL");
+      } else if (params.pricingMode === "maintenance_only") {
+        sets.push("cooperative_fee = NULL");
+      }
+    }
+    if (params.reservationMode !== undefined) {
+      sets.push(`reservation_mode = $${i++}`);
+      values.push(params.reservationMode);
+    }
+    if (params.maintenanceFee === null) {
+      sets.push("maintenance_fee = NULL");
+    } else if (params.maintenanceFee !== undefined) {
+      sets.push(`maintenance_fee = $${i++}`);
+      values.push(Math.max(0, params.maintenanceFee));
+    }
+
+    values.push(params.gemachId);
+    const updated = await txRows(
+      client,
+      `UPDATE gemachim SET ${sets.join(", ")} WHERE id = $${i} RETURNING *`,
+      values
+    );
+    return gemachFromRow(updated[0]);
+  });
 }
 
 export async function closeGemachPermanently(gemachId: string): Promise<{
@@ -741,7 +631,6 @@ export async function closeGemachPermanently(gemachId: string): Promise<{
     );
   }
 
-  const db = getAdminDb();
   const reservations = await getActiveReservations();
   const reservationsToCancel = reservations.filter(
     (r) =>
@@ -749,48 +638,50 @@ export async function closeGemachPermanently(gemachId: string): Promise<{
       (r.status === "pending" || r.status === "confirmed")
   );
 
-  const batch = db.batch();
+  const toolIdList = tools.map((t) => t.id);
+  const reservationIds = reservationsToCancel.map((r) => r.id);
 
-  for (const reservation of reservationsToCancel) {
-    batch.update(db.collection("reservations").doc(reservation.id), {
-      status: "cancelled",
-    });
-  }
-
-  for (const tool of tools) {
-    batch.delete(db.collection("tools").doc(tool.id));
-    batch.delete(db.collection("device_pots").doc(tool.id));
-  }
-
-  batch.delete(db.collection("gemachim").doc(gemachId));
-
-  await batch.commit();
-
-  for (const reservation of reservationsToCancel) {
-    const pending = await getPendingPaymentForReservation(reservation.id);
-    if (pending) {
-      await db.collection("payments").doc(pending.id).update({ status: "failed" });
+  await withTransaction(async (raw) => {
+    const client = raw as unknown as QueryClient;
+    if (reservationIds.length) {
+      await client.query(
+        `UPDATE reservations
+         SET status = 'cancelled'
+         WHERE id = ANY($1)`,
+        [reservationIds]
+      );
+      await client.query(
+        `UPDATE payments SET status = 'failed'
+         WHERE reservation_id = ANY($1) AND status = 'pending'`,
+        [reservationIds]
+      );
     }
-  }
-
-  const adminsSnap = await db
-    .collection("members")
-    .where("gemachAdminIds", "array-contains", gemachId)
-    .get();
-
-  for (const doc of adminsSnap.docs) {
-    const member = memberFromDoc(doc.id, doc.data());
-    const remainingIds = (member.gemachAdminIds ?? []).filter((id) => id !== gemachId);
-    const updates: Record<string, unknown> = {
-      gemachAdminIds: remainingIds,
-      updatedAt: FieldValue.serverTimestamp(),
-    };
-    if (member.role !== "ADMIN" && remainingIds.length === 0) {
-      updates.role = "MEMBER";
+    if (toolIdList.length) {
+      await client.query("DELETE FROM device_pots WHERE id = ANY($1)", [toolIdList]);
+      await client.query("DELETE FROM tools WHERE id = ANY($1)", [toolIdList]);
     }
-    await db.collection("members").doc(doc.id).update(updates);
-  }
+    await client.query("DELETE FROM gemachim WHERE id = $1", [gemachId]);
 
+    const admins = await txRows(
+      client,
+      "SELECT * FROM members WHERE $1 = ANY(gemach_admin_ids)",
+      [gemachId]
+    );
+    for (const row of admins) {
+      const member = memberFromRow(row);
+      const remainingIds = (member.gemachAdminIds ?? []).filter((id) => id !== gemachId);
+      const nextRole =
+        member.role !== "ADMIN" && remainingIds.length === 0 ? "MEMBER" : member.role;
+      await client.query(
+        `UPDATE members
+         SET gemach_admin_ids = $1, role = $2, updated_at = NOW()
+         WHERE id = $3`,
+        [remainingIds, nextRole, member.id]
+      );
+    }
+  });
+
+  invalidateQueryMemo();
   return { deletedGemachId: gemachId, deletedToolCount: tools.length };
 }
 
@@ -894,108 +785,159 @@ export async function updateToolKindDetails(params: {
     params.loanFeeMax ?? params.loanFeeMin ?? units[0].loanFeeMax
   );
 
-  const batch = getAdminDb().batch();
-  for (const tool of units) {
-    const update: Record<string, unknown> = {
-      name: params.name.trim(),
-      description: params.description.trim(),
-      category: params.category.trim(),
-      loanFeeMin: fees.loanFeeMin,
-      loanFeeMax: fees.loanFeeMax,
-      updatedAt: FieldValue.serverTimestamp(),
-    };
+  const sets: string[] = [
+    "name = $1",
+    "description = $2",
+    "category = $3",
+    "loan_fee_min = $4",
+    "loan_fee_max = $5",
+    "updated_at = NOW()",
+  ];
+  const values: unknown[] = [
+    params.name.trim(),
+    params.description.trim(),
+    params.category.trim(),
+    fees.loanFeeMin,
+    fees.loanFeeMax,
+  ];
+  let i = 6;
 
-    if (params.defaultLoanHours === null) {
-      update.defaultLoanHours = FieldValue.delete();
-    } else if (params.defaultLoanHours !== undefined) {
-      update.defaultLoanHours = params.defaultLoanHours;
-    }
-
-    if (params.maxLoanHours === null) {
-      update.maxLoanHours = FieldValue.delete();
-    } else if (params.maxLoanHours !== undefined) {
-      update.maxLoanHours = params.maxLoanHours;
-    }
-
-    if (params.imageUrl === null) {
-      update.imageUrl = FieldValue.delete();
-    } else if (params.imageUrl !== undefined) {
-      update.imageUrl = params.imageUrl;
-    }
-
-    if (params.adminNotes === null) {
-      update.adminNotes = FieldValue.delete();
-    } else if (params.adminNotes !== undefined) {
-      const notes = params.adminNotes.trim();
-      update.adminNotes = notes ? notes : FieldValue.delete();
-    }
-
-    if (params.imageUrls === null) {
-      update.imageUrls = FieldValue.delete();
-    } else if (params.imageUrls !== undefined) {
-      update.imageUrls = params.imageUrls.length ? params.imageUrls : FieldValue.delete();
-    }
-
-    // Explicit array (incl. empty) is saved; empty disables the safety step.
-    if (params.safetyRules !== undefined) {
-      update.safetyRules = params.safetyRules ?? [];
-    }
-
-    if (params.location === null) {
-      update.location = FieldValue.delete();
-    } else if (params.location !== undefined) {
-      const loc = params.location.trim();
-      update.location = loc ? loc : FieldValue.delete();
-    }
-
-    if (params.brand === null) {
-      update.brand = FieldValue.delete();
-    } else if (params.brand !== undefined) {
-      const v = params.brand.trim();
-      update.brand = v ? v : FieldValue.delete();
-    }
-
-    if (params.supplier === null) {
-      update.supplier = FieldValue.delete();
-    } else if (params.supplier !== undefined) {
-      const v = params.supplier.trim();
-      update.supplier = v ? v : FieldValue.delete();
-    }
-
-    if (params.purpose === null) {
-      update.purpose = FieldValue.delete();
-    } else if (params.purpose !== undefined) {
-      const v = params.purpose.trim();
-      update.purpose = v ? v : FieldValue.delete();
-    }
-
-    if (params.productAge === null) {
-      update.productAge = FieldValue.delete();
-    } else if (params.productAge !== undefined) {
-      update.productAge = params.productAge;
-    }
-
-    if (params.youtubeUrl === null) {
-      update.youtubeUrl = FieldValue.delete();
-    } else if (params.youtubeUrl !== undefined) {
-      const v = params.youtubeUrl.trim();
-      update.youtubeUrl = v ? v : FieldValue.delete();
-    }
-
-    batch.update(getAdminDb().collection("tools").doc(tool.id), update);
+  if (params.defaultLoanHours === null) {
+    sets.push("default_loan_hours = NULL");
+  } else if (params.defaultLoanHours !== undefined) {
+    sets.push(`default_loan_hours = $${i++}`);
+    values.push(params.defaultLoanHours);
   }
-  await batch.commit();
+
+  if (params.maxLoanHours === null) {
+    sets.push("max_loan_hours = NULL");
+  } else if (params.maxLoanHours !== undefined) {
+    sets.push(`max_loan_hours = $${i++}`);
+    values.push(params.maxLoanHours);
+  }
+
+  if (params.imageUrl === null) {
+    sets.push("image_url = NULL");
+  } else if (params.imageUrl !== undefined) {
+    sets.push(`image_url = $${i++}`);
+    values.push(params.imageUrl);
+  }
+
+  if (params.adminNotes === null) {
+    sets.push("admin_notes = NULL");
+  } else if (params.adminNotes !== undefined) {
+    const notes = params.adminNotes.trim();
+    if (notes) {
+      sets.push(`admin_notes = $${i++}`);
+      values.push(notes);
+    } else {
+      sets.push("admin_notes = NULL");
+    }
+  }
+
+  if (params.imageUrls === null) {
+    sets.push("image_urls = NULL");
+  } else if (params.imageUrls !== undefined) {
+    if (params.imageUrls.length) {
+      sets.push(`image_urls = $${i++}`);
+      values.push(params.imageUrls);
+    } else {
+      sets.push("image_urls = NULL");
+    }
+  }
+
+  if (params.safetyRules !== undefined) {
+    sets.push(`safety_rules = $${i++}::jsonb`);
+    values.push(JSON.stringify(params.safetyRules ?? []));
+  }
+
+  if (params.location === null) {
+    sets.push("location = NULL");
+  } else if (params.location !== undefined) {
+    const loc = params.location.trim();
+    if (loc) {
+      sets.push(`location = $${i++}`);
+      values.push(loc);
+    } else {
+      sets.push("location = NULL");
+    }
+  }
+
+  if (params.brand === null) {
+    sets.push("brand = NULL");
+  } else if (params.brand !== undefined) {
+    const v = params.brand.trim();
+    if (v) {
+      sets.push(`brand = $${i++}`);
+      values.push(v);
+    } else {
+      sets.push("brand = NULL");
+    }
+  }
+
+  if (params.supplier === null) {
+    sets.push("supplier = NULL");
+  } else if (params.supplier !== undefined) {
+    const v = params.supplier.trim();
+    if (v) {
+      sets.push(`supplier = $${i++}`);
+      values.push(v);
+    } else {
+      sets.push("supplier = NULL");
+    }
+  }
+
+  if (params.purpose === null) {
+    sets.push("purpose = NULL");
+  } else if (params.purpose !== undefined) {
+    const v = params.purpose.trim();
+    if (v) {
+      sets.push(`purpose = $${i++}`);
+      values.push(v);
+    } else {
+      sets.push("purpose = NULL");
+    }
+  }
+
+  if (params.productAge === null) {
+    sets.push("product_age = NULL");
+  } else if (params.productAge !== undefined) {
+    sets.push(`product_age = $${i++}`);
+    values.push(params.productAge);
+  }
+
+  if (params.youtubeUrl === null) {
+    sets.push("youtube_url = NULL");
+  } else if (params.youtubeUrl !== undefined) {
+    const v = params.youtubeUrl.trim();
+    if (v) {
+      sets.push(`youtube_url = $${i++}`);
+      values.push(v);
+    } else {
+      sets.push("youtube_url = NULL");
+    }
+  }
+
+  const unitIds = units.map((u) => u.id);
+  values.push(unitIds);
+  await withTransaction(async (raw) => {
+    const client = raw as unknown as QueryClient;
+    await client.query(
+      `UPDATE tools SET ${sets.join(", ")} WHERE id = ANY($${i})`,
+      values
+    );
+  });
+  invalidateQueryMemo();
   return { updated: units.length };
 }
 
 export { resolveReservationFee };
 
-// ─── Tools ───────────────────────────────────────────────────────────────────
-
 export async function getAllTools(): Promise<Tool[]> {
   return memoQuery("allTools", async () => {
-    const snap = await getAdminDb().collection("tools").get();
-    return snap.docs.map((d) => toolFromDoc(d.id, d.data())).filter(Boolean);
+    const sql = getSql();
+    const rows = await sql`SELECT * FROM tools`;
+    return mapRows(rows, toolFromRow);
   });
 }
 
@@ -1060,11 +1002,8 @@ export async function syncReservationHardLocks(): Promise<{
     for (const id of reservationToolIds(r)) hardLockedToolIds.add(id);
   }
 
-  const db = getAdminDb();
-  const batch = db.batch();
-  let locked = 0;
-  let released = 0;
-  let ops = 0;
+  const lockIds: string[] = [];
+  const releaseIds: string[] = [];
 
   for (const r of active) {
     const ids = reservationToolIds(r);
@@ -1072,10 +1011,8 @@ export async function syncReservationHardLocks(): Promise<{
       for (const id of ids) {
         const tool = toolMap.get(id);
         if (tool?.status === "available") {
-          batch.update(db.collection("tools").doc(id), { status: "reserved" });
+          lockIds.push(id);
           toolMap.set(id, { ...tool, status: "reserved" });
-          locked += 1;
-          ops += 1;
         }
       }
     } else {
@@ -1083,17 +1020,33 @@ export async function syncReservationHardLocks(): Promise<{
         if (hardLockedToolIds.has(id)) continue;
         const tool = toolMap.get(id);
         if (tool?.status === "reserved") {
-          batch.update(db.collection("tools").doc(id), { status: "available" });
+          releaseIds.push(id);
           toolMap.set(id, { ...tool, status: "available" });
-          released += 1;
-          ops += 1;
         }
       }
     }
   }
 
-  if (ops > 0) await batch.commit();
-  return { locked, released };
+  if (lockIds.length || releaseIds.length) {
+    await withTransaction(async (raw) => {
+      const client = raw as unknown as QueryClient;
+      if (lockIds.length) {
+        await client.query(
+          `UPDATE tools SET status = 'reserved', updated_at = NOW() WHERE id = ANY($1)`,
+          [lockIds]
+        );
+      }
+      if (releaseIds.length) {
+        await client.query(
+          `UPDATE tools SET status = 'available', updated_at = NOW() WHERE id = ANY($1)`,
+          [releaseIds]
+        );
+      }
+    });
+    invalidateQueryMemo();
+  }
+
+  return { locked: lockIds.length, released: releaseIds.length };
 }
 
 export async function pickAvailableToolUnits(
@@ -1179,28 +1132,23 @@ export async function getToolWithAvailability(id: string): Promise<ToolWithAvail
 }
 
 export async function getToolById(id: string): Promise<Tool | null> {
-  const snap = await getAdminDb().collection("tools").doc(id).get();
-  if (!snap.exists) return null;
-  return toolFromDoc(snap.id, snap.data()!);
+  const sql = getSql();
+  const rows = await sql`SELECT * FROM tools WHERE id = ${id}`;
+  return rows[0] ? toolFromRow(asRecord(rows[0])) : null;
 }
 
 export async function getToolByQrCode(qrCode: string): Promise<Tool | null> {
-  const snap = await getAdminDb()
-    .collection("tools")
-    .where("qrCode", "==", qrCode)
-    .limit(1)
-    .get();
-  if (snap.empty) return null;
-  const d = snap.docs[0];
-  return toolFromDoc(d.id, d.data()!);
+  const sql = getSql();
+  const rows = await sql`SELECT * FROM tools WHERE qr_code = ${qrCode} LIMIT 1`;
+  return rows[0] ? toolFromRow(asRecord(rows[0])) : null;
 }
 
 export async function updateToolStatus(id: string, status: Tool["status"]) {
-  await getAdminDb().collection("tools").doc(id).update({ status });
+  const sql = getSql();
+  await sql`UPDATE tools SET status = ${status}, updated_at = NOW() WHERE id = ${id}`;
   invalidateQueryMemo();
 }
 
-/** Bulk status change for all idle units of a tool kind. */
 export async function updateToolKindStatus(params: {
   gemachId: string;
   kindId: string;
@@ -1213,8 +1161,7 @@ export async function updateToolKindStatus(params: {
     throw new Error("הכלי לא נמצא");
   }
 
-  const batch = getAdminDb().batch();
-  let updated = 0;
+  const updates: Array<{ id: string; status: Tool["status"] }> = [];
 
   for (const tool of units) {
     let nextStatus: Tool["status"] | null = null;
@@ -1227,23 +1174,28 @@ export async function updateToolKindStatus(params: {
     } else if (params.status === "maintenance" && tool.status === "available") {
       nextStatus = "maintenance";
     }
-
     if (nextStatus) {
-      batch.update(getAdminDb().collection("tools").doc(tool.id), { status: nextStatus });
-      updated++;
+      updates.push({ id: tool.id, status: nextStatus });
     }
   }
 
-  if (updated === 0) {
+  if (updates.length === 0) {
     throw new Error("אין יחידות שניתן לעדכן במצב הנוכחי");
   }
 
-  await batch.commit();
+  await withTransaction(async (raw) => {
+    const client = raw as unknown as QueryClient;
+    for (const u of updates) {
+      await client.query(
+        "UPDATE tools SET status = $1, updated_at = NOW() WHERE id = $2",
+        [u.status, u.id]
+      );
+    }
+  });
   invalidateQueryMemo();
-  return { updated };
+  return { updated: updates.length };
 }
 
-/** Permanently remove a cooperative tool kind. Platform/cooperative admin only. */
 export async function deleteToolKind(params: {
   gemachId: string;
   kindId: string;
@@ -1279,13 +1231,12 @@ export async function deleteToolKind(params: {
     throw new Error("לא ניתן למחוק — יש שריונים פעילים על הכלי");
   }
 
-  const db = getAdminDb();
-  const batch = db.batch();
-  for (const tool of units) {
-    batch.delete(db.collection("tools").doc(tool.id));
-    batch.delete(db.collection("device_pots").doc(tool.id));
-  }
-  await batch.commit();
+  const ids = units.map((u) => u.id);
+  await withTransaction(async (raw) => {
+    const client = raw as unknown as QueryClient;
+    await client.query("DELETE FROM device_pots WHERE id = ANY($1)", [ids]);
+    await client.query("DELETE FROM tools WHERE id = ANY($1)", [ids]);
+  });
   invalidateQueryMemo();
   return { deleted: units.length };
 }
@@ -1345,175 +1296,192 @@ export async function createToolsForGemach(params: {
 
   const fees = resolveToolFees(gemach, params.loanFeeMin, params.loanFeeMax);
   const kindId = kindIdForTool(params.gemachId, params.name, params.kindId);
-  // An explicit array (even empty) is respected; omitting it keeps the default.
   const safetyRules =
     params.safetyRules !== undefined ? params.safetyRules : DEFAULT_SAFETY_RULES;
 
-  const db = getAdminDb();
-  const batch = db.batch();
   const created: Tool[] = [];
   const baseId = Date.now().toString(36);
 
-  for (let i = 0; i < params.quantity; i++) {
-    const toolId = `tool-${baseId}-${i + 1}`;
-    const unitLabel = params.quantity > 1 ? `יחידה ${i + 1}` : undefined;
-    const qrCode = `${qrCodeForUnit(params.gemachId, kindId, i)}-${baseId.toUpperCase()}`;
+  await withTransaction(async (raw) => {
+    const client = raw as unknown as QueryClient;
+    for (let i = 0; i < params.quantity; i++) {
+      const toolId = `tool-${baseId}-${i + 1}`;
+      const unitLabel = params.quantity > 1 ? `יחידה ${i + 1}` : undefined;
+      const qrCode = `${qrCodeForUnit(params.gemachId, kindId, i)}-${baseId.toUpperCase()}`;
 
-    const toolData = {
-      name: params.name.trim(),
-      description: params.description.trim(),
-      category: params.category.trim(),
-      qrCode,
-      status: "available" as const,
-      loanFeeMin: fees.loanFeeMin,
-      loanFeeMax: fees.loanFeeMax,
-      gemachId: params.gemachId,
-      kindId,
-      ...(unitLabel ? { unitLabel } : {}),
-      ...(params.defaultLoanHours !== undefined
-        ? { defaultLoanHours: params.defaultLoanHours }
-        : {}),
-      ...(params.maxLoanHours !== undefined ? { maxLoanHours: params.maxLoanHours } : {}),
-      ...(params.location?.trim() ? { location: params.location.trim() } : {}),
-      ...(params.brand?.trim() ? { brand: params.brand.trim() } : {}),
-      ...(params.supplier?.trim() ? { supplier: params.supplier.trim() } : {}),
-      ...(params.purpose?.trim() ? { purpose: params.purpose.trim() } : {}),
-      ...(params.productAge !== undefined && Number.isFinite(params.productAge)
-        ? { productAge: params.productAge }
-        : {}),
-      ...(params.youtubeUrl?.trim() ? { youtubeUrl: params.youtubeUrl.trim() } : {}),
-      safetyRules,
-      createdBy: params.createdBy,
-      createdAt: FieldValue.serverTimestamp(),
-    };
+      await client.query(
+        `INSERT INTO tools (
+          id, name, description, category, qr_code, status,
+          loan_fee_min, loan_fee_max, gemach_id, kind_id, unit_label,
+          default_loan_hours, max_loan_hours, location, brand, supplier,
+          purpose, product_age, youtube_url, safety_rules
+        ) VALUES (
+          $1, $2, $3, $4, $5, 'available',
+          $6, $7, $8, $9, $10,
+          $11, $12, $13, $14, $15,
+          $16, $17, $18, $19::jsonb
+        )`,
+        [
+          toolId,
+          params.name.trim(),
+          params.description.trim(),
+          params.category.trim(),
+          qrCode,
+          fees.loanFeeMin,
+          fees.loanFeeMax,
+          params.gemachId,
+          kindId,
+          unitLabel ?? null,
+          params.defaultLoanHours ?? null,
+          params.maxLoanHours ?? null,
+          params.location?.trim() || null,
+          params.brand?.trim() || null,
+          params.supplier?.trim() || null,
+          params.purpose?.trim() || null,
+          params.productAge !== undefined && Number.isFinite(params.productAge)
+            ? params.productAge
+            : null,
+          params.youtubeUrl?.trim() || null,
+          JSON.stringify(safetyRules),
+        ]
+      );
+      await client.query(
+        `INSERT INTO device_pots (id, tool_id, balance, total_earned, total_spent)
+         VALUES ($1, $2, 0, 0, 0)
+         ON CONFLICT (id) DO UPDATE SET tool_id = EXCLUDED.tool_id`,
+        [toolId, toolId]
+      );
 
-    batch.set(db.collection("tools").doc(toolId), toolData);
-    batch.set(
-      db.collection("device_pots").doc(toolId),
-      {
-        toolId,
-        balance: 0,
-        totalEarned: 0,
-        totalSpent: 0,
-      },
-      { merge: true }
-    );
+      created.push({
+        id: toolId,
+        name: params.name.trim(),
+        description: params.description.trim(),
+        category: params.category.trim(),
+        qrCode,
+        status: "available",
+        loanFeeMin: fees.loanFeeMin,
+        loanFeeMax: fees.loanFeeMax,
+        gemachId: params.gemachId,
+        kindId,
+        ...(unitLabel ? { unitLabel } : {}),
+        ...(params.defaultLoanHours !== undefined
+          ? { defaultLoanHours: params.defaultLoanHours }
+          : {}),
+        ...(params.maxLoanHours !== undefined ? { maxLoanHours: params.maxLoanHours } : {}),
+        ...(params.location?.trim() ? { location: params.location.trim() } : {}),
+        ...(params.brand?.trim() ? { brand: params.brand.trim() } : {}),
+        ...(params.supplier?.trim() ? { supplier: params.supplier.trim() } : {}),
+        ...(params.purpose?.trim() ? { purpose: params.purpose.trim() } : {}),
+        ...(params.productAge !== undefined && Number.isFinite(params.productAge)
+          ? { productAge: params.productAge }
+          : {}),
+        ...(params.youtubeUrl?.trim() ? { youtubeUrl: params.youtubeUrl.trim() } : {}),
+        safetyRules,
+      });
+    }
+  });
 
-    created.push({
-      id: toolId,
-      name: params.name.trim(),
-      description: params.description.trim(),
-      category: params.category.trim(),
-      qrCode,
-      status: "available",
-      loanFeeMin: fees.loanFeeMin,
-      loanFeeMax: fees.loanFeeMax,
-      gemachId: params.gemachId,
-      kindId,
-      ...(unitLabel ? { unitLabel } : {}),
-      ...(params.defaultLoanHours !== undefined
-        ? { defaultLoanHours: params.defaultLoanHours }
-        : {}),
-      ...(params.maxLoanHours !== undefined ? { maxLoanHours: params.maxLoanHours } : {}),
-      ...(params.location?.trim() ? { location: params.location.trim() } : {}),
-      ...(params.brand?.trim() ? { brand: params.brand.trim() } : {}),
-      ...(params.supplier?.trim() ? { supplier: params.supplier.trim() } : {}),
-      ...(params.purpose?.trim() ? { purpose: params.purpose.trim() } : {}),
-      ...(params.productAge !== undefined && Number.isFinite(params.productAge)
-        ? { productAge: params.productAge }
-        : {}),
-      ...(params.youtubeUrl?.trim() ? { youtubeUrl: params.youtubeUrl.trim() } : {}),
-      safetyRules,
-    });
-  }
-
-  await batch.commit();
+  invalidateQueryMemo();
   return { kindId, tools: created };
 }
 
-// ─── Reservations ──────────────────────────────────────────────────────────
-
 export async function getReservationById(id: string): Promise<Reservation | null> {
-  const snap = await getAdminDb().collection("reservations").doc(id).get();
-  if (!snap.exists) return null;
-  return reservationFromDoc(snap.id, snap.data()!);
+  const sql = getSql();
+  const rows = await sql`SELECT * FROM reservations WHERE id = ${id}`;
+  return rows[0] ? reservationFromRow(asRecord(rows[0])) : null;
 }
 
 export async function createReservation(
   data: Omit<Reservation, "id" | "createdAt">
 ): Promise<Reservation> {
   const id = newId("res");
-  const ref = getAdminDb().collection("reservations").doc(id);
-  const now = FieldValue.serverTimestamp();
-  await ref.set({
-    memberId: data.memberId,
-    toolId: data.toolId,
-    pickupDate: data.pickupDate,
-    pickupTimeStart: data.pickupTimeStart ?? null,
-    pickupTimeEnd: data.pickupTimeEnd ?? null,
-    returnDate: data.returnDate,
-    returnTimeStart: data.returnTimeStart ?? null,
-    returnTimeEnd: data.returnTimeEnd ?? null,
-    date: data.pickupDate,
-    status: data.status,
-    feeAmount: data.feeAmount,
-    ...(data.loanDurationHours !== undefined
-      ? { loanDurationHours: data.loanDurationHours }
-      : {}),
-    ...(data.kindId ? { kindId: data.kindId } : {}),
-    ...(data.quantity !== undefined ? { quantity: data.quantity } : {}),
-    ...(data.toolIds?.length ? { toolIds: data.toolIds } : {}),
-    ...(data.groupId ? { groupId: data.groupId } : {}),
-    ...(data.cooperativeFeeAmount !== undefined
-      ? { cooperativeFeeAmount: data.cooperativeFeeAmount }
-      : {}),
-    createdAt: now,
+  const createdAt = new Date().toISOString();
+
+  await withTransaction(async (raw) => {
+    const client = raw as unknown as QueryClient;
+    await client.query(
+      `INSERT INTO reservations (
+        id, member_id, tool_id, pickup_date, pickup_time_start, pickup_time_end,
+        return_date, return_time_start, return_time_end, status, fee_amount,
+        loan_duration_hours, kind_id, quantity, tool_ids, group_id, cooperative_fee_amount
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6,
+        $7, $8, $9, $10, $11,
+        $12, $13, $14, $15, $16, $17
+      )`,
+      [
+        id,
+        data.memberId,
+        data.toolId,
+        data.pickupDate,
+        data.pickupTimeStart ?? null,
+        data.pickupTimeEnd ?? null,
+        data.returnDate,
+        data.returnTimeStart ?? null,
+        data.returnTimeEnd ?? null,
+        data.status,
+        data.feeAmount,
+        data.loanDurationHours ?? null,
+        data.kindId ?? null,
+        data.quantity ?? null,
+        data.toolIds?.length ? data.toolIds : null,
+        data.groupId ?? null,
+        data.cooperativeFeeAmount ?? null,
+      ]
+    );
   });
   invalidateQueryMemo();
-  return { ...data, id, createdAt: new Date().toISOString() };
+  return { ...data, id, createdAt };
 }
 
 export async function updateReservationStatus(id: string, status: Reservation["status"]) {
-  await getAdminDb().collection("reservations").doc(id).update({ status });
+  const sql = getSql();
+  await sql`UPDATE reservations SET status = ${status} WHERE id = ${id}`;
   invalidateQueryMemo();
 }
 
 async function releaseReservedToolsForReservation(
-  db: FirebaseFirestore.Firestore,
-  batch: FirebaseFirestore.WriteBatch,
+  client: QueryClient,
   reservation: Reservation,
   reservationId: string
 ): Promise<void> {
   const toolIds = reservationToolIds(reservation);
   for (const toolId of toolIds) {
-    const tool = await getToolById(toolId);
+    const toolRows = await txRows(client, "SELECT * FROM tools WHERE id = $1", [toolId]);
+    const tool = toolRows[0] ? toolFromRow(toolRows[0]) : null;
     if (tool?.status !== "reserved") continue;
 
-    const onToolSnap = await db
-      .collection("reservations")
-      .where("toolId", "==", toolId)
-      .get();
-
-    let hasOtherActive = onToolSnap.docs.some((doc) => {
-      if (doc.id === reservationId) return false;
-      const status = doc.data().status as Reservation["status"];
+    const onTool = await txRows(
+      client,
+      `SELECT id, status FROM reservations WHERE tool_id = $1`,
+      [toolId]
+    );
+    let hasOtherActive = onTool.some((row) => {
+      if (String(row.id) === reservationId) return false;
+      const status = row.status as Reservation["status"];
       return status === "pending" || status === "confirmed";
     });
 
     if (!hasOtherActive) {
-      const active = await getActiveReservations();
-      hasOtherActive = active.some(
+      const active = await txRows(
+        client,
+        `SELECT * FROM reservations WHERE status = ANY($1)`,
+        [ACTIVE_RESERVATION_STATUSES]
+      );
+      hasOtherActive = mapRows(active, reservationFromRow).some(
         (r) => r.id !== reservationId && reservationToolIds(r).includes(toolId)
       );
     }
 
     if (!hasOtherActive) {
-      batch.update(db.collection("tools").doc(toolId), { status: "available" });
+      await client.query(
+        "UPDATE tools SET status = $1, updated_at = NOW() WHERE id = $2",
+        ["available", toolId]
+      );
     }
   }
 }
 
-/** Cancel a reservation and free tools (no member auth — system no-show). */
 export async function autoCancelNoShowReservation(
   reservationId: string
 ): Promise<Reservation | null> {
@@ -1524,35 +1492,34 @@ export async function autoCancelNoShowReservation(
   }
   if (!isReservationNoShowExpired(reservation)) return reservation;
 
-  const db = getAdminDb();
-  const existingLoan = await db
-    .collection("loans")
-    .where("reservationId", "==", reservationId)
-    .limit(1)
-    .get();
-  if (!existingLoan.empty) return reservation;
+  const cancelled = await withTransaction(async (raw) => {
+    const client = raw as unknown as QueryClient;
+    const existingLoan = await txRows(
+      client,
+      "SELECT id FROM loans WHERE reservation_id = $1 LIMIT 1",
+      [reservationId]
+    );
+    if (existingLoan.length) return false;
 
-  const batch = db.batch();
-  batch.update(db.collection("reservations").doc(reservationId), {
-    status: "cancelled",
-    cancelReason: "no_show",
-    cancelledAt: FieldValue.serverTimestamp(),
+    await client.query(
+      `UPDATE reservations
+       SET status = 'cancelled', cancel_reason = 'no_show', cancelled_at = NOW()
+       WHERE id = $1`,
+      [reservationId]
+    );
+    await releaseReservedToolsForReservation(client, reservation, reservationId);
+    await client.query(
+      `UPDATE payments SET status = 'failed'
+       WHERE reservation_id = $1 AND status = 'pending'`,
+      [reservationId]
+    );
+    return true;
   });
 
-  await releaseReservedToolsForReservation(db, batch, reservation, reservationId);
-
-  const pendingPayment = await getPendingPaymentForReservation(reservationId);
-  if (pendingPayment) {
-    batch.update(db.collection("payments").doc(pendingPayment.id), {
-      status: "failed",
-    });
-  }
-
-  await batch.commit();
-  return { ...reservation, status: "cancelled" };
+  if (cancelled) invalidateQueryMemo();
+  return { ...reservation, status: cancelled ? "cancelled" : reservation.status };
 }
 
-/** Cancel all active reservations past the no-show pickup deadline. */
 export async function expireStaleNoShowReservations(): Promise<number> {
   const now = new Date();
   const reservations = await getActiveReservations();
@@ -1575,11 +1542,6 @@ export async function expireNoShowReservationIfNeeded(
   return getReservationById(reservationId);
 }
 
-/**
- * Refund a paid reservation payment into the member's internal credit balance.
- * Idempotent: if the payment is already `refunded`, returns 0.
- * Used for member-initiated cancel before pickup start (not for no-show).
- */
 async function refundPaidReservationToCredit(params: {
   payment: MemberPayment;
   reservationId: string;
@@ -1591,69 +1553,60 @@ async function refundPaidReservationToCredit(params: {
 
   const amount = Math.round(payment.amount * 100) / 100;
   if (!(amount > 0)) {
-    await getAdminDb().collection("payments").doc(payment.id).update({
-      status: "refunded",
-      refundedAt: FieldValue.serverTimestamp(),
-    });
+    const sql = getSql();
+    await sql`UPDATE payments SET status = 'refunded', refunded_at = NOW() WHERE id = ${payment.id}`;
     return 0;
   }
 
-  const db = getAdminDb();
-  const memberRef = db.collection("members").doc(memberId);
-  const paymentRef = db.collection("payments").doc(payment.id);
-  const ledgerRef = db.collection("credit_ledger").doc(newId("cl"));
+  const ledgerId = newId("cl");
 
-  const refunded = await db.runTransaction(async (txn) => {
-    const paySnap = await txn.get(paymentRef);
-    if (!paySnap.exists) return 0;
-    const payData = paySnap.data() ?? {};
-    if (payData.status === "refunded") return 0;
-    if (payData.status !== "paid") return 0;
+  return withTransaction(async (raw) => {
+    const client = raw as unknown as QueryClient;
+    const payRows = await txRows(client, "SELECT * FROM payments WHERE id = $1", [payment.id]);
+    if (!payRows.length) return 0;
+    const pay = paymentFromRow(payRows[0]);
+    if (pay.status === "refunded") return 0;
+    if (pay.status !== "paid") return 0;
 
-    const refundAmount =
-      Math.round((typeof payData.amount === "number" ? payData.amount : amount) * 100) /
-      100;
+    const refundAmount = Math.round(pay.amount * 100) / 100;
     if (!(refundAmount > 0)) {
-      txn.update(paymentRef, {
-        status: "refunded",
-        refundedAt: FieldValue.serverTimestamp(),
-      });
+      await client.query(
+        "UPDATE payments SET status = 'refunded', refunded_at = NOW() WHERE id = $1",
+        [payment.id]
+      );
       return 0;
     }
 
-    const memberSnap = await txn.get(memberRef);
-    if (!memberSnap.exists) throw new Error("משתמש לא נמצא");
-    const current = memberCreditBalance(memberSnap.data() ?? {});
+    const memberRows = await txRows(client, "SELECT * FROM members WHERE id = $1", [memberId]);
+    if (!memberRows.length) throw new Error("משתמש לא נמצא");
+    const current = memberFromRow(memberRows[0]).creditBalance;
     const next = Math.round((current + refundAmount) * 100) / 100;
 
-    txn.set(
-      memberRef,
-      { creditBalance: next, updatedAt: FieldValue.serverTimestamp() },
-      { merge: true }
+    await client.query(
+      "UPDATE members SET credit_balance = $1, updated_at = NOW() WHERE id = $2",
+      [next, memberId]
     );
-    txn.set(
-      ledgerRef,
-      omitUndefined({
-        id: ledgerRef.id,
+    await client.query(
+      `INSERT INTO credit_ledger (
+        id, member_id, delta, balance_after, reason, note, reservation_id, created_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        ledgerId,
         memberId,
-        delta: refundAmount,
-        balanceAfter: next,
-        reason: "refund" as const,
-        note: `החזר על ביטול שריון לפני מועד ההשאלה — ${reservationId}`,
+        refundAmount,
+        next,
+        "refund",
+        `החזר על ביטול שריון לפני מועד ההשאלה — ${reservationId}`,
         reservationId,
-        createdBy: memberId,
-        createdAt: FieldValue.serverTimestamp(),
-      })
+        memberId,
+      ]
     );
-    txn.update(paymentRef, {
-      status: "refunded",
-      refundedAt: FieldValue.serverTimestamp(),
-    });
-
+    await client.query(
+      "UPDATE payments SET status = 'refunded', refunded_at = NOW() WHERE id = $1",
+      [payment.id]
+    );
     return refundAmount;
   });
-
-  return refunded;
 }
 
 export async function cancelReservation(
@@ -1671,38 +1624,36 @@ export async function cancelReservation(
     throw new Error("לא ניתן לבטל שריון זה");
   }
 
-  const db = getAdminDb();
-  const existingLoan = await db
-    .collection("loans")
-    .where("reservationId", "==", id)
-    .limit(1)
-    .get();
-
-  if (!existingLoan.empty) {
-    throw new Error("כבר התחיל תהליך לקיחה — לא ניתן לבטל");
-  }
-
   const paidPayment = await getPaidPaymentForReservation(id);
   const beforePickupStart =
     Date.now() < reservationPickupStart(reservation).getTime();
 
-  const batch = db.batch();
-  batch.update(db.collection("reservations").doc(id), {
-    status: "cancelled",
-    cancelReason: "member",
-    cancelledAt: FieldValue.serverTimestamp(),
+  await withTransaction(async (raw) => {
+    const client = raw as unknown as QueryClient;
+    const existingLoan = await txRows(
+      client,
+      "SELECT id FROM loans WHERE reservation_id = $1 LIMIT 1",
+      [id]
+    );
+    if (existingLoan.length) {
+      throw new Error("כבר התחיל תהליך לקיחה — לא ניתן לבטל");
+    }
+
+    await client.query(
+      `UPDATE reservations
+       SET status = 'cancelled', cancel_reason = 'member', cancelled_at = NOW()
+       WHERE id = $1`,
+      [id]
+    );
+    await releaseReservedToolsForReservation(client, reservation, id);
+    await client.query(
+      `UPDATE payments SET status = 'failed'
+       WHERE reservation_id = $1 AND status = 'pending'`,
+      [id]
+    );
   });
 
-  await releaseReservedToolsForReservation(db, batch, reservation, id);
-
-  const pendingPayment = await getPendingPaymentForReservation(id);
-  if (pendingPayment) {
-    batch.update(db.collection("payments").doc(pendingPayment.id), {
-      status: "failed",
-    });
-  }
-
-  await batch.commit();
+  invalidateQueryMemo();
 
   let refundedAmount = 0;
   if (paidPayment && beforePickupStart) {
@@ -1721,90 +1672,39 @@ export async function cancelReservation(
 }
 
 export async function getAllReservations(): Promise<Reservation[]> {
-  const snap = await getAdminDb().collection("reservations").get();
-  return snap.docs.map((d) => reservationFromDoc(d.id, d.data())).filter(Boolean);
+  const sql = getSql();
+  const rows = await sql`SELECT * FROM reservations`;
+  return mapRows(rows, reservationFromRow);
 }
 
 export async function getReservationsByMember(memberId: string): Promise<Reservation[]> {
-  const snap = await getAdminDb()
-    .collection("reservations")
-    .where("memberId", "==", memberId)
-    .get();
-
-  return snap.docs.map((d) => reservationFromDoc(d.id, d.data()));
+  const sql = getSql();
+  const rows = await sql`SELECT * FROM reservations WHERE member_id = ${memberId}`;
+  return mapRows(rows, reservationFromRow);
 }
 
-// ─── Loans ─────────────────────────────────────────────────────────────────
-
 export async function getLoanById(id: string): Promise<Loan | null> {
-  const snap = await getAdminDb().collection("loans").doc(id).get();
-  if (!snap.exists) return null;
-  return loanFromDoc(snap.id, snap.data()!);
+  const sql = getSql();
+  const rows = await sql`SELECT * FROM loans WHERE id = ${id}`;
+  return rows[0] ? loanFromRow(asRecord(rows[0])) : null;
 }
 
 export async function getLoansByMember(memberId: string): Promise<Loan[]> {
-  const snap = await getAdminDb()
-    .collection("loans")
-    .where("memberId", "==", memberId)
-    .get();
-  return snap.docs.map((d) => loanFromDoc(d.id, d.data())).filter(Boolean);
+  const sql = getSql();
+  const rows = await sql`SELECT * FROM loans WHERE member_id = ${memberId}`;
+  return mapRows(rows, loanFromRow);
 }
 
 export async function getAllLoans(): Promise<Loan[]> {
-  const snap = await getAdminDb().collection("loans").get();
-  return snap.docs.map((d) => loanFromDoc(d.id, d.data())).filter(Boolean);
-}
-
-// ─── Members ───────────────────────────────────────────────────────────────
-
-function memberCreditBalance(data: DocumentData): number {
-  const value = data.creditBalance;
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-function memberFromDoc(id: string, data: DocumentData): Member {
-  return {
-    id,
-    name: (data.name as string) ?? "חבר",
-    firstName: (data.firstName as string) || undefined,
-    familyName: (data.familyName as string) || undefined,
-    nameCompleted: data.nameCompleted === true,
-    email: (data.email as string) ?? "",
-    phone: (data.phone as string) || undefined,
-    isAmember: (data.isAmember as boolean) ?? false,
-    firstPayout: data.firstPayout !== false,
-    termsAcceptedAt: (data.termsAcceptedAt as string) || undefined,
-    membershipOfferDismissedAt:
-      (data.membershipOfferDismissedAt as string) || undefined,
-    hasPaymentMethod: (data.hasPaymentMethod as boolean) ?? false,
-    role: roleFromMemberData(data),
-    gemachAdminIds: gemachAdminIdsFromData(data),
-    creditBalance: memberCreditBalance(data),
-  };
-}
-
-/** Full admin summary projection for a member document. */
-function memberSummaryFromDoc(id: string, data: DocumentData): AdminMemberSummary {
-  const m = memberFromDoc(id, data);
-  return {
-    id: m.id,
-    name: m.name,
-    firstName: m.firstName,
-    familyName: m.familyName,
-    email: m.email,
-    phone: m.phone,
-    isAmember: m.isAmember,
-    firstPayout: m.firstPayout,
-    role: m.role,
-    gemachAdminIds: m.gemachAdminIds,
-    creditBalance: m.creditBalance,
-  };
+  const sql = getSql();
+  const rows = await sql`SELECT * FROM loans`;
+  return mapRows(rows, loanFromRow);
 }
 
 export async function getMemberById(uid: string): Promise<Member | null> {
-  const snap = await getAdminDb().collection("members").doc(uid).get();
-  if (!snap.exists) return null;
-  return memberFromDoc(snap.id, snap.data()!);
+  const sql = getSql();
+  const rows = await sql`SELECT * FROM members WHERE id = ${uid}`;
+  return rows[0] ? memberFromRow(asRecord(rows[0])) : null;
 }
 
 export async function syncMemberFromAuth(params: {
@@ -1813,156 +1713,144 @@ export async function syncMemberFromAuth(params: {
   email: string;
   photoURL?: string | null;
 }): Promise<Member> {
-  const ref = getAdminDb().collection("members").doc(params.uid);
-  const existing = await ref.get();
-  const existingData = existing.exists ? existing.data() : undefined;
-  const role = existing.exists
-    ? roleFromMemberData(existingData ?? {})
+  const sql = getSql();
+  const existingRows = await sql`SELECT * FROM members WHERE id = ${params.uid}`;
+  const existing = existingRows[0] ? memberFromRow(asRecord(existingRows[0])) : null;
+  const role = existing
+    ? roleFromMemberData({
+        role: existing.role,
+        gemachAdminIds: existing.gemachAdminIds,
+      })
     : DEFAULT_MEMBER_ROLE;
 
-  await ref.set(
-    {
-      name: params.name,
-      email: params.email,
-      photoURL: params.photoURL ?? null,
-      hasPaymentMethod: existing.exists
-        ? ((existingData?.hasPaymentMethod as boolean) ?? false)
-        : false,
-      role,
-      updatedAt: FieldValue.serverTimestamp(),
-      ...(existing.exists
-        ? {}
-        : {
-            createdAt: FieldValue.serverTimestamp(),
-            isAmember: false,
-            firstPayout: true,
-          }),
-    },
-    { merge: true }
-  );
+  if (existing) {
+    await sql`
+      UPDATE members
+      SET name = ${params.name},
+          email = ${params.email},
+          photo_url = ${params.photoURL ?? null},
+          role = ${role},
+          updated_at = NOW()
+      WHERE id = ${params.uid}
+    `;
+  } else {
+    await sql`
+      INSERT INTO members (
+        id, name, email, photo_url, has_payment_method, role, is_a_member, first_payout
+      ) VALUES (
+        ${params.uid}, ${params.name}, ${params.email}, ${params.photoURL ?? null},
+        FALSE, ${role}, FALSE, TRUE
+      )
+    `;
+  }
 
   return {
     id: params.uid,
     name: params.name,
-    firstName: (existingData?.firstName as string) || undefined,
-    familyName: (existingData?.familyName as string) || undefined,
-    nameCompleted: existingData?.nameCompleted === true,
+    firstName: existing?.firstName,
+    familyName: existing?.familyName,
+    nameCompleted: existing?.nameCompleted === true,
     email: params.email,
-    phone: (existingData?.phone as string) || undefined,
-    isAmember: (existingData?.isAmember as boolean) ?? false,
-    firstPayout: existingData?.firstPayout !== false,
-    termsAcceptedAt: (existingData?.termsAcceptedAt as string) || undefined,
-    membershipOfferDismissedAt:
-      (existingData?.membershipOfferDismissedAt as string) || undefined,
-    hasPaymentMethod: existing.exists
-      ? ((existingData?.hasPaymentMethod as boolean) ?? false)
-      : false,
+    phone: existing?.phone,
+    isAmember: existing?.isAmember ?? false,
+    firstPayout: existing ? existing.firstPayout !== false : true,
+    termsAcceptedAt: existing?.termsAcceptedAt,
+    membershipOfferDismissedAt: existing?.membershipOfferDismissedAt,
+    hasPaymentMethod: existing?.hasPaymentMethod ?? false,
     role,
-    gemachAdminIds: existing.exists ? gemachAdminIdsFromData(existingData ?? {}) : [],
-    creditBalance: existing.exists ? memberCreditBalance(existingData ?? {}) : 0,
+    gemachAdminIds: existing ? gemachAdminIdsFromData({ gemachAdminIds: existing.gemachAdminIds }) : [],
+    creditBalance: existing?.creditBalance ?? 0,
   };
 }
 
-/** Update platform-admin-managed member flags (membership / first payout). */
 export async function updateMemberFlags(
   memberId: string,
   updates: { isAmember?: boolean; firstPayout?: boolean }
 ): Promise<AdminMemberSummary> {
-  const ref = getAdminDb().collection("members").doc(memberId);
-  const snap = await ref.get();
-  if (!snap.exists) throw new Error("משתמש לא נמצא");
+  const existing = await getMemberById(memberId);
+  if (!existing) throw new Error("משתמש לא נמצא");
 
-  const patch: Record<string, unknown> = { updatedAt: FieldValue.serverTimestamp() };
-  if (typeof updates.isAmember === "boolean") patch.isAmember = updates.isAmember;
-  if (typeof updates.firstPayout === "boolean") patch.firstPayout = updates.firstPayout;
-
-  await ref.set(patch, { merge: true });
-  return memberSummaryFromDoc(memberId, (await ref.get()).data()!);
+  const sql = getSql();
+  const isAmember =
+    typeof updates.isAmember === "boolean" ? updates.isAmember : existing.isAmember ?? false;
+  const firstPayout =
+    typeof updates.firstPayout === "boolean" ? updates.firstPayout : existing.firstPayout !== false;
+  const rows = await sql`
+    UPDATE members
+    SET is_a_member = ${isAmember},
+        first_payout = ${firstPayout},
+        updated_at = NOW()
+    WHERE id = ${memberId}
+    RETURNING *
+  `;
+  return memberSummary(memberFromRow(asRecord(rows[0])));
 }
 
-/** Save a member's mobile number (stored as digits only). */
 export async function updateMemberPhone(uid: string, phone: string): Promise<Member> {
-  const ref = getAdminDb().collection("members").doc(uid);
-  const existing = await ref.get();
-  if (!existing.exists) throw new Error("משתמש לא נמצא");
+  const sql = getSql();
+  const existing = await sql`SELECT id FROM members WHERE id = ${uid}`;
+  if (!existing.length) throw new Error("משתמש לא נמצא");
 
-  await ref.set(
-    { phone, updatedAt: FieldValue.serverTimestamp() },
-    { merge: true }
-  );
-
-  const snap = await ref.get();
-  return memberFromDoc(snap.id, snap.data()!);
+  const rows = await sql`
+    UPDATE members SET phone = ${phone}, updated_at = NOW() WHERE id = ${uid} RETURNING *
+  `;
+  return memberFromRow(asRecord(rows[0]));
 }
 
-/** Record תקנון acceptance (idempotent). */
 export async function acceptMemberTerms(uid: string): Promise<Member> {
-  const ref = getAdminDb().collection("members").doc(uid);
-  const existing = await ref.get();
-  if (!existing.exists) throw new Error("משתמש לא נמצא");
-
-  const data = existing.data()!;
-  if (typeof data.termsAcceptedAt === "string" && data.termsAcceptedAt) {
-    return memberFromDoc(existing.id, data);
-  }
+  const existing = await getMemberById(uid);
+  if (!existing) throw new Error("משתמש לא נמצא");
+  if (existing.termsAcceptedAt) return existing;
 
   const termsAcceptedAt = new Date().toISOString();
-  await ref.set(
-    { termsAcceptedAt, updatedAt: FieldValue.serverTimestamp() },
-    { merge: true }
-  );
-
-  const snap = await ref.get();
-  return memberFromDoc(snap.id, snap.data()!);
+  const sql = getSql();
+  const rows = await sql`
+    UPDATE members
+    SET terms_accepted_at = ${termsAcceptedAt}::timestamptz, updated_at = NOW()
+    WHERE id = ${uid}
+    RETURNING *
+  `;
+  return memberFromRow(asRecord(rows[0]));
 }
 
-/** Dismiss the optional post-signup join offer (PayBox + תקנון). */
 export async function dismissMembershipOffer(uid: string): Promise<Member> {
-  const ref = getAdminDb().collection("members").doc(uid);
-  const existing = await ref.get();
-  if (!existing.exists) throw new Error("משתמש לא נמצא");
-
-  const data = existing.data()!;
-  if (
-    typeof data.membershipOfferDismissedAt === "string" &&
-    data.membershipOfferDismissedAt
-  ) {
-    return memberFromDoc(existing.id, data);
-  }
+  const existing = await getMemberById(uid);
+  if (!existing) throw new Error("משתמש לא נמצא");
+  if (existing.membershipOfferDismissedAt) return existing;
 
   const membershipOfferDismissedAt = new Date().toISOString();
-  await ref.set(
-    { membershipOfferDismissedAt, updatedAt: FieldValue.serverTimestamp() },
-    { merge: true }
-  );
-
-  const snap = await ref.get();
-  return memberFromDoc(snap.id, snap.data()!);
+  const sql = getSql();
+  const rows = await sql`
+    UPDATE members
+    SET membership_offer_dismissed_at = ${membershipOfferDismissedAt}::timestamptz,
+        updated_at = NOW()
+    WHERE id = ${uid}
+    RETURNING *
+  `;
+  return memberFromRow(asRecord(rows[0]));
 }
 
-/** Save a member's first and family name (both required). */
 export async function updateMemberName(
   uid: string,
   firstName: string,
   familyName: string
 ): Promise<Member> {
-  const ref = getAdminDb().collection("members").doc(uid);
-  const existing = await ref.get();
-  if (!existing.exists) throw new Error("משתמש לא נמצא");
+  const sql = getSql();
+  const existing = await sql`SELECT id FROM members WHERE id = ${uid}`;
+  if (!existing.length) throw new Error("משתמש לא נמצא");
 
-  await ref.set(
-    {
-      firstName,
-      familyName,
-      name: `${firstName} ${familyName}`,
-      nameCompleted: true,
-      updatedAt: FieldValue.serverTimestamp(),
-    },
-    { merge: true }
-  );
-
-  const snap = await ref.get();
-  return memberFromDoc(snap.id, snap.data()!);
+  const name = `${firstName} ${familyName}`;
+  const rows = await sql`
+    UPDATE members
+    SET first_name = ${firstName},
+        family_name = ${familyName},
+        name = ${name},
+        name_completed = TRUE,
+        updated_at = NOW()
+    WHERE id = ${uid}
+    RETURNING *
+  `;
+  return memberFromRow(asRecord(rows[0]));
 }
 
 export async function getAdminDashboard(options?: {
@@ -2172,11 +2060,11 @@ export async function getAdminDashboard(options?: {
 }
 
 export async function listMembers(query?: string): Promise<AdminMemberSummary[]> {
-  const snap = await getAdminDb().collection("members").get();
+  const sql = getSql();
+  const rows = await sql`SELECT * FROM members`;
   const normalized = query?.trim().toLowerCase() ?? "";
 
-  return snap.docs
-    .map((d) => memberFromDoc(d.id, d.data()))
+  return mapRows(rows, memberFromRow)
     .filter((m) => {
       if (!normalized) return true;
       return (
@@ -2185,19 +2073,7 @@ export async function listMembers(query?: string): Promise<AdminMemberSummary[]>
       );
     })
     .sort((a, b) => a.name.localeCompare(b.name, "he"))
-    .map((m) => ({
-      id: m.id,
-      name: m.name,
-      firstName: m.firstName,
-      familyName: m.familyName,
-      email: m.email,
-      phone: m.phone,
-      isAmember: m.isAmember,
-      firstPayout: m.firstPayout,
-      role: m.role,
-      gemachAdminIds: m.gemachAdminIds,
-      creditBalance: m.creditBalance,
-    }));
+    .map(memberSummary);
 }
 
 /** @deprecated use listMembers */
@@ -2232,19 +2108,7 @@ export async function getMemberHistory(memberId: string): Promise<AdminMemberHis
   const creditLedger = await getMemberCreditLedger(memberId);
 
   return {
-    member: {
-      id: member.id,
-      name: member.name,
-      firstName: member.firstName,
-      familyName: member.familyName,
-      email: member.email,
-      phone: member.phone,
-      isAmember: member.isAmember,
-      firstPayout: member.firstPayout,
-      role: member.role,
-      gemachAdminIds: member.gemachAdminIds,
-      creditBalance: member.creditBalance,
-    },
+    member: memberSummary(member),
     creditLedger,
     loans: sortedLoans.map((loan) => ({
       id: loan.id,
@@ -2278,57 +2142,29 @@ export async function updateMemberRole(
     throw new Error("תפקיד לא נתמך");
   }
 
-  const ref = getAdminDb().collection("members").doc(memberId);
-  const snap = await ref.get();
-  if (!snap.exists) {
+  const sql = getSql();
+  const existing = await sql`SELECT id FROM members WHERE id = ${memberId}`;
+  if (!existing.length) {
     throw new Error("משתמש לא נמצא");
   }
 
-  await ref.update({
-    role,
-    updatedAt: FieldValue.serverTimestamp(),
-  });
-
-  return memberSummaryFromDoc(memberId, (await ref.get()).data()!);
-}
-
-// ─── Internal credit balance ─────────────────────────────────────────────────
-
-function creditLedgerFromDoc(id: string, data: DocumentData): CreditLedgerEntry {
-  return {
-    id,
-    memberId: (data.memberId as string) ?? "",
-    delta: typeof data.delta === "number" ? data.delta : 0,
-    balanceAfter: typeof data.balanceAfter === "number" ? data.balanceAfter : 0,
-    reason: (data.reason as CreditLedgerEntry["reason"]) ?? "manual_adjustment",
-    note: typeof data.note === "string" ? data.note : undefined,
-    reservationId: typeof data.reservationId === "string" ? data.reservationId : undefined,
-    peerLoanId: typeof data.peerLoanId === "string" ? data.peerLoanId : undefined,
-    createdBy: (data.createdBy as string) ?? "",
-    createdAt: data.createdAt ? tsToIso(data.createdAt) : new Date().toISOString(),
-  };
+  const rows = await sql`
+    UPDATE members SET role = ${role}, updated_at = NOW() WHERE id = ${memberId} RETURNING *
+  `;
+  return memberSummary(memberFromRow(asRecord(rows[0])));
 }
 
 export async function getMemberCreditLedger(
   memberId: string,
   limit = 50
 ): Promise<CreditLedgerEntry[]> {
-  const snap = await getAdminDb()
-    .collection("credit_ledger")
-    .where("memberId", "==", memberId)
-    .get();
-
-  return snap.docs
-    .map((d) => creditLedgerFromDoc(d.id, d.data()))
+  const sql = getSql();
+  const rows = await sql`SELECT * FROM credit_ledger WHERE member_id = ${memberId}`;
+  return mapRows(rows, ledgerFromRow)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, limit);
 }
 
-/**
- * Apply a manual balance adjustment (platform admin only). Runs in a
- * transaction so concurrent edits cannot corrupt the balance, and records
- * every change in the credit ledger. Balance may not drop below zero.
- */
 export async function adjustMemberCredit(params: {
   memberId: string;
   delta: number;
@@ -2341,61 +2177,42 @@ export async function adjustMemberCredit(params: {
     throw new Error("סכום העדכון אינו תקין");
   }
 
-  const db = getAdminDb();
-  const memberRef = db.collection("members").doc(memberId);
-  const ledgerRef = db.collection("credit_ledger").doc(newId("cl"));
+  const ledgerId = newId("cl");
 
-  const balanceAfter = await db.runTransaction(async (txn) => {
-    const snap = await txn.get(memberRef);
-    if (!snap.exists) throw new Error("משתמש לא נמצא");
+  const { balanceAfter, entry } = await withTransaction(async (raw) => {
+    const client = raw as unknown as QueryClient;
+    const memberRows = await txRows(client, "SELECT * FROM members WHERE id = $1", [memberId]);
+    if (!memberRows.length) throw new Error("משתמש לא נמצא");
 
-    const data = snap.data() ?? {};
-    // Balance can only be added to paying members. A non-member must join first.
-    if (delta > 0 && data.isAmember !== true) {
+    const member = memberFromRow(memberRows[0]);
+    if (delta > 0 && member.isAmember !== true) {
       throw new Error("לא ניתן להוסיף יתרה למי שאינו רשום כחבר משלם בקואופרטיב");
     }
 
-    const current = memberCreditBalance(data);
+    const current = member.creditBalance;
     const next = Math.round((current + delta) * 100) / 100;
     if (next < 0) {
       throw new Error("היתרה אינה יכולה לרדת מתחת לאפס");
     }
 
-    txn.set(
-      memberRef,
-      { creditBalance: next, updatedAt: FieldValue.serverTimestamp() },
-      { merge: true }
+    await client.query(
+      "UPDATE members SET credit_balance = $1, updated_at = NOW() WHERE id = $2",
+      [next, memberId]
     );
-    txn.set(
-      ledgerRef,
-      omitUndefined({
-        id: ledgerRef.id,
-        memberId,
-        delta,
-        balanceAfter: next,
-        reason,
-        note,
-        createdBy,
-        createdAt: FieldValue.serverTimestamp(),
-      })
+    const ledgerRows = await txRows(
+      client,
+      `INSERT INTO credit_ledger (
+        id, member_id, delta, balance_after, reason, note, created_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING *`,
+      [ledgerId, memberId, delta, next, reason, note ?? null, createdBy]
     );
-
-    return next;
+    return { balanceAfter: next, entry: ledgerFromRow(ledgerRows[0]) };
   });
 
-  const entry = creditLedgerFromDoc(
-    ledgerRef.id,
-    (await ledgerRef.get()).data() ?? {}
-  );
   return { balance: balanceAfter, entry };
 }
 
-/**
- * Credit a single PayBox payment row to a member's balance. Idempotent per
- * `importKey`: the whole operation (dedupe check, balance update, ledger entry
- * and import record) runs in one transaction, so re-uploading the same export
- * never double-credits. Returns "duplicate" when the row was already imported.
- */
 export async function applyPayboxImportRow(params: {
   memberId: string;
   amount: number;
@@ -2419,38 +2236,35 @@ export async function applyPayboxImportRow(params: {
     throw new Error("סכום התשלום אינו תקין");
   }
 
-  const db = getAdminDb();
-  const memberRef = db.collection("members").doc(memberId);
-  const importRef = db.collection("paybox_payment_imports").doc(importKey);
-  const ledgerRef = db.collection("credit_ledger").doc(newId("cl"));
+  const ledgerId = newId("cl");
 
-  const result = await db.runTransaction(async (txn) => {
-    const importSnap = await txn.get(importRef);
-    if (importSnap.exists) return { status: "duplicate" as const };
+  const result = await withTransaction(async (raw) => {
+    const client = raw as unknown as QueryClient;
+    const importRows = await txRows(
+      client,
+      "SELECT id FROM paybox_payment_imports WHERE id = $1",
+      [importKey]
+    );
+    if (importRows.length) return { status: "duplicate" as const };
 
-    const snap = await txn.get(memberRef);
-    if (!snap.exists) throw new Error("משתמש לא נמצא");
+    const memberRows = await txRows(client, "SELECT * FROM members WHERE id = $1", [memberId]);
+    if (!memberRows.length) throw new Error("משתמש לא נמצא");
 
-    const data = snap.data() ?? {};
-    const isAmember = data.isAmember === true;
+    const member = memberFromRow(memberRows[0]);
+    const isAmember = member.isAmember === true;
 
-    // A non-member can only be credited by a qualifying membership payment
-    // (>= the join minimum). Anything smaller is rejected — no credit applied.
     if (!isAmember && amount < MEMBERSHIP_JOIN_MIN_NIS) {
       return { status: "rejected_not_member" as const };
     }
 
-    // A qualifying non-member becomes a member now. Only on that first join do
-    // we withhold the one-time membership fee and credit the remainder; every
-    // later payment from an existing member is credited in full.
-    const firstPayout = isFirstPayout(data);
+    const firstPayout = isFirstPayout({ firstPayout: member.firstPayout });
     const becameMember = !isAmember;
     const { membershipFee, credited } = splitFirstPayout(
       amount,
       becameMember && firstPayout
     );
 
-    const current = memberCreditBalance(data);
+    const current = member.creditBalance;
     const next = Math.round((current + credited) * 100) / 100;
 
     const feeNote =
@@ -2458,42 +2272,39 @@ export async function applyPayboxImportRow(params: {
         ? `${note ? `${note} · ` : ""}דמי חבר נוכו ₪${membershipFee} מתוך ₪${amount}`
         : note;
 
-    txn.set(
-      memberRef,
-      omitUndefined({
-        creditBalance: next,
-        ...(firstPayout ? { firstPayout: false } : {}),
-        ...(becameMember ? { isAmember: true } : {}),
-        updatedAt: FieldValue.serverTimestamp(),
-      }),
-      { merge: true }
+    await client.query(
+      `UPDATE members
+       SET credit_balance = $1,
+           first_payout = CASE WHEN $2 THEN FALSE ELSE first_payout END,
+           is_a_member = CASE WHEN $3 THEN TRUE ELSE is_a_member END,
+           updated_at = NOW()
+       WHERE id = $4`,
+      [next, firstPayout, becameMember, memberId]
     );
-    txn.set(
-      ledgerRef,
-      omitUndefined({
-        id: ledgerRef.id,
-        memberId,
-        delta: credited,
-        balanceAfter: next,
-        reason: "paybox_import" as CreditLedgerEntry["reason"],
-        note: feeNote,
-        createdBy,
-        createdAt: FieldValue.serverTimestamp(),
-      })
+    const ledgerRows = await txRows(
+      client,
+      `INSERT INTO credit_ledger (
+        id, member_id, delta, balance_after, reason, note, created_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING *`,
+      [ledgerId, memberId, credited, next, "paybox_import", feeNote ?? null, createdBy]
     );
-    txn.set(
-      importRef,
-      omitUndefined({
-        id: importKey,
-        memberId,
-        amount,
-        credited,
-        membershipFee,
-        ledgerId: ledgerRef.id,
-        note: feeNote,
-        createdBy,
-        createdAt: FieldValue.serverTimestamp(),
-      })
+    await client.query(
+      `INSERT INTO paybox_payment_imports (id, data) VALUES ($1, $2::jsonb)`,
+      [
+        importKey,
+        JSON.stringify({
+          id: importKey,
+          memberId,
+          amount,
+          credited,
+          membershipFee,
+          ledgerId,
+          note: feeNote,
+          createdBy,
+          createdAt: new Date().toISOString(),
+        }),
+      ]
     );
     return {
       status: "applied" as const,
@@ -2501,32 +2312,23 @@ export async function applyPayboxImportRow(params: {
       credited,
       membershipFee,
       becameMember,
+      entry: ledgerFromRow(ledgerRows[0]),
     };
   });
 
   if (result.status === "duplicate") return { status: "duplicate" };
   if (result.status === "rejected_not_member") return { status: "rejected_not_member" };
 
-  const entry = creditLedgerFromDoc(
-    ledgerRef.id,
-    (await ledgerRef.get()).data() ?? {}
-  );
   return {
     status: "applied",
     balance: result.balance,
-    entry,
+    entry: result.entry,
     credited: result.credited,
     membershipFee: result.membershipFee,
     becameMember: result.becameMember,
   };
 }
 
-/**
- * Apply the member's internal balance toward a reservation's loan fee.
- * Debits up to the available balance (partial allowed), records a ledger
- * entry, and updates/creates the reservation payment. Idempotent: a payment
- * that already has credit applied is returned unchanged.
- */
 export async function applyCreditToReservationPayment(params: {
   reservation: Reservation;
   memberId: string;
@@ -2549,24 +2351,24 @@ export async function applyCreditToReservationPayment(params: {
     };
   }
 
-  const db = getAdminDb();
-  const memberRef = db.collection("members").doc(memberId);
   const pending = await getPendingPaymentForReservation(reservation.id);
   const paymentId = pending?.id ?? newId("pay");
-  const paymentRef = db.collection("payments").doc(paymentId);
-  const ledgerRef = db.collection("credit_ledger").doc(newId("cl"));
+  const ledgerId = newId("cl");
 
-  await db.runTransaction(async (txn) => {
-    const memberSnap = await txn.get(memberRef);
-    const balance = memberCreditBalance(memberSnap.data() ?? {});
-    const paySnap = await txn.get(paymentRef);
+  await withTransaction(async (raw) => {
+    const client = raw as unknown as QueryClient;
+    const memberRows = await txRows(client, "SELECT * FROM members WHERE id = $1", [memberId]);
+    const member = memberRows[0] ? memberFromRow(memberRows[0]) : null;
+    const balance = member?.creditBalance ?? 0;
+
+    const payRows = await txRows(client, "SELECT * FROM payments WHERE id = $1", [paymentId]);
     const alreadyApplied =
-      paySnap.exists && typeof paySnap.data()?.creditApplied === "number"
-        ? (paySnap.data()!.creditApplied as number)
+      payRows[0] && typeof paymentFromRow(payRows[0]).creditApplied === "number"
+        ? (paymentFromRow(payRows[0]).creditApplied as number)
         : 0;
 
     if (alreadyApplied > 0) {
-      return; // idempotent — credit already applied to this payment
+      return;
     }
 
     const creditApply = Math.min(balance, fee);
@@ -2578,51 +2380,61 @@ export async function applyCreditToReservationPayment(params: {
     const remaining = Math.max(0, Math.round((fee - creditApply) * 100) / 100);
     const paid = remaining <= 0;
 
-    txn.set(
-      memberRef,
-      { creditBalance: balanceAfter, updatedAt: FieldValue.serverTimestamp() },
-      { merge: true }
+    await client.query(
+      "UPDATE members SET credit_balance = $1, updated_at = NOW() WHERE id = $2",
+      [balanceAfter, memberId]
     );
-    txn.set(ledgerRef, {
-      id: ledgerRef.id,
-      memberId,
-      delta: -creditApply,
-      balanceAfter,
-      reason: "payment_debit",
-      note: `תשלום מהיתרה — השאלה ${reservation.id}`,
-      reservationId: reservation.id,
-      createdBy: memberId,
-      createdAt: FieldValue.serverTimestamp(),
-    });
-
-    if (paySnap.exists) {
-      txn.update(
-        paymentRef,
-        omitUndefined({
-          creditApplied: creditApply,
-          ...(paid
-            ? {
-                status: "paid",
-                provider: "credit",
-                paidAt: FieldValue.serverTimestamp(),
-              }
-            : {}),
-        })
-      );
-    } else {
-      txn.set(paymentRef, {
-        id: paymentId,
-        reservationId: reservation.id,
+    await client.query(
+      `INSERT INTO credit_ledger (
+        id, member_id, delta, balance_after, reason, note, reservation_id, created_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        ledgerId,
         memberId,
-        toolId: reservation.toolId,
-        amount: fee,
-        creditApplied: creditApply,
-        status: paid ? "paid" : "pending",
-        provider: paid ? "credit" : "paybox_group",
-        payboxGroupUrl: "",
-        createdAt: FieldValue.serverTimestamp(),
-        ...(paid ? { paidAt: FieldValue.serverTimestamp() } : {}),
-      });
+        -creditApply,
+        balanceAfter,
+        "payment_debit",
+        `תשלום מהיתרה — השאלה ${reservation.id}`,
+        reservation.id,
+        memberId,
+      ]
+    );
+
+    if (payRows.length) {
+      if (paid) {
+        await client.query(
+          `UPDATE payments
+           SET credit_applied = $1, status = 'paid', provider = 'credit', paid_at = NOW()
+           WHERE id = $2`,
+          [creditApply, paymentId]
+        );
+      } else {
+        await client.query(
+          "UPDATE payments SET credit_applied = $1 WHERE id = $2",
+          [creditApply, paymentId]
+        );
+      }
+    } else {
+      await client.query(
+        `INSERT INTO payments (
+          id, reservation_id, member_id, tool_id, amount, credit_applied,
+          status, provider, paybox_group_url, paid_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6,
+          $7, $8, '', $9
+        )`,
+        [
+          paymentId,
+          reservation.id,
+          memberId,
+          reservation.toolId,
+          fee,
+          creditApply,
+          paid ? "paid" : "pending",
+          paid ? "credit" : "paybox_group",
+          paid ? new Date() : null,
+        ]
+      );
     }
   });
 
@@ -2633,65 +2445,38 @@ export async function applyCreditToReservationPayment(params: {
   return { payment, creditApplied, remaining, paid: remaining <= 0 };
 }
 
-// ─── Peer credit loans (mutual guarantee) ───────────────────────────────────
-
-function peerLoanFromDoc(id: string, data: DocumentData): PeerCreditLoan {
-  return {
-    id,
-    lenderId: data.lenderId as string,
-    lenderName: (data.lenderName as string) ?? "",
-    borrowerId: data.borrowerId as string,
-    borrowerName: (data.borrowerName as string) ?? "",
-    principal: typeof data.principal === "number" ? data.principal : 0,
-    outstanding: typeof data.outstanding === "number" ? data.outstanding : 0,
-    status: data.status === "settled" ? "settled" : "open",
-    createdAt: data.createdAt ? tsToIso(data.createdAt) : new Date().toISOString(),
-    settledAt: data.settledAt ? tsToIso(data.settledAt) : undefined,
-  };
-}
-
-/** Members a borrower can receive credit from / send credit to (id + name only). */
 export async function listMemberDirectory(
   excludeId?: string
 ): Promise<Array<{ id: string; name: string }>> {
-  const snap = await getAdminDb().collection("members").get();
-  return snap.docs
-    .map((d) => ({ id: d.id, name: (d.data().name as string) ?? "חבר/ה" }))
+  const sql = getSql();
+  const rows = await sql`SELECT id, name FROM members`;
+  return rows
+    .map((d) => ({ id: String(asRecord(d).id ?? ""), name: String(asRecord(d).name ?? "חבר/ה") }))
     .filter((m) => m.id !== excludeId)
     .sort((a, b) => a.name.localeCompare(b.name, "he"));
 }
 
-/** True when the member has any open peer-credit debt with outstanding > 0. */
 export async function memberHasOpenPeerDebt(memberId: string): Promise<boolean> {
-  const snap = await getAdminDb()
-    .collection("credit_loans")
-    .where("borrowerId", "==", memberId)
-    .where("status", "==", "open")
-    .limit(25)
-    .get();
-  return snap.docs.some((d) => {
-    const outstanding = d.data().outstanding;
-    return typeof outstanding === "number" && outstanding > 0;
+  const sql = getSql();
+  const rows = await sql`
+    SELECT outstanding FROM credit_loans
+    WHERE borrower_id = ${memberId} AND status = 'open'
+    LIMIT 25
+  `;
+  return rows.some((d) => {
+    const outstanding = Number(asRecord(d).outstanding);
+    return Number.isFinite(outstanding) && outstanding > 0;
   });
 }
 
-/** Open debts a member owes (as borrower) and is owed (as lender), aggregated. */
 export async function getPeerCreditSummary(memberId: string): Promise<{
   owed: PeerDebtSummary[];
   lent: PeerDebtSummary[];
 }> {
-  const db = getAdminDb();
-  const [owedSnap, lentSnap] = await Promise.all([
-    db
-      .collection("credit_loans")
-      .where("borrowerId", "==", memberId)
-      .where("status", "==", "open")
-      .get(),
-    db
-      .collection("credit_loans")
-      .where("lenderId", "==", memberId)
-      .where("status", "==", "open")
-      .get(),
+  const sql = getSql();
+  const [owedRows, lentRows] = await Promise.all([
+    sql`SELECT * FROM credit_loans WHERE borrower_id = ${memberId} AND status = 'open'`,
+    sql`SELECT * FROM credit_loans WHERE lender_id = ${memberId} AND status = 'open'`,
   ]);
 
   const aggregate = (
@@ -2711,22 +2496,11 @@ export async function getPeerCreditSummary(memberId: string): Promise<{
   };
 
   return {
-    owed: aggregate(
-      owedSnap.docs.map((d) => peerLoanFromDoc(d.id, d.data())),
-      "lender"
-    ),
-    lent: aggregate(
-      lentSnap.docs.map((d) => peerLoanFromDoc(d.id, d.data())),
-      "borrower"
-    ),
+    owed: aggregate(mapRows(owedRows, peerLoanFromRow), "lender"),
+    lent: aggregate(mapRows(lentRows, peerLoanFromRow), "borrower"),
   };
 }
 
-/**
- * Transfer internal credit from one member to another and record the debt.
- * The recipient owes the sender back. Atomic: balances, ledger entries and the
- * loan record all move together.
- */
 export async function transferCreditToMember(params: {
   fromMemberId: string;
   toMemberId: string;
@@ -2742,79 +2516,90 @@ export async function transferCreditToMember(params: {
     throw new Error("לא ניתן להעביר קרדיט לעצמכם");
   }
 
-  const db = getAdminDb();
-  const fromRef = db.collection("members").doc(fromMemberId);
-  const toRef = db.collection("members").doc(toMemberId);
-  const loanRef = db.collection("credit_loans").doc(newId("cloan"));
-  const fromLedgerRef = db.collection("credit_ledger").doc(newId("cl"));
-  const toLedgerRef = db.collection("credit_ledger").doc(newId("cl"));
+  const loanId = newId("cloan");
+  const fromLedgerId = newId("cl");
+  const toLedgerId = newId("cl");
 
-  await db.runTransaction(async (txn) => {
-    const [fromSnap, toSnap] = await Promise.all([txn.get(fromRef), txn.get(toRef)]);
-    if (!fromSnap.exists) throw new Error("החשבון שלך לא נמצא");
-    if (!toSnap.exists) throw new Error("המשתמש שאליו מעבירים לא נמצא");
+  return withTransaction(async (raw) => {
+    const client = raw as unknown as QueryClient;
+    const [fromRows, toRows] = await Promise.all([
+      txRows(client, "SELECT * FROM members WHERE id = $1", [fromMemberId]),
+      txRows(client, "SELECT * FROM members WHERE id = $1", [toMemberId]),
+    ]);
+    if (!fromRows.length) throw new Error("החשבון שלך לא נמצא");
+    if (!toRows.length) throw new Error("המשתמש שאליו מעבירים לא נמצא");
 
-    const fromData = fromSnap.data() ?? {};
-    const toData = toSnap.data() ?? {};
-    const fromBalance = memberCreditBalance(fromData);
-    const toBalance = memberCreditBalance(toData);
-
-    if (fromBalance < amount) {
+    const fromMember = memberFromRow(fromRows[0]);
+    const toMember = memberFromRow(toRows[0]);
+    if (fromMember.creditBalance < amount) {
       throw new Error("אין מספיק יתרה להעברה");
     }
 
-    const fromName = (fromData.name as string) ?? "חבר/ה";
-    const toName = (toData.name as string) ?? "חבר/ה";
-    const fromAfter = Math.round((fromBalance - amount) * 100) / 100;
-    const toAfter = Math.round((toBalance + amount) * 100) / 100;
+    const fromAfter = Math.round((fromMember.creditBalance - amount) * 100) / 100;
+    const toAfter = Math.round((toMember.creditBalance + amount) * 100) / 100;
 
-    txn.set(fromRef, { creditBalance: fromAfter, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-    txn.set(toRef, { creditBalance: toAfter, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    await client.query(
+      "UPDATE members SET credit_balance = $1, updated_at = NOW() WHERE id = $2",
+      [fromAfter, fromMemberId]
+    );
+    await client.query(
+      "UPDATE members SET credit_balance = $1, updated_at = NOW() WHERE id = $2",
+      [toAfter, toMemberId]
+    );
 
-    txn.set(loanRef, {
-      id: loanRef.id,
-      lenderId: fromMemberId,
-      lenderName: fromName,
-      borrowerId: toMemberId,
-      borrowerName: toName,
-      principal: amount,
-      outstanding: amount,
-      status: "open",
-      createdAt: FieldValue.serverTimestamp(),
-    });
+    const loanRows = await txRows(
+      client,
+      `INSERT INTO credit_loans (
+        id, lender_id, lender_name, borrower_id, borrower_name,
+        principal, outstanding, status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'open')
+      RETURNING *`,
+      [
+        loanId,
+        fromMemberId,
+        fromMember.name || "חבר/ה",
+        toMemberId,
+        toMember.name || "חבר/ה",
+        amount,
+        amount,
+      ]
+    );
 
-    txn.set(fromLedgerRef, {
-      id: fromLedgerRef.id,
-      memberId: fromMemberId,
-      delta: -amount,
-      balanceAfter: fromAfter,
-      reason: "peer_transfer_out",
-      note: `העברת קרדיט לחבר ${toName}`,
-      peerLoanId: loanRef.id,
-      createdBy: fromMemberId,
-      createdAt: FieldValue.serverTimestamp(),
-    });
-    txn.set(toLedgerRef, {
-      id: toLedgerRef.id,
-      memberId: toMemberId,
-      delta: amount,
-      balanceAfter: toAfter,
-      reason: "peer_transfer_in",
-      note: `קבלת קרדיט מחבר ${fromName}`,
-      peerLoanId: loanRef.id,
-      createdBy: fromMemberId,
-      createdAt: FieldValue.serverTimestamp(),
-    });
+    await client.query(
+      `INSERT INTO credit_ledger (
+        id, member_id, delta, balance_after, reason, note, peer_loan_id, created_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        fromLedgerId,
+        fromMemberId,
+        -amount,
+        fromAfter,
+        "peer_transfer_out",
+        `העברת קרדיט לחבר ${toMember.name || "חבר/ה"}`,
+        loanId,
+        fromMemberId,
+      ]
+    );
+    await client.query(
+      `INSERT INTO credit_ledger (
+        id, member_id, delta, balance_after, reason, note, peer_loan_id, created_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        toLedgerId,
+        toMemberId,
+        amount,
+        toAfter,
+        "peer_transfer_in",
+        `קבלת קרדיט מחבר ${fromMember.name || "חבר/ה"}`,
+        loanId,
+        fromMemberId,
+      ]
+    );
+
+    return { loan: peerLoanFromRow(loanRows[0]) };
   });
-
-  const loanSnap = await loanRef.get();
-  return { loan: peerLoanFromDoc(loanRef.id, loanSnap.data() ?? {}) };
 }
 
-/**
- * Repay, in full, every open debt the borrower owes to one counterparty
- * (lender). Moves credit back and settles the loans atomically.
- */
 export async function repayPeerCreditDebt(params: {
   borrowerId: string;
   lenderId: string;
@@ -2822,82 +2607,90 @@ export async function repayPeerCreditDebt(params: {
   const { borrowerId, lenderId } = params;
   if (borrowerId === lenderId) throw new Error("בקשה לא תקינה");
 
-  const db = getAdminDb();
-  const borrowerRef = db.collection("members").doc(borrowerId);
-  const lenderRef = db.collection("members").doc(lenderId);
-  const openLoansQuery = db
-    .collection("credit_loans")
-    .where("borrowerId", "==", borrowerId)
-    .where("lenderId", "==", lenderId)
-    .where("status", "==", "open");
-  const borrowerLedgerRef = db.collection("credit_ledger").doc(newId("cl"));
-  const lenderLedgerRef = db.collection("credit_ledger").doc(newId("cl"));
+  const borrowerLedgerId = newId("cl");
+  const lenderLedgerId = newId("cl");
 
-  const repaid = await db.runTransaction(async (txn) => {
-    const loansSnap = await txn.get(openLoansQuery);
-    const total = loansSnap.docs.reduce((sum, d) => {
-      const o = d.data().outstanding;
-      return sum + (typeof o === "number" ? o : 0);
+  return withTransaction(async (raw) => {
+    const client = raw as unknown as QueryClient;
+    const loanRows = await txRows(
+      client,
+      `SELECT * FROM credit_loans
+       WHERE borrower_id = $1 AND lender_id = $2 AND status = 'open'`,
+      [borrowerId, lenderId]
+    );
+    const total = loanRows.reduce((sum, row) => {
+      const o = Number(row.outstanding);
+      return sum + (Number.isFinite(o) ? o : 0);
     }, 0);
     const totalRounded = Math.round(total * 100) / 100;
     if (totalRounded <= 0) throw new Error("אין חוב פתוח להחזרה");
 
-    const [borrowerSnap, lenderSnap] = await Promise.all([
-      txn.get(borrowerRef),
-      txn.get(lenderRef),
+    const [borrowerRows, lenderRows] = await Promise.all([
+      txRows(client, "SELECT * FROM members WHERE id = $1", [borrowerId]),
+      txRows(client, "SELECT * FROM members WHERE id = $1", [lenderId]),
     ]);
-    if (!borrowerSnap.exists) throw new Error("החשבון שלך לא נמצא");
-    if (!lenderSnap.exists) throw new Error("המלווה לא נמצא");
+    if (!borrowerRows.length) throw new Error("החשבון שלך לא נמצא");
+    if (!lenderRows.length) throw new Error("המלווה לא נמצא");
 
-    const borrowerBalance = memberCreditBalance(borrowerSnap.data() ?? {});
-    const lenderBalance = memberCreditBalance(lenderSnap.data() ?? {});
-    if (borrowerBalance < totalRounded) {
+    const borrower = memberFromRow(borrowerRows[0]);
+    const lender = memberFromRow(lenderRows[0]);
+    if (borrower.creditBalance < totalRounded) {
       throw new Error(
         "אין מספיק יתרה להחזרת החוב המלא — המתינו שהמנהל יטעין את היתרה"
       );
     }
 
-    const lenderName = (lenderSnap.data()?.name as string) ?? "חבר/ה";
-    const borrowerName = (borrowerSnap.data()?.name as string) ?? "חבר/ה";
-    const borrowerAfter = Math.round((borrowerBalance - totalRounded) * 100) / 100;
-    const lenderAfter = Math.round((lenderBalance + totalRounded) * 100) / 100;
+    const borrowerAfter = Math.round((borrower.creditBalance - totalRounded) * 100) / 100;
+    const lenderAfter = Math.round((lender.creditBalance + totalRounded) * 100) / 100;
 
-    txn.set(borrowerRef, { creditBalance: borrowerAfter, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-    txn.set(lenderRef, { creditBalance: lenderAfter, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    await client.query(
+      "UPDATE members SET credit_balance = $1, updated_at = NOW() WHERE id = $2",
+      [borrowerAfter, borrowerId]
+    );
+    await client.query(
+      "UPDATE members SET credit_balance = $1, updated_at = NOW() WHERE id = $2",
+      [lenderAfter, lenderId]
+    );
 
-    for (const doc of loansSnap.docs) {
-      txn.update(doc.ref, {
-        outstanding: 0,
-        status: "settled",
-        settledAt: FieldValue.serverTimestamp(),
-      });
-    }
+    const loanIds = loanRows.map((r) => String(r.id));
+    await client.query(
+      `UPDATE credit_loans
+       SET outstanding = 0, status = 'settled', settled_at = NOW()
+       WHERE id = ANY($1)`,
+      [loanIds]
+    );
 
-    txn.set(borrowerLedgerRef, {
-      id: borrowerLedgerRef.id,
-      memberId: borrowerId,
-      delta: -totalRounded,
-      balanceAfter: borrowerAfter,
-      reason: "peer_repay_out",
-      note: `החזר חוב לחבר ${lenderName}`,
-      createdBy: borrowerId,
-      createdAt: FieldValue.serverTimestamp(),
-    });
-    txn.set(lenderLedgerRef, {
-      id: lenderLedgerRef.id,
-      memberId: lenderId,
-      delta: totalRounded,
-      balanceAfter: lenderAfter,
-      reason: "peer_repay_in",
-      note: `קבלת החזר מחבר ${borrowerName}`,
-      createdBy: borrowerId,
-      createdAt: FieldValue.serverTimestamp(),
-    });
+    await client.query(
+      `INSERT INTO credit_ledger (
+        id, member_id, delta, balance_after, reason, note, created_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        borrowerLedgerId,
+        borrowerId,
+        -totalRounded,
+        borrowerAfter,
+        "peer_repay_out",
+        `החזר חוב לחבר ${lender.name || "חבר/ה"}`,
+        borrowerId,
+      ]
+    );
+    await client.query(
+      `INSERT INTO credit_ledger (
+        id, member_id, delta, balance_after, reason, note, created_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        lenderLedgerId,
+        lenderId,
+        totalRounded,
+        lenderAfter,
+        "peer_repay_in",
+        `קבלת החזר מחבר ${borrower.name || "חבר/ה"}`,
+        borrowerId,
+      ]
+    );
 
-    return totalRounded;
+    return { repaid: totalRounded };
   });
-
-  return { repaid };
 }
 
 export async function getPotsOverviewForGemach(gemachId: string) {
@@ -2914,11 +2707,6 @@ export async function getPotsOverviewForGemach(gemachId: string) {
   };
 }
 
-/**
- * At pickup: claim concrete units for the reservation window.
- * Prefers the original soft-assigned ids; replaces any that were lent out
- * in the gap before hard-lock.
- */
 async function claimToolsForCheckout(reservation: Reservation): Promise<string[]> {
   await syncReservationHardLocks();
 
@@ -2960,19 +2748,7 @@ async function claimToolsForCheckout(reservation: Reservation): Promise<string[]
     );
   }
 
-  const toolIds = claimed.map((t) => t.id);
-  const db = getAdminDb();
-  const batch = db.batch();
-  batch.update(db.collection("reservations").doc(reservation.id), {
-    toolId: toolIds[0],
-    toolIds,
-    quantity: toolIds.length,
-  });
-  for (const id of toolIds) {
-    batch.update(db.collection("tools").doc(id), { status: "reserved" });
-  }
-  await batch.commit();
-  return toolIds;
+  return claimed.map((t) => t.id);
 }
 
 export async function createLoanFromCheckout(params: {
@@ -2992,7 +2768,6 @@ export async function createLoanFromCheckout(params: {
   }
 
   const toolIds = await claimToolsForCheckout(params.reservation);
-  const db = getAdminDb();
   const split = splitPayment(params.reservation.feeAmount);
   const quantity = toolIds.length;
   const perUnitDevice = quantity > 0 ? split.deviceAmount / quantity : 0;
@@ -3024,8 +2799,6 @@ export async function createLoanFromCheckout(params: {
     createdAt: new Date().toISOString(),
   };
 
-  // One loan document represents the whole booking; quantity / toolIds capture
-  // the individual physical units that were taken out together.
   const loan: Loan = {
     id: loanId,
     reservationId: params.reservation.id,
@@ -3047,52 +2820,96 @@ export async function createLoanFromCheckout(params: {
       params.reservation.returnTimeEnd ?? params.reservation.returnTimeStart,
   };
 
-  const batch = db.batch();
-  batch.set(db.collection("loans").doc(loanId), {
-    ...omitUndefined(loan as unknown as Record<string, unknown>),
-    checkedOutAt: FieldValue.serverTimestamp(),
-  });
-
-  for (const toolId of toolIds) {
-    batch.update(db.collection("tools").doc(toolId), { status: "on_loan" });
-    batch.set(
-      db.collection("device_pots").doc(toolId),
-      {
-        toolId,
-        balance: FieldValue.increment(perUnitDevice),
-        totalEarned: FieldValue.increment(perUnitDevice),
-        totalSpent: 0,
-      },
-      { merge: true }
+  await withTransaction(async (raw) => {
+    const client = raw as unknown as QueryClient;
+    await client.query(
+      `UPDATE reservations
+       SET tool_id = $1, tool_ids = $2, quantity = $3, status = 'completed'
+       WHERE id = $4`,
+      [toolIds[0], toolIds, toolIds.length, params.reservation.id]
     );
-  }
 
-  for (const previous of supersededLoans) {
-    batch.update(db.collection("loans").doc(previous.id), {
-      status: "returned",
-      returnConditionNotes: "נסגר אוטומטית עקב שריון הארכה",
-      returnedAt: FieldValue.serverTimestamp(),
-    });
-  }
+    await client.query(
+      `INSERT INTO loans (
+        id, reservation_id, member_id, tool_id, tool_ids, quantity, status,
+        safety_acknowledged, checkout_photo_url, checkout_condition_notes,
+        checkout_items_checked, checkout_defect, checked_out_at,
+        due_return_date, due_return_time_end
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7,
+        TRUE, $8, $9,
+        $10, $11::jsonb, NOW(),
+        $12, $13
+      )`,
+      [
+        loanId,
+        params.reservation.id,
+        params.reservation.memberId,
+        toolIds[0],
+        toolIds,
+        quantity,
+        "active",
+        params.checkoutPhotoUrl,
+        params.checkoutConditionNotes?.trim() || null,
+        params.checkoutItemsChecked?.length ? params.checkoutItemsChecked : null,
+        params.checkoutDefect ? JSON.stringify(params.checkoutDefect) : null,
+        params.reservation.returnDate || null,
+        params.reservation.returnTimeEnd ?? params.reservation.returnTimeStart ?? null,
+      ]
+    );
 
-  batch.set(db.collection("transactions").doc(txnId), {
-    ...transaction,
-    createdAt: FieldValue.serverTimestamp(),
+    for (const toolId of toolIds) {
+      await client.query(
+        "UPDATE tools SET status = $1, updated_at = NOW() WHERE id = $2",
+        ["on_loan", toolId]
+      );
+      await client.query(
+        `INSERT INTO device_pots (id, tool_id, balance, total_earned, total_spent)
+         VALUES ($1, $2, $3, $3, 0)
+         ON CONFLICT (id) DO UPDATE SET
+           balance = device_pots.balance + $3,
+           total_earned = device_pots.total_earned + $3`,
+        [toolId, toolId, perUnitDevice]
+      );
+    }
+
+    for (const previous of supersededLoans) {
+      await client.query(
+        `UPDATE loans
+         SET status = 'returned',
+             return_condition_notes = $1,
+             returned_at = NOW()
+         WHERE id = $2`,
+        ["נסגר אוטומטית עקב שריון הארכה", previous.id]
+      );
+    }
+
+    await client.query(
+      `INSERT INTO transactions (
+        id, member_id, tool_id, loan_id, amount, operations_amount, device_amount
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        transaction.id,
+        transaction.memberId,
+        transaction.toolId,
+        transaction.loanId,
+        transaction.amount,
+        transaction.operationsAmount,
+        transaction.deviceAmount,
+      ]
+    );
+
+    await client.query(
+      `INSERT INTO operations_pot (id, balance, total_earned, total_spent)
+       VALUES ('main', $1, $1, 0)
+       ON CONFLICT (id) DO UPDATE SET
+         balance = operations_pot.balance + $1,
+         total_earned = operations_pot.total_earned + $1`,
+      [split.operationsAmount]
+    );
   });
-  batch.update(db.collection("reservations").doc(params.reservation.id), {
-    status: "completed",
-  });
-  batch.set(
-    db.collection("operations_pot").doc("main"),
-    {
-      balance: FieldValue.increment(split.operationsAmount),
-      totalEarned: FieldValue.increment(split.operationsAmount),
-      totalSpent: 0,
-    },
-    { merge: true }
-  );
 
-  await batch.commit();
+  invalidateQueryMemo();
   return { loan, loans: [loan] };
 }
 
@@ -3106,7 +2923,6 @@ export async function completeLoanReturn(
     returnDefect?: DefectRecord;
   }
 ): Promise<{ loan: Loan; lateFee: LateReturnFee | null; dispute?: Dispute }> {
-  const db = getAdminDb();
   const loan = await getLoanById(loanId);
   if (!loan) throw new Error("Loan not found");
 
@@ -3116,27 +2932,15 @@ export async function completeLoanReturn(
 
   const returnedAt = new Date();
   const returnedAtIso = returnedAt.toISOString();
-  const batch = db.batch();
-
-  batch.update(db.collection("loans").doc(loanId), {
-    status: loanStatus,
-    returnPhotoUrl: params.returnPhotoUrl,
-    returnConditionNotes: params.returnConditionNotes?.trim() || null,
-    returnItemsChecked: params.returnItemsChecked?.length ? params.returnItemsChecked : null,
-    returnOk: params.returnOk === true ? true : null,
-    returnDefect: params.returnDefect ?? null,
-    returnedAt: FieldValue.serverTimestamp(),
-  });
-  const loanToolIds = loan.toolIds?.length ? loan.toolIds : [loan.toolId];
-  for (const toolId of loanToolIds) {
-    batch.update(db.collection("tools").doc(toolId), { status: toolStatus });
-  }
-
-  let lateFee: LateReturnFee | null = null;
-  let dispute: Dispute | undefined;
   const reservation = loan.reservationId
     ? await getReservationById(loan.reservationId)
     : null;
+
+  let lateFee: LateReturnFee | null = null;
+  let dispute: Dispute | undefined;
+  const membersForDispute = hasDefect ? await listMembers() : [];
+  const toolForFee =
+    reservation || hasDefect ? await getToolById(loan.toolId) : null;
 
   if (reservation) {
     const { lateMinutes, dueAt } = computeLateness(reservation, returnedAt, {
@@ -3144,7 +2948,6 @@ export async function completeLoanReturn(
     });
     const amount = calculateLateFeeAmount(lateMinutes);
     if (lateMinutes > 0 && amount > 0 && !hasDefect) {
-      const tool = await getToolById(loan.toolId);
       const feeId = newId("late");
       lateFee = {
         id: feeId,
@@ -3152,7 +2955,7 @@ export async function completeLoanReturn(
         reservationId: loan.reservationId,
         memberId: loan.memberId,
         toolId: loan.toolId,
-        gemachId: tool?.gemachId ?? PLATFORM_GEMACH_ID,
+        gemachId: toolForFee?.gemachId ?? PLATFORM_GEMACH_ID,
         dueAt: dueAt.toISOString(),
         returnedAt: returnedAtIso,
         lateMinutes,
@@ -3160,30 +2963,81 @@ export async function completeLoanReturn(
         paid: false,
         createdAt: returnedAtIso,
       };
-      batch.set(db.collection("late_return_fees").doc(feeId), {
-        ...lateFee,
-        createdAt: FieldValue.serverTimestamp(),
-      });
     }
   }
 
   if (hasDefect && params.returnDefect) {
-    const tool = await getToolById(loan.toolId);
-  const members = await listMembers();
-    dispute = buildDisputeForBatch({
+    dispute = buildDisputeRecord({
       loanId,
       toolId: loan.toolId,
       memberId: loan.memberId,
-      gemachId: tool?.gemachId ?? PLATFORM_GEMACH_ID,
+      gemachId: toolForFee?.gemachId ?? PLATFORM_GEMACH_ID,
       defect: params.returnDefect,
-      members,
-      batch,
+      members: membersForDispute,
     });
-    batch.update(db.collection("loans").doc(loanId), { disputeId: dispute.id });
   }
 
-  await batch.commit();
+  await withTransaction(async (raw) => {
+    const client = raw as unknown as QueryClient;
+    await client.query(
+      `UPDATE loans SET
+        status = $1,
+        return_photo_url = $2,
+        return_condition_notes = $3,
+        return_items_checked = $4,
+        return_ok = $5,
+        return_defect = $6::jsonb,
+        returned_at = NOW(),
+        dispute_id = $7
+       WHERE id = $8`,
+      [
+        loanStatus,
+        params.returnPhotoUrl,
+        params.returnConditionNotes?.trim() || null,
+        params.returnItemsChecked?.length ? params.returnItemsChecked : null,
+        params.returnOk === true ? true : null,
+        params.returnDefect ? JSON.stringify(params.returnDefect) : null,
+        dispute?.id ?? null,
+        loanId,
+      ]
+    );
 
+    const ids = loan.toolIds?.length ? loan.toolIds : [loan.toolId];
+    await client.query(
+      "UPDATE tools SET status = $1, updated_at = NOW() WHERE id = ANY($2)",
+      [toolStatus, ids]
+    );
+
+    if (lateFee) {
+      await client.query(
+        `INSERT INTO late_return_fees (
+          id, loan_id, reservation_id, member_id, tool_id, gemach_id,
+          due_at, returned_at, late_minutes, amount, paid
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6,
+          $7::timestamptz, $8::timestamptz, $9, $10, FALSE
+        )`,
+        [
+          lateFee.id,
+          lateFee.loanId,
+          lateFee.reservationId,
+          lateFee.memberId,
+          lateFee.toolId,
+          lateFee.gemachId,
+          lateFee.dueAt,
+          lateFee.returnedAt,
+          lateFee.lateMinutes,
+          lateFee.amount,
+        ]
+      );
+    }
+
+    if (dispute) {
+      await insertDispute(client, dispute);
+    }
+  });
+
+  invalidateQueryMemo();
   return {
     loan: {
       ...loan,
@@ -3209,50 +3063,19 @@ export async function addLoanPhoto(loanId: string, photoUrl: string): Promise<Lo
   }
 
   const additionalPhotoUrls = [...(loan.additionalPhotoUrls ?? []), photoUrl];
-  await getAdminDb()
-    .collection("loans")
-    .doc(loanId)
-    .update({ additionalPhotoUrls });
-
+  const sql = getSql();
+  await sql`UPDATE loans SET additional_photo_urls = ${additionalPhotoUrls} WHERE id = ${loanId}`;
   return { ...loan, additionalPhotoUrls };
-}
-
-// ─── Late return fees ───────────────────────────────────────────────────────
-
-function lateReturnFeeFromDoc(id: string, data: DocumentData): LateReturnFee {
-  return {
-    id,
-    loanId: data.loanId as string,
-    reservationId: data.reservationId as string,
-    memberId: data.memberId as string,
-    toolId: data.toolId as string,
-    gemachId: (data.gemachId as string) ?? PLATFORM_GEMACH_ID,
-    dueAt: typeof data.dueAt === "string" ? data.dueAt : tsToIso(data.dueAt),
-    returnedAt:
-      typeof data.returnedAt === "string" ? data.returnedAt : tsToIso(data.returnedAt),
-    lateMinutes: (data.lateMinutes as number) ?? 0,
-    amount: (data.amount as number) ?? 0,
-    paid: (data.paid as boolean) ?? false,
-    paidAt: data.paidAt ? tsToIso(data.paidAt) : undefined,
-    markedPaidBy: (data.markedPaidBy as string) || undefined,
-    cancelled: data.cancelled === true,
-    cancelledAt: data.cancelledAt ? tsToIso(data.cancelledAt) : undefined,
-    cancelledBy: (data.cancelledBy as string) || undefined,
-    cancelReason:
-      typeof data.cancelReason === "string" ? data.cancelReason : undefined,
-    createdAt: data.createdAt ? tsToIso(data.createdAt) : new Date().toISOString(),
-  };
 }
 
 export async function listLateReturnFees(options?: {
   paid?: boolean;
-  /** When true (default for unpaid lists), hide cancelled fees. */
   includeCancelled?: boolean;
   gemachId?: string;
 }): Promise<LateReturnFee[]> {
-  const snap = await getAdminDb().collection("late_return_fees").get();
-  return snap.docs
-    .map((d) => lateReturnFeeFromDoc(d.id, d.data()))
+  const sql = getSql();
+  const rows = await sql`SELECT * FROM late_return_fees`;
+  return mapRows(rows, lateFeeFromRow)
     .filter((fee) => {
       if (options?.paid !== undefined && fee.paid !== options.paid) return false;
       if (options?.paid === false && options?.includeCancelled !== true && fee.cancelled) {
@@ -3268,20 +3091,17 @@ export async function markLateReturnFeePaid(
   feeId: string,
   markedPaidBy: string
 ): Promise<LateReturnFee> {
-  const ref = getAdminDb().collection("late_return_fees").doc(feeId);
-  const snap = await ref.get();
-  if (!snap.exists) throw new Error("רשומת קנס לא נמצאה");
-
-  const existing = lateReturnFeeFromDoc(feeId, snap.data()!);
+  const existing = await getLateReturnFeeById(feeId);
+  if (!existing) throw new Error("רשומת קנס לא נמצאה");
   if (existing.cancelled) throw new Error("הקנס בוטל — לא ניתן לסמן כשולם");
   if (existing.paid) return existing;
 
-  await ref.update({
-    paid: true,
-    paidAt: FieldValue.serverTimestamp(),
-    markedPaidBy,
-  });
-
+  const sql = getSql();
+  await sql`
+    UPDATE late_return_fees
+    SET paid = TRUE, paid_at = NOW(), marked_paid_by = ${markedPaidBy}
+    WHERE id = ${feeId}
+  `;
   return {
     ...existing,
     paid: true,
@@ -3299,46 +3119,42 @@ export async function updateLateReturnFeeAmount(
     throw new Error("סכום הקנס אינו תקין");
   }
   const rounded = Math.round(amount);
-
-  const ref = getAdminDb().collection("late_return_fees").doc(feeId);
-  const snap = await ref.get();
-  if (!snap.exists) throw new Error("רשומת קנס לא נמצאה");
-
-  const existing = lateReturnFeeFromDoc(feeId, snap.data()!);
+  const existing = await getLateReturnFeeById(feeId);
+  if (!existing) throw new Error("רשומת קנס לא נמצאה");
   if (existing.cancelled) throw new Error("הקנס בוטל — לא ניתן לערוך");
   if (existing.paid) throw new Error("הקנס כבר שולם — לא ניתן לערוך");
 
-  await ref.update({
-    amount: rounded,
-    amountUpdatedAt: FieldValue.serverTimestamp(),
-    amountUpdatedBy: updatedBy,
-  });
-
+  const sql = getSql();
+  await sql`
+    UPDATE late_return_fees
+    SET amount = ${rounded},
+        amount_updated_at = NOW(),
+        amount_updated_by = ${updatedBy}
+    WHERE id = ${feeId}
+  `;
   return { ...existing, amount: rounded };
 }
 
-/** Waive an incorrect or disputed late fee (does not collect payment). */
 export async function cancelLateReturnFee(
   feeId: string,
   cancelledBy: string,
   cancelReason?: string
 ): Promise<LateReturnFee> {
-  const ref = getAdminDb().collection("late_return_fees").doc(feeId);
-  const snap = await ref.get();
-  if (!snap.exists) throw new Error("רשומת קנס לא נמצאה");
-
-  const existing = lateReturnFeeFromDoc(feeId, snap.data()!);
+  const existing = await getLateReturnFeeById(feeId);
+  if (!existing) throw new Error("רשומת קנס לא נמצאה");
   if (existing.cancelled) return existing;
   if (existing.paid) throw new Error("הקנס כבר סומן כשולם — לא ניתן לבטל");
 
   const reason = cancelReason?.trim() || "בוטל על ידי מנהל";
-  await ref.update({
-    cancelled: true,
-    cancelledAt: FieldValue.serverTimestamp(),
-    cancelledBy,
-    cancelReason: reason,
-  });
-
+  const sql = getSql();
+  await sql`
+    UPDATE late_return_fees
+    SET cancelled = TRUE,
+        cancelled_at = NOW(),
+        cancelled_by = ${cancelledBy},
+        cancel_reason = ${reason}
+    WHERE id = ${feeId}
+  `;
   return {
     ...existing,
     cancelled: true,
@@ -3348,71 +3164,66 @@ export async function cancelLateReturnFee(
   };
 }
 
-// ─── Maintenance ───────────────────────────────────────────────────────────
+async function getLateReturnFeeById(feeId: string): Promise<LateReturnFee | null> {
+  const sql = getSql();
+  const rows = await sql`SELECT * FROM late_return_fees WHERE id = ${feeId}`;
+  return rows[0] ? lateFeeFromRow(asRecord(rows[0])) : null;
+}
 
 export async function createMaintenanceTicket(
   data: Omit<MaintenanceTicket, "id" | "createdAt" | "status">
 ): Promise<MaintenanceTicket> {
   const id = newId("ticket");
-  const db = getAdminDb();
-  const batch = db.batch();
-
-  batch.set(db.collection("maintenance_tickets").doc(id), {
-    ...omitUndefined(data as unknown as Record<string, unknown>),
-    status: "open",
-    createdAt: FieldValue.serverTimestamp(),
+  await withTransaction(async (raw) => {
+    const client = raw as unknown as QueryClient;
+    await client.query(
+      `INSERT INTO maintenance_tickets (
+        id, tool_id, loan_id, member_id, description, status
+      ) VALUES ($1, $2, $3, $4, $5, 'open')`,
+      [id, data.toolId, data.loanId ?? null, data.memberId, data.description]
+    );
+    await client.query(
+      "UPDATE tools SET status = $1, updated_at = NOW() WHERE id = $2",
+      ["disabled", data.toolId]
+    );
   });
-  batch.update(db.collection("tools").doc(data.toolId), { status: "disabled" });
-
-  await batch.commit();
+  invalidateQueryMemo();
   return { ...data, id, status: "open", createdAt: new Date().toISOString() };
-}
-
-function maintenanceTicketFromDoc(id: string, data: DocumentData): MaintenanceTicket {
-  return {
-    id,
-    toolId: data.toolId as string,
-    loanId: (data.loanId as string) || undefined,
-    memberId: data.memberId as string,
-    description: data.description as string,
-    status: (data.status as MaintenanceTicket["status"]) ?? "open",
-    adminReply: (data.adminReply as string) || undefined,
-    resolvedAt: data.resolvedAt ? tsToIso(data.resolvedAt) : undefined,
-    resolvedBy: (data.resolvedBy as string) || undefined,
-    createdAt: tsToIso(data.createdAt),
-  };
 }
 
 export async function resolveMaintenanceTicket(
   ticketId: string,
   params: { adminReply?: string; resolvedBy: string }
 ): Promise<MaintenanceTicket> {
-  const db = getAdminDb();
-  const ref = db.collection("maintenance_tickets").doc(ticketId);
-  const snap = await ref.get();
-  if (!snap.exists) throw new Error("הדיווח לא נמצא");
+  const existing = await getMaintenanceTicketById(ticketId);
+  if (!existing) throw new Error("הדיווח לא נמצא");
+  if (existing.status === "resolved") throw new Error("הדיווח כבר נסגר");
 
-  const data = snap.data()!;
-  if (data.status === "resolved") throw new Error("הדיווח כבר נסגר");
-
-  const batch = db.batch();
-  batch.update(ref, {
-    status: "resolved",
-    adminReply: params.adminReply?.trim() || null,
-    resolvedAt: FieldValue.serverTimestamp(),
-    resolvedBy: params.resolvedBy,
+  await withTransaction(async (raw) => {
+    const client = raw as unknown as QueryClient;
+    await client.query(
+      `UPDATE maintenance_tickets
+       SET status = 'resolved',
+           admin_reply = $1,
+           resolved_at = NOW(),
+           resolved_by = $2
+       WHERE id = $3`,
+      [params.adminReply?.trim() || null, params.resolvedBy, ticketId]
+    );
+    const toolRows = await txRows(client, "SELECT status FROM tools WHERE id = $1", [
+      existing.toolId,
+    ]);
+    if (toolRows[0]?.status === "disabled") {
+      await client.query(
+        "UPDATE tools SET status = $1, updated_at = NOW() WHERE id = $2",
+        ["available", existing.toolId]
+      );
+    }
   });
-
-  const toolRef = db.collection("tools").doc(data.toolId as string);
-  const toolSnap = await toolRef.get();
-  if (toolSnap.exists && toolSnap.data()?.status === "disabled") {
-    batch.update(toolRef, { status: "available" });
-  }
-
-  await batch.commit();
+  invalidateQueryMemo();
 
   return {
-    ...maintenanceTicketFromDoc(ticketId, data),
+    ...existing,
     status: "resolved",
     adminReply: params.adminReply?.trim() || undefined,
     resolvedAt: new Date().toISOString(),
@@ -3423,47 +3234,35 @@ export async function resolveMaintenanceTicket(
 export async function listMaintenanceTickets(options?: {
   status?: MaintenanceTicket["status"] | MaintenanceTicket["status"][];
 }): Promise<MaintenanceTicket[]> {
-  const snap = await getAdminDb().collection("maintenance_tickets").get();
+  const sql = getSql();
+  const rows = await sql`SELECT * FROM maintenance_tickets`;
   const statuses = options?.status
     ? Array.isArray(options.status)
       ? options.status
       : [options.status]
     : null;
 
-  return snap.docs
-    .map((d) => maintenanceTicketFromDoc(d.id, d.data()))
+  return mapRows(rows, ticketFromRow)
     .filter((t) => !statuses || statuses.includes(t.status))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export async function getMaintenanceTicketById(id: string): Promise<MaintenanceTicket | null> {
-  const snap = await getAdminDb().collection("maintenance_tickets").doc(id).get();
-  if (!snap.exists) return null;
-  return maintenanceTicketFromDoc(snap.id, snap.data()!);
+  const sql = getSql();
+  const rows = await sql`SELECT * FROM maintenance_tickets WHERE id = ${id}`;
+  return rows[0] ? ticketFromRow(asRecord(rows[0])) : null;
 }
 
-// ─── Pots ──────────────────────────────────────────────────────────────────
-
-export async function getDevicePots(): Promise<(DevicePot & { id: string })[]> {
-  const snap = await getAdminDb().collection("device_pots").get();
-  return snap.docs.map((d) => ({
-    id: d.id,
-    ...(d.data() as Omit<DevicePot, "toolId">),
-    toolId: d.data().toolId ?? d.id,
-  }));
+export async function getDevicePots() {
+  const sql = getSql();
+  const rows = await sql`SELECT * FROM device_pots`;
+  return mapRows(rows, devicePotFromRow);
 }
 
-export async function getOperationsPot(): Promise<OperationsPot> {
-  const snap = await getAdminDb().collection("operations_pot").doc("main").get();
-  if (!snap.exists) {
-    return { balance: 0, totalEarned: 0, totalSpent: 0 };
-  }
-  const data = snap.data()!;
-  return {
-    balance: data.balance ?? 0,
-    totalEarned: data.totalEarned ?? 0,
-    totalSpent: data.totalSpent ?? 0,
-  };
+export async function getOperationsPot() {
+  const sql = getSql();
+  const rows = await sql`SELECT * FROM operations_pot WHERE id = 'main'`;
+  return operationsPotFromRow(rows[0] ? asRecord(rows[0]) : undefined);
 }
 
 export async function getPotsOverview() {
@@ -3476,50 +3275,23 @@ export async function getPotsOverview() {
   return { tools, devicePots, operationsPot, operationsPercent };
 }
 
-// ─── PayBox settings ─────────────────────────────────────────────────────────
-
 export async function getPayboxSettings(): Promise<PayboxSettings> {
   return memoQuery("payboxSettings", async () => {
-    const snap = await getAdminDb().collection("settings").doc("paybox").get();
-    if (!snap.exists) return getDefaultPayboxSettings();
-
-    const data = snap.data()!;
-    const defaults = getDefaultPayboxSettings();
-    return {
-      enabled: (data.enabled as boolean) ?? defaults.enabled,
-      operationsGroupUrl:
-        (data.operationsGroupUrl as string) || defaults.operationsGroupUrl,
-      deviceGroupUrl: (data.deviceGroupUrl as string) || defaults.deviceGroupUrl,
-      groupName: (data.groupName as string) || undefined,
-      growPageCode: (data.growPageCode as string) || defaults.growPageCode,
-    };
+    const sql = getSql();
+    const rows = await sql`SELECT data FROM settings WHERE id = 'paybox'`;
+    const data = rows[0] ? (asRecord(rows[0]).data as Record<string, unknown> | undefined) : undefined;
+    return payboxSettingsFromData(data);
   });
 }
 
 const ACCESS_CODES_DOC = "access-codes";
 
-function emptyAccessCodes(): AccessCodesRecord {
-  return {
-    caravanCode: "",
-    caravanNote: "",
-    clubRoomCode: "",
-    clubRoomNote: "",
-    clubRoomUpdatedAt: null,
-  };
-}
-
 export async function getAccessCodes(): Promise<AccessCodesRecord> {
   return memoQuery("accessCodes", async () => {
-    const snap = await getAdminDb().collection("settings").doc(ACCESS_CODES_DOC).get();
-    if (!snap.exists) return emptyAccessCodes();
-    const data = snap.data() ?? {};
-    return {
-      caravanCode: typeof data.caravanCode === "string" ? data.caravanCode : "",
-      caravanNote: typeof data.caravanNote === "string" ? data.caravanNote : "",
-      clubRoomCode: typeof data.clubRoomCode === "string" ? data.clubRoomCode : "",
-      clubRoomNote: typeof data.clubRoomNote === "string" ? data.clubRoomNote : "",
-      clubRoomUpdatedAt: data.clubRoomUpdatedAt ? tsToIso(data.clubRoomUpdatedAt) : null,
-    };
+    const sql = getSql();
+    const rows = await sql`SELECT data FROM settings WHERE id = ${ACCESS_CODES_DOC}`;
+    const data = rows[0] ? (asRecord(rows[0]).data as Record<string, unknown> | undefined) : undefined;
+    return accessCodesFromData(data);
   });
 }
 
@@ -3531,79 +3303,54 @@ export async function updateAccessCodes(params: {
 }): Promise<AccessCodesRecord> {
   const existing = await getAccessCodes();
   const roomChanged = params.clubRoomCode !== existing.clubRoomCode;
-  const ref = getAdminDb().collection("settings").doc(ACCESS_CODES_DOC);
-  const payload: Record<string, unknown> = {
+  const payload = {
     caravanCode: params.caravanCode,
     caravanNote: params.caravanNote,
     clubRoomCode: params.clubRoomCode,
     clubRoomNote: params.clubRoomNote,
-    updatedAt: FieldValue.serverTimestamp(),
+    clubRoomUpdatedAt: roomChanged ? new Date().toISOString() : existing.clubRoomUpdatedAt,
   };
-  if (roomChanged) {
-    payload.clubRoomUpdatedAt = FieldValue.serverTimestamp();
-  }
-  await ref.set(payload, { merge: true });
+
+  await withTransaction(async (raw) => {
+    const client = raw as unknown as QueryClient;
+    await client.query(
+      `INSERT INTO settings (id, data) VALUES ($1, $2::jsonb)
+       ON CONFLICT (id) DO UPDATE SET data = $2::jsonb`,
+      [ACCESS_CODES_DOC, JSON.stringify(payload)]
+    );
+  });
   invalidateQueryMemo();
   return getAccessCodes();
 }
 
-// ─── Member payments (PayBox group) ──────────────────────────────────────────
-
 export async function getPaymentById(id: string): Promise<MemberPayment | null> {
-  const snap = await getAdminDb().collection("payments").doc(id).get();
-  if (!snap.exists) return null;
-  const payment = docWithId<MemberPayment>(snap.id, snap.data());
-  if (payment && snap.data()?.createdAt) {
-    payment.createdAt = tsToIso(snap.data()!.createdAt);
-  }
-  if (payment && snap.data()?.paidAt) {
-    payment.paidAt = tsToIso(snap.data()!.paidAt);
-  }
-  if (payment && snap.data()?.refundedAt) {
-    payment.refundedAt = tsToIso(snap.data()!.refundedAt);
-  }
-  return payment;
+  const sql = getSql();
+  const rows = await sql`SELECT * FROM payments WHERE id = ${id}`;
+  return rows[0] ? paymentFromRow(asRecord(rows[0])) : null;
 }
 
 export async function getPendingPaymentForReservation(
   reservationId: string
 ): Promise<MemberPayment | null> {
-  const snap = await getAdminDb()
-    .collection("payments")
-    .where("reservationId", "==", reservationId)
-    .limit(5)
-    .get();
-
-  const pendingDoc = snap.docs.find((d) => d.data().status === "pending");
-  if (!pendingDoc) return null;
-
-  const payment = docWithId<MemberPayment>(pendingDoc.id, pendingDoc.data());
-  if (payment && pendingDoc.data()?.createdAt) {
-    payment.createdAt = tsToIso(pendingDoc.data()!.createdAt);
-  }
-  return payment;
+  const sql = getSql();
+  const rows = await sql`
+    SELECT * FROM payments
+    WHERE reservation_id = ${reservationId} AND status = 'pending'
+    LIMIT 1
+  `;
+  return rows[0] ? paymentFromRow(asRecord(rows[0])) : null;
 }
 
 export async function getPaidPaymentForReservation(
   reservationId: string
 ): Promise<MemberPayment | null> {
-  const snap = await getAdminDb()
-    .collection("payments")
-    .where("reservationId", "==", reservationId)
-    .limit(5)
-    .get();
-
-  const paidDoc = snap.docs.find((d) => d.data().status === "paid");
-  if (!paidDoc) return null;
-
-  const payment = docWithId<MemberPayment>(paidDoc.id, paidDoc.data());
-  if (payment && paidDoc.data()?.createdAt) {
-    payment.createdAt = tsToIso(paidDoc.data()!.createdAt);
-  }
-  if (payment && paidDoc.data()?.paidAt) {
-    payment.paidAt = tsToIso(paidDoc.data()!.paidAt);
-  }
-  return payment;
+  const sql = getSql();
+  const rows = await sql`
+    SELECT * FROM payments
+    WHERE reservation_id = ${reservationId} AND status = 'paid'
+    LIMIT 1
+  `;
+  return rows[0] ? paymentFromRow(asRecord(rows[0])) : null;
 }
 
 export async function createMemberPayment(params: {
@@ -3626,21 +3373,17 @@ export async function createMemberPayment(params: {
     createdAt: new Date().toISOString(),
   };
 
-  await getAdminDb()
-    .collection("payments")
-    .doc(id)
-    .set({
-      id,
-      reservationId: payment.reservationId,
-      memberId: payment.memberId,
-      toolId: payment.toolId,
-      amount: payment.amount,
-      status: payment.status,
-      provider: payment.provider,
-      payboxGroupUrl: payment.payboxGroupUrl,
-      ...(payment.growPaymentUrl ? { growPaymentUrl: payment.growPaymentUrl } : {}),
-      createdAt: FieldValue.serverTimestamp(),
-    });
+  const sql = getSql();
+  await sql`
+    INSERT INTO payments (
+      id, reservation_id, member_id, tool_id, amount, status, provider,
+      paybox_group_url, grow_payment_url
+    ) VALUES (
+      ${id}, ${payment.reservationId}, ${payment.memberId}, ${payment.toolId},
+      ${payment.amount}, ${payment.status}, ${payment.provider},
+      ${payment.payboxGroupUrl}, ${payment.growPaymentUrl ?? null}
+    )
+  `;
 
   return payment;
 }
@@ -3650,11 +3393,8 @@ export async function markPaymentPaid(paymentId: string): Promise<MemberPayment>
   if (!payment) throw new Error("Payment not found");
   if (payment.status === "paid") return payment;
 
-  await getAdminDb().collection("payments").doc(paymentId).update({
-    status: "paid",
-    paidAt: FieldValue.serverTimestamp(),
-  });
-
+  const sql = getSql();
+  await sql`UPDATE payments SET status = 'paid', paid_at = NOW() WHERE id = ${paymentId}`;
   return {
     ...payment,
     status: "paid",
@@ -3662,21 +3402,39 @@ export async function markPaymentPaid(paymentId: string): Promise<MemberPayment>
   };
 }
 
-// ─── PayBox payouts (admin → group) ──────────────────────────────────────────
+export async function updatePaymentPayboxFields(
+  id: string,
+  fields: { payboxGroupUrl?: string; growPaymentUrl?: string; provider?: string }
+) {
+  const sets: string[] = [];
+  const values: unknown[] = [];
+  let i = 1;
+  if (fields.payboxGroupUrl !== undefined) {
+    sets.push(`paybox_group_url = $${i++}`);
+    values.push(fields.payboxGroupUrl);
+  }
+  if (fields.growPaymentUrl !== undefined) {
+    sets.push(`grow_payment_url = $${i++}`);
+    values.push(fields.growPaymentUrl);
+  }
+  if (fields.provider !== undefined) {
+    sets.push(`provider = $${i++}`);
+    values.push(fields.provider);
+  }
+  if (!sets.length) return;
+  values.push(id);
+  await withTransaction(async (raw) => {
+    const client = raw as unknown as QueryClient;
+    await client.query(`UPDATE payments SET ${sets.join(", ")} WHERE id = $${i}`, values);
+  });
+}
 
 export async function getPayboxPayouts(limit = 20): Promise<PayboxPayout[]> {
-  const snap = await getAdminDb().collection("paybox_payouts").limit(limit).get();
-
-  const payouts = snap.docs.map((d) => {
-    const payout = docWithId<PayboxPayout>(d.id, d.data())!;
-    if (d.data()?.createdAt) payout.createdAt = tsToIso(d.data()!.createdAt);
-    if (d.data()?.completedAt) payout.completedAt = tsToIso(d.data()!.completedAt);
-    return payout;
-  });
-
-  return payouts.sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
+  const sql = getSql();
+  const rows = await sql`SELECT * FROM paybox_payouts`;
+  return mapRows(rows, payoutFromRow)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, limit);
 }
 
 export async function createPayboxPayout(params: {
@@ -3689,14 +3447,14 @@ export async function createPayboxPayout(params: {
 }): Promise<PayboxPayout> {
   if (params.amount <= 0) throw new Error("Invalid payout amount");
 
-  const db = getAdminDb();
   if (params.potTarget === "operations") {
     const pot = await getOperationsPot();
     if (pot.balance < params.amount) throw new Error("Insufficient operations pot balance");
   } else {
     if (!params.toolId) throw new Error("Device pot requires toolId");
-    const potSnap = await db.collection("device_pots").doc(params.toolId).get();
-    const balance = (potSnap.data()?.balance as number) ?? 0;
+    const sql = getSql();
+    const potRows = await sql`SELECT * FROM device_pots WHERE id = ${params.toolId}`;
+    const balance = potRows[0] ? devicePotFromRow(asRecord(potRows[0])).balance : 0;
     if (balance < params.amount) throw new Error("Insufficient device pot balance");
   }
 
@@ -3713,101 +3471,71 @@ export async function createPayboxPayout(params: {
     createdAt: new Date().toISOString(),
   };
 
-  await db.collection("paybox_payouts").doc(id).set({
-    ...payout,
-    createdAt: FieldValue.serverTimestamp(),
-  });
+  const sql = getSql();
+  await sql`
+    INSERT INTO paybox_payouts (
+      id, pot_target, tool_id, amount, group_url, status, note, created_by
+    ) VALUES (
+      ${id}, ${payout.potTarget}, ${payout.toolId ?? null}, ${payout.amount},
+      ${payout.groupUrl}, ${payout.status}, ${payout.note ?? null}, ${payout.createdBy}
+    )
+  `;
 
   return payout;
 }
 
 export async function completePayboxPayout(payoutId: string): Promise<PayboxPayout> {
-  const db = getAdminDb();
-  const ref = db.collection("paybox_payouts").doc(payoutId);
-  const snap = await ref.get();
-  if (!snap.exists) throw new Error("Payout not found");
+  return withTransaction(async (raw) => {
+    const client = raw as unknown as QueryClient;
+    const rows = await txRows(client, "SELECT * FROM paybox_payouts WHERE id = $1", [payoutId]);
+    if (!rows.length) throw new Error("Payout not found");
 
-  const data = snap.data()!;
-  if (data.status === "completed") {
-    return docWithId<PayboxPayout>(snap.id, data)!;
-  }
-  if (data.status === "cancelled") {
-    throw new Error("Payout was cancelled");
-  }
+    const payout = payoutFromRow(rows[0]);
+    if (payout.status === "completed") return payout;
+    if (payout.status === "cancelled") {
+      throw new Error("Payout was cancelled");
+    }
 
-  const amount = data.amount as number;
-  const potTarget = data.potTarget as PayboxPayout["potTarget"];
-  const toolId = data.toolId as string | undefined;
+    await client.query(
+      `UPDATE paybox_payouts SET status = 'completed', completed_at = NOW() WHERE id = $1`,
+      [payoutId]
+    );
 
-  const batch = db.batch();
-  batch.update(ref, {
-    status: "completed",
-    completedAt: FieldValue.serverTimestamp(),
+    if (payout.potTarget === "operations") {
+      await client.query(
+        `UPDATE operations_pot
+         SET balance = balance + $1, total_spent = total_spent + $2
+         WHERE id = 'main'`,
+        [-payout.amount, payout.amount]
+      );
+    } else if (payout.toolId) {
+      await client.query(
+        `UPDATE device_pots
+         SET balance = balance + $1, total_spent = total_spent + $2
+         WHERE id = $3`,
+        [-payout.amount, payout.amount, payout.toolId]
+      );
+    }
+
+    return {
+      ...payout,
+      status: "completed",
+      completedAt: new Date().toISOString(),
+    };
   });
-
-  if (potTarget === "operations") {
-    batch.update(db.collection("operations_pot").doc("main"), {
-      balance: FieldValue.increment(-amount),
-      totalSpent: FieldValue.increment(amount),
-    });
-  } else if (toolId) {
-    batch.update(db.collection("device_pots").doc(toolId), {
-      balance: FieldValue.increment(-amount),
-      totalSpent: FieldValue.increment(amount),
-    });
-  }
-
-  await batch.commit();
-
-  const payout = docWithId<PayboxPayout>(snap.id, data)!;
-  payout.status = "completed";
-  payout.completedAt = new Date().toISOString();
-  return payout;
 }
 
-// ─── Disputes ────────────────────────────────────────────────────────────────
-
-function disputeFromDoc(id: string, data: DocumentData): Dispute {
-  return {
-    id,
-    loanId: data.loanId as string,
-    toolId: data.toolId as string,
-    memberId: data.memberId as string,
-    gemachId: data.gemachId as string,
-    status: (data.status as DisputeStatus) ?? "new",
-    defect: parseDefectRecord(data.defect) ?? {
-      category: "other",
-      description: "",
-      reportedAt: new Date().toISOString(),
-    },
-    damageAmount:
-      typeof data.damageAmount === "number" ? data.damageAmount : undefined,
-    mediatorIds: Array.isArray(data.mediatorIds)
-      ? data.mediatorIds.filter((x): x is string => typeof x === "string")
-      : [],
-    mediatorDecisions:
-      data.mediatorDecisions && typeof data.mediatorDecisions === "object"
-        ? (data.mediatorDecisions as Record<string, MediatorDecision>)
-        : undefined,
-    resolvedAt: data.resolvedAt ? tsToIso(data.resolvedAt) : undefined,
-    createdAt: data.createdAt ? tsToIso(data.createdAt) : new Date().toISOString(),
-  };
-}
-
-function buildDisputeForBatch(params: {
+function buildDisputeRecord(params: {
   loanId: string;
   toolId: string;
   memberId: string;
   gemachId: string;
   defect: DefectRecord;
   members: Array<{ id: string; role?: string }>;
-  batch: import("firebase-admin/firestore").WriteBatch;
 }): Dispute {
   const id = newId("dispute");
-  const mediatorIds = pickRandomMediators(params.members, [
-    params.memberId,
-  ]);
-  const dispute: Dispute = {
+  const mediatorIds = pickRandomMediators(params.members, [params.memberId]);
+  return {
     id,
     loanId: params.loanId,
     toolId: params.toolId,
@@ -3818,24 +3546,36 @@ function buildDisputeForBatch(params: {
     mediatorIds,
     createdAt: new Date().toISOString(),
   };
+}
 
-  params.batch.set(getAdminDb().collection("disputes").doc(id), {
-    ...omitUndefined(dispute as unknown as Record<string, unknown>),
-    createdAt: FieldValue.serverTimestamp(),
-  });
-
-  return dispute;
+async function insertDispute(client: QueryClient, dispute: Dispute): Promise<void> {
+  await client.query(
+    `INSERT INTO disputes (
+      id, loan_id, tool_id, member_id, gemach_id, status, defect, mediator_ids
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)`,
+    [
+      dispute.id,
+      dispute.loanId,
+      dispute.toolId,
+      dispute.memberId,
+      dispute.gemachId,
+      dispute.status,
+      JSON.stringify(dispute.defect),
+      dispute.mediatorIds,
+    ]
+  );
 }
 
 export async function getAllDisputes(): Promise<Dispute[]> {
-  const snap = await getAdminDb().collection("disputes").get();
-  return snap.docs.map((d) => disputeFromDoc(d.id, d.data()));
+  const sql = getSql();
+  const rows = await sql`SELECT * FROM disputes`;
+  return mapRows(rows, disputeFromRow);
 }
 
 export async function getDisputeById(id: string): Promise<Dispute | null> {
-  const snap = await getAdminDb().collection("disputes").doc(id).get();
-  if (!snap.exists) return null;
-  return disputeFromDoc(snap.id, snap.data()!);
+  const sql = getSql();
+  const rows = await sql`SELECT * FROM disputes WHERE id = ${id}`;
+  return rows[0] ? disputeFromRow(asRecord(rows[0])) : null;
 }
 
 function filterDisputesForViewer(
@@ -3900,10 +3640,7 @@ export async function getDisputeDetailForAdmin(params: {
   const dispute = await getDisputeById(params.disputeId);
   if (!dispute) return null;
 
-  if (
-    !params.viewAll &&
-    !dispute.mediatorIds.includes(params.viewerId)
-  ) {
+  if (!params.viewAll && !dispute.mediatorIds.includes(params.viewerId)) {
     return null;
   }
 
@@ -3954,12 +3691,9 @@ export async function updateDisputeMediators(
   disputeId: string,
   mediatorIds: string[]
 ): Promise<Dispute> {
-  const db = getAdminDb();
-  const ref = db.collection("disputes").doc(disputeId);
-  const snap = await ref.get();
-  if (!snap.exists) throw new Error("המחלוקת לא נמצאה");
+  const dispute = await getDisputeById(disputeId);
+  if (!dispute) throw new Error("המחלוקת לא נמצאה");
 
-  const dispute = disputeFromDoc(snap.id, snap.data()!);
   const unique = [
     ...new Set(
       mediatorIds.filter(
@@ -3980,17 +3714,17 @@ export async function updateDisputeMediators(
     if (!member) throw new Error(`חבר לא נמצא: ${id}`);
   }
 
-  const status: DisputeStatus =
-    unique.length > 0 ? "mediators_assigned" : "new";
-
-  await ref.update({
-    mediatorIds: unique,
-    status,
-    mediatorDecisions: FieldValue.delete(),
-  });
-
-  const updated = await ref.get();
-  return disputeFromDoc(updated.id, updated.data()!);
+  const status: DisputeStatus = unique.length > 0 ? "mediators_assigned" : "new";
+  const sql = getSql();
+  const rows = await sql`
+    UPDATE disputes
+    SET mediator_ids = ${unique},
+        status = ${status},
+        mediator_decisions = NULL
+    WHERE id = ${disputeId}
+    RETURNING *
+  `;
+  return disputeFromRow(asRecord(rows[0]));
 }
 
 export async function submitMediatorDecision(params: {
@@ -3998,12 +3732,8 @@ export async function submitMediatorDecision(params: {
   mediatorId: string;
   decision: MediatorDecision;
 }): Promise<Dispute> {
-  const db = getAdminDb();
-  const ref = db.collection("disputes").doc(params.disputeId);
-  const snap = await ref.get();
-  if (!snap.exists) throw new Error("המחלוקת לא נמצאה");
-
-  const dispute = disputeFromDoc(snap.id, snap.data()!);
+  const dispute = await getDisputeById(params.disputeId);
+  if (!dispute) throw new Error("המחלוקת לא נמצאה");
   if (!dispute.mediatorIds.includes(params.mediatorId)) {
     throw new Error("אין הרשאה להכריע במחלוקת זו");
   }
@@ -4027,10 +3757,16 @@ export async function submitMediatorDecision(params: {
     resolvedAt = new Date().toISOString();
   }
 
-  await ref.update({
-    mediatorDecisions: decisions,
-    status,
-    ...(resolvedAt ? { resolvedAt: FieldValue.serverTimestamp() } : {}),
+  await withTransaction(async (raw) => {
+    const client = raw as unknown as QueryClient;
+    await client.query(
+      `UPDATE disputes
+       SET mediator_decisions = $1::jsonb,
+           status = $2,
+           resolved_at = $3
+       WHERE id = $4`,
+      [JSON.stringify(decisions), status, resolvedAt ?? null, params.disputeId]
+    );
   });
 
   return {
@@ -4040,8 +3776,6 @@ export async function submitMediatorDecision(params: {
     resolvedAt,
   };
 }
-
-// ─── Board dashboard ─────────────────────────────────────────────────────────
 
 export async function getBoardDashboardData(): Promise<BoardDashboardData> {
   await syncReservationHardLocks();
@@ -4140,7 +3874,6 @@ export type KindScheduleAvailability = {
   lendableNow: number;
   reservedForFuture: number;
   hardLockHours: number;
-  /** Earliest upcoming hold the borrower must finish before (pickup − 1h). */
   nextHold: null | {
     pickupDate: string;
     pickupTimeStart?: string;
@@ -4205,7 +3938,6 @@ function computeKindScheduleAvailability(
   };
 }
 
-/** Window availability + next blocking hold for the reserve UI. */
 export async function getKindScheduleAvailability(
   catalogKey: string,
   schedule: ReservationWindow,
@@ -4224,7 +3956,6 @@ export async function getKindScheduleAvailability(
   );
 }
 
-/** One Firestore load, many hour windows — used by the reserve form. */
 export async function getKindScheduleAvailabilityForHours(
   catalogKey: string,
   pickupDate: string,
@@ -4256,5 +3987,3 @@ export async function getKindScheduleAvailabilityForHours(
     };
   });
 }
-
-export { getAdminDb } from "@/lib/firebase/admin-app";

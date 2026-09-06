@@ -13,16 +13,20 @@
     "lint": "next lint",
     "seed": "node scripts/seed-firestore.mjs",
     "migrate:reset": "node scripts/reset-firestore.mjs",
-    "db:fresh": "node scripts/reset-firestore.mjs --reseed"
+    "db:fresh": "node scripts/reset-firestore.mjs --reseed",
+    "db:schema": "node scripts/apply-neon-schema.mjs",
+    "db:import": "node scripts/import-firestore-to-neon.mjs"
   },
   "dependencies": {
+    "@neondatabase/serverless": "1.0.2",
     "cloudinary": "^2.7.0",
     "fflate": "0.8.2",
     "firebase": "^11.0.0",
     "firebase-admin": "^13.10.0",
     "next": "^15.3.3",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "ws": "8.18.3"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",
@@ -30,6 +34,7 @@
     "@types/node": "^22.15.21",
     "@types/react": "^19.1.6",
     "@types/react-dom": "^19.1.5",
+    "@types/ws": "8.18.1",
     "eslint": "^9.27.0",
     "eslint-config-next": "^15.3.3",
     "tailwindcss": "^4.1.8",

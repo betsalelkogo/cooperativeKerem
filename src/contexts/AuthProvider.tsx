@@ -22,7 +22,6 @@ import { getFirebaseAuth } from "@/lib/firebase/client";
 import { isFirebaseConfigured } from "@/lib/firebase/config";
 import { authFetch } from "@/lib/api-client";
 import { DEFAULT_MEMBER_ROLE } from "@/lib/admin";
-import { saveMemberNameParts, upsertMemberFromUser } from "@/lib/firebase/members";
 import { splitFullName } from "@/lib/name";
 import type { Member } from "@/lib/types";
 
@@ -60,14 +59,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(firebaseUser);
           if (firebaseUser) {
             try {
-              const memberRecord = await upsertMemberFromUser(firebaseUser);
-              setMember(memberRecord);
-
               const token = await firebaseUser.getIdToken();
               const res = await authFetch("/api/me", { token });
               if (res.ok) {
                 const { member: synced } = await res.json();
                 setMember(synced);
+              } else {
+                throw new Error("me");
               }
             } catch {
               setMember({
@@ -106,9 +104,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const fallback = splitFullName(result.user.displayName ?? "");
     const firstName = profile?.given_name?.trim() || fallback.firstName;
     const familyName = profile?.family_name?.trim() || fallback.familyName;
-    if (firstName || familyName) {
+    if (firstName && familyName) {
       try {
-        await saveMemberNameParts(result.user.uid, { firstName, familyName });
+        const token = await result.user.getIdToken();
+        await authFetch("/api/account/name", {
+          method: "POST",
+          token,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ firstName, familyName }),
+        });
       } catch {
         // non-fatal — sign-in should still succeed if the name write fails
       }

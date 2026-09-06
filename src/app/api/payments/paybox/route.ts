@@ -9,7 +9,7 @@ import {
   getToolById,
   getGemachById,
   markPaymentPaid,
-  getAdminDb,
+  updatePaymentPayboxFields,
 } from "@/lib/firestore/repository";
 import type { MemberPayment } from "@/lib/types";
 import { createGrowPaymentLink } from "@/lib/paybox/grow";
@@ -130,10 +130,7 @@ export async function POST(request: Request) {
 
     let payment: MemberPayment;
     if (pending) {
-      await getAdminDb()
-        .collection("payments")
-        .doc(pending.id)
-        .update({ payboxGroupUrl: groupUrl, provider });
+      await updatePaymentPayboxFields(pending.id, { payboxGroupUrl: groupUrl, provider });
       payment = { ...pending, payboxGroupUrl: groupUrl, provider };
     } else {
       payment = await createMemberPayment({
@@ -162,7 +159,7 @@ export async function POST(request: Request) {
       growPaymentUrl = grow?.paymentUrl;
       provider = "grow";
 
-      await getAdminDb().collection("payments").doc(payment.id).update({
+      await updatePaymentPayboxFields(payment.id, {
         growPaymentUrl,
         provider,
       });
