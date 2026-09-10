@@ -18,6 +18,7 @@ import { compressImageFile } from "@/lib/compress-image";
 import { canStartCheckout } from "@/lib/reservation-checkout";
 import { REQUIRE_QR_SCAN } from "@/lib/features";
 import { PLATFORM_GEMACH_ID } from "@/lib/gemach";
+import { formatCredits } from "@/lib/pots";
 import type { Reservation, Tool } from "@/lib/types";
 
 type Step = "payment" | "qr" | "items" | "safety" | "condition" | "photo" | "done";
@@ -36,7 +37,7 @@ function stepAfterQr(hasItems: boolean, hasSafety: boolean): Step {
 export default function CheckoutPage() {
   const params = useParams<{ reservationId: string }>();
   const router = useRouter();
-  const { getIdToken } = useAuth();
+  const { getIdToken, refreshMember } = useAuth();
 
   const [reservation, setReservation] = useState<Reservation | null>(null);
   const [tool, setTool] = useState<Tool | null>(null);
@@ -77,7 +78,8 @@ export default function CheckoutPage() {
 
         const toolHasItems = (data.tool?.includedItems?.length ?? 0) > 0;
         const toolHasSafety = (data.tool?.safetyRules?.length ?? 0) > 0;
-        if (data.reservation.feeAmount === 0) {
+        const chargeAtPickup = data.tool?.gemachId === PLATFORM_GEMACH_ID;
+        if (data.reservation.feeAmount === 0 || chargeAtPickup) {
           setStep(stepAfterPayment(toolHasItems, toolHasSafety));
         } else if (paymentRes.ok) {
           const paymentData = await paymentRes.json();
@@ -128,6 +130,7 @@ export default function CheckoutPage() {
       }
 
       setStep("done");
+      await refreshMember();
       setTimeout(() => router.push("/my-loans?pickedUp=1"), 2000);
     } catch (err) {
       setError(err instanceof Error ? err.message : "משהו השתבש");
@@ -153,13 +156,14 @@ export default function CheckoutPage() {
     { key: "done", label: "סיום" },
   ];
 
-  const steps =
-    reservation.feeAmount === 0
-      ? [
-          ...(REQUIRE_QR_SCAN ? [{ key: "qr", label: "סריקת QR" }] : []),
-          ...baseSteps,
-        ]
-      : [{ key: "payment", label: "תשלום" }, ...(REQUIRE_QR_SCAN ? [{ key: "qr", label: "סריקת QR" }] : []), ...baseSteps];
+  const isPlatform = tool.gemachId === PLATFORM_GEMACH_ID;
+  const needsPrepay = reservation.feeAmount > 0 && !isPlatform;
+  const steps = needsPrepay
+    ? [{ key: "payment", label: "תשלום" }, ...(REQUIRE_QR_SCAN ? [{ key: "qr", label: "סריקת QR" }] : []), ...baseSteps]
+    : [
+        ...(REQUIRE_QR_SCAN ? [{ key: "qr", label: "סריקת QR" }] : []),
+        ...baseSteps,
+      ];
 
   const stepIndex = steps.findIndex((s) => s.key === step);
 
@@ -167,7 +171,7 @@ export default function CheckoutPage() {
     <div className="mx-auto max-w-lg px-0">
       <PageHeader
         title={`לקיחה: ${tool.name}`}
-        description="שלב 2 — תשלום (אם נדרש), צ׳ק-ליסט, מצב הכלי, צילום והפעלת ההשאלה."
+        description="שלב 2 — צ׳ק-ליסט, מצב הכלי, צילום והפעלת ההשאלה. דמי ההשאלה יורדים מהיתרה רק בלקיחה."
       />
 
       <StepProgress steps={steps} currentIndex={stepIndex} />
@@ -220,6 +224,12 @@ export default function CheckoutPage() {
             label="צלמו את הכלי לפני השימוש"
             onCapture={(file) => setPhotoFile(file)}
           />
+          {isPlatform && reservation.feeAmount > 0 && (
+            <Alert variant="info">
+              בעת הלקיחה יירדו מהיתרה {formatCredits(reservation.feeAmount)}.
+              ביטול שריון לפני הלקיחה לא מחייב.
+            </Alert>
+          )}
           <Button
             type="button"
             disabled={!photoFile || loading}

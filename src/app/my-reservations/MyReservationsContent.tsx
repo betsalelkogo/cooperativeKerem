@@ -16,7 +16,7 @@ import {
 import { formatCredits } from "@/lib/pots";
 
 export default function MyReservationsContent() {
-  const { getIdToken, user } = useAuth();
+  const { getIdToken, user, refreshMember } = useAuth();
   const searchParams = useSearchParams();
   const justCreated = searchParams.get("created") === "1";
 
@@ -53,7 +53,7 @@ export default function MyReservationsContent() {
 
   async function handleCancelReservation(reservationId: string) {
     const confirmed = window.confirm(
-      "לבטל את השריון? הכלי יחזור להיות זמין.\n\nאם כבר שילמתם וביטול הוא לפני מועד תחילת ההשאלה — הסכום יוחזר אוטומטית ליתרה שלכם. אחרי מועד ההתחלה, או בביטול אוטומטי שלא הגעתם, אין החזר אוטומטי."
+      "לבטל את השריון? הכלי יחזור להיות זמין. דמי ההשאלה יורדים רק בלקיחה בפועל — ביטול לא מחייב."
     );
     if (!confirmed) return;
 
@@ -73,10 +73,7 @@ export default function MyReservationsContent() {
         window.alert(
           `השריון בוטל. זוכו ${formatCredits(data.refundedAmount)} ליתרה שלכם.`
         );
-      } else if (data.hadPaidPayment) {
-        window.alert(
-          "השריון בוטל. הביטול היה אחרי מועד תחילת ההשאלה — אין החזר אוטומטי. אפשר לפנות למנהל."
-        );
+        await refreshMember();
       }
       await loadData();
     } catch (err) {
@@ -99,7 +96,7 @@ export default function MyReservationsContent() {
         <Alert variant="success" className="mb-4">
           <p className="font-semibold">השריון נוצר בהצלחה!</p>
           <p className="mt-1 text-sm">
-            הכלי שמור עבורכם. ביום האיסוף לחצו «המשך ללקיחה» לתשלום (אם נדרש) והפעלת ההשאלה.
+            הכלי שמור עבורכם. ביום האיסוף לחצו «המשך ללקיחה». דמי ההשאלה יורדים מהיתרה רק בלקיחה.
           </p>
         </Alert>
       )}

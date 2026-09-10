@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getUidFromRequest } from "@/lib/firebase/admin";
 import {
-  applyCreditToReservationPayment,
   getGemachById,
   getReservationById,
   getToolById,
@@ -32,7 +31,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "אין דמי השאלה לתשלום" }, { status: 400 });
     }
 
-    // Internal balance may only be spent inside the cooperative, never at a gemach.
     const tool = await getToolById(reservation.toolId);
     const gemach = tool ? await getGemachById(tool.gemachId) : null;
     if (!gemach || !isPlatformGemach(gemach)) {
@@ -42,8 +40,13 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = await applyCreditToReservationPayment({ reservation, memberId });
-    return NextResponse.json(result);
+    return NextResponse.json(
+      {
+        error:
+          "דמי ההשאלה יורדים מהיתרה רק בעת הלקיחה בפועל. אפשר לבטל שריון בלי חיוב.",
+      },
+      { status: 400 }
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : "שגיאת שרת";
     return NextResponse.json({ error: message }, { status: 500 });

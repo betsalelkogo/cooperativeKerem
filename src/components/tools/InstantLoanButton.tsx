@@ -162,7 +162,7 @@ export function InstantLoanButton({
             disabled={loading}
             className="flex-1 rounded-xl bg-kerem-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-kerem-800 disabled:opacity-60"
           >
-            {loading ? "מתחיל…" : `קח ${quantity} ועבור לתשלום`}
+            {loading ? "מתחיל…" : `קח ${quantity} ועבור ללקיחה`}
           </button>
           <button
             type="button"

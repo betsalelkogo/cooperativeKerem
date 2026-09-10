@@ -290,8 +290,8 @@ export async function POST(request: Request) {
       }
     }
 
-    // Cooperative loans are paid from the internal balance only — block the
-    // booking up-front when the member can't cover the fee (no PayBox fallback).
+    // Cooperative loans are charged from the internal balance only at checkout.
+    // Block the booking up-front when the member can't cover the fee later.
     if (isPlatformGemach(gemach) && feeAmount > 0) {
       const balance = member?.creditBalance ?? 0;
       if (balance < feeAmount) {

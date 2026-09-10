@@ -111,6 +111,9 @@ export async function POST(request: Request) {
         { status: 402 }
       );
     }
+    if (message.includes("יתרה")) {
+      return NextResponse.json({ error: message }, { status: 402 });
+    }
     if (message.includes("Firebase Admin not configured")) {
       return NextResponse.json(
         { error: "שרת לא מוגדר — חסרים Firebase Admin credentials" },

@@ -849,6 +849,11 @@ function ReserveToolForm() {
                 {kind.gemachPricingMode === "free" ? "מחיר" : "דמי השאלה המשוערים"}
               </p>
               <p className="mt-1 text-xl font-bold text-kerem-800">{priceText}</p>
+              {!kind.isPartnerGemach && (
+                <p className="mt-1 text-xs text-kerem-800">
+                  החיוב מהיתרה מתבצע רק בלקיחה בפועל. ביטול שריון לא מוריד כסף.
+                </p>
+              )}
             </div>
 
             {windowBlocked && (

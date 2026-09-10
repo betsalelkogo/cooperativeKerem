@@ -72,6 +72,7 @@ import {
   PLATFORM_GEMACH_DISPLAY_NAME,
   formatToolPriceLabel,
   isPartnerGemach,
+  isPlatformGemach,
   resolveReservationFee,
   displayGemachName,
   resolveGemachReservationMode,
@@ -85,7 +86,7 @@ import {
   PARTNER_DEFAULT_LOAN_HOURS,
   PARTNER_MAX_LOAN_HOURS,
 } from "@/lib/gemach";
-import { splitPayment, getOperationsPercent } from "@/lib/pots";
+import { splitPayment, getOperationsPercent, formatCredits } from "@/lib/pots";
 import {
   roleFromMemberData,
   DEFAULT_MEMBER_ROLE,
@@ -132,7 +133,6 @@ import {
 } from "@/lib/billing-days";
 import {
   isReservationNoShowExpired,
-  reservationPickupStart,
 } from "@/lib/reservation-expiry";
 
 type QueryClient = {
@@ -1562,7 +1562,17 @@ export async function autoCancelNoShowReservation(
     return true;
   });
 
-  if (cancelled) invalidateQueryMemo();
+  if (cancelled) {
+    invalidateQueryMemo();
+    const paidPayment = await getPaidPaymentForReservation(reservationId);
+    if (paidPayment) {
+      await refundPaidReservationToCredit({
+        payment: paidPayment,
+        reservationId,
+        memberId: reservation.memberId,
+      });
+    }
+  }
   return { ...reservation, status: cancelled ? "cancelled" : reservation.status };
 }
 
@@ -1642,7 +1652,7 @@ async function refundPaidReservationToCredit(params: {
         refundAmount,
         next,
         "refund",
-        `החזר על ביטול שריון לפני מועד ההשאלה — ${reservationId}`,
+        `החזר על ביטול שריון — הכלי לא נלקח — ${reservationId}`,
         reservationId,
         memberId,
       ]
@@ -1671,8 +1681,6 @@ export async function cancelReservation(
   }
 
   const paidPayment = await getPaidPaymentForReservation(id);
-  const beforePickupStart =
-    Date.now() < reservationPickupStart(reservation).getTime();
 
   await withTransaction(async (raw) => {
     const client = raw as unknown as QueryClient;
@@ -1702,7 +1710,7 @@ export async function cancelReservation(
   invalidateQueryMemo();
 
   let refundedAmount = 0;
-  if (paidPayment && beforePickupStart) {
+  if (paidPayment) {
     refundedAmount = await refundPaidReservationToCredit({
       payment: paidPayment,
       reservationId: id,
@@ -2440,7 +2448,7 @@ export async function applyCreditToReservationPayment(params: {
         -creditApply,
         balanceAfter,
         "payment_debit",
-        `תשלום מהיתרה — השאלה ${reservation.id}`,
+        `תשלום מהיתרה בעת לקיחה — ${reservation.id}`,
         reservation.id,
         memberId,
       ]
@@ -2795,6 +2803,80 @@ async function claimToolsForCheckout(reservation: Reservation): Promise<string[]
   return claimed.map((t) => t.id);
 }
 
+/** Debit cooperative loan fee from credit at actual checkout (same transaction). */
+async function debitReservationFeeFromCredit(
+  client: QueryClient,
+  params: { reservation: Reservation; memberId: string }
+): Promise<void> {
+  const fee = Math.round(params.reservation.feeAmount * 100) / 100;
+  if (!(fee > 0)) return;
+
+  const paidRows = await txRows(
+    client,
+    `SELECT id FROM payments
+     WHERE reservation_id = $1 AND status = 'paid'
+     LIMIT 1`,
+    [params.reservation.id]
+  );
+  if (paidRows.length) return;
+
+  const memberRows = await txRows(
+    client,
+    "SELECT * FROM members WHERE id = $1 FOR UPDATE",
+    [params.memberId]
+  );
+  const member = memberRows[0] ? memberFromRow(memberRows[0]) : null;
+  const balance = member?.creditBalance ?? 0;
+  if (balance < fee) {
+    throw new Error(
+      balance <= 0
+        ? "אין לך יתרה. בקואופרטיב ההשאלה מתבצעת מהיתרה בלבד — פנו למנהל להטענת יתרה."
+        : `היתרה שלך (${formatCredits(balance)}) אינה מספיקה לדמי ההשאלה (${formatCredits(fee)}).`
+    );
+  }
+
+  const balanceAfter = Math.round((balance - fee) * 100) / 100;
+  const paymentId = newId("pay");
+  const ledgerId = newId("cl");
+
+  await client.query(
+    "UPDATE members SET credit_balance = $1, updated_at = NOW() WHERE id = $2",
+    [balanceAfter, params.memberId]
+  );
+  await client.query(
+    `INSERT INTO credit_ledger (
+      id, member_id, delta, balance_after, reason, note, reservation_id, created_by
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [
+      ledgerId,
+      params.memberId,
+      -fee,
+      balanceAfter,
+      "payment_debit",
+      `תשלום מהיתרה בעת לקיחה — ${params.reservation.id}`,
+      params.reservation.id,
+      params.memberId,
+    ]
+  );
+  await client.query(
+    `INSERT INTO payments (
+      id, reservation_id, member_id, tool_id, amount, credit_applied,
+      status, provider, paybox_group_url, paid_at
+    ) VALUES (
+      $1, $2, $3, $4, $5, $6,
+      'paid', 'credit', '', NOW()
+    )`,
+    [
+      paymentId,
+      params.reservation.id,
+      params.memberId,
+      params.reservation.toolId,
+      fee,
+      fee,
+    ]
+  );
+}
+
 export async function createLoanFromCheckout(params: {
   reservation: Reservation;
   checkoutPhotoUrl: string;
@@ -2803,11 +2885,21 @@ export async function createLoanFromCheckout(params: {
   checkoutDefect?: DefectRecord;
   loanId?: string;
 }): Promise<{ loan: Loan; loans: Loan[] }> {
+  const checkoutTool = await getToolById(params.reservation.toolId);
+  const checkoutGemach = checkoutTool
+    ? await getGemachById(checkoutTool.gemachId)
+    : null;
+  const chargeCreditAtCheckout = Boolean(
+    params.reservation.feeAmount > 0 &&
+      checkoutGemach &&
+      isPlatformGemach(checkoutGemach)
+  );
+
   const payment =
     params.reservation.feeAmount > 0
       ? await getPaidPaymentForReservation(params.reservation.id)
       : null;
-  if (params.reservation.feeAmount > 0 && !payment) {
+  if (params.reservation.feeAmount > 0 && !payment && !chargeCreditAtCheckout) {
     throw new Error("Payment required before checkout");
   }
 
@@ -2866,6 +2958,12 @@ export async function createLoanFromCheckout(params: {
 
   await withTransaction(async (raw) => {
     const client = raw as unknown as QueryClient;
+    if (chargeCreditAtCheckout) {
+      await debitReservationFeeFromCredit(client, {
+        reservation: params.reservation,
+        memberId: params.reservation.memberId,
+      });
+    }
     await client.query(
       `UPDATE reservations
        SET tool_id = $1, tool_ids = $2, quantity = $3, status = 'completed'
