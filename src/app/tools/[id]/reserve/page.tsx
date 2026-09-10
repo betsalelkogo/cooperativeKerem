@@ -28,6 +28,12 @@ import { PeerDebtBanner } from "@/components/membership/PeerDebtBanner";
 import type { GemachReservationMode, ToolKindWithAvailability } from "@/lib/types";
 import { LOAN_HOUR_CANDIDATES } from "@/lib/gemach";
 import {
+  computeBillingDaysReservation,
+  formatBillingDaysLabel,
+  MAX_RESERVATION_BILLING_DAYS,
+  validateBillingDaysReservation,
+} from "@/lib/billing-days";
+import {
   isPaidMember,
   MEMBERSHIP_REQUIRED_CODE,
   PEER_DEBT_REQUIRED_CODE,
@@ -50,6 +56,7 @@ type WindowAvailability = {
     mustReturnByLabel: string;
   };
   byHours?: Record<string, WindowAvailability>;
+  byDays?: Record<string, WindowAvailability>;
 };
 
 function initialPickup(searchParams: URLSearchParams): {
@@ -109,6 +116,7 @@ function ReserveToolForm() {
 
   const mode: GemachReservationMode = kind?.gemachReservationMode ?? "fixed_hours";
   const isFixedHours = mode === "fixed_hours";
+  const useBillingDays = isFixedHours && !kind?.isPartnerGemach;
 
   // ASAP defaults, or consecutive start after the current loan when extending.
   const [pickupDefaults] = useState(() => pickupQuery);
@@ -116,6 +124,10 @@ function ReserveToolForm() {
   const [pickupTimeStart, setPickupTimeStart] = useState(pickupDefaults.time);
   const extending = pickupQuery.extending;
   const [loanHours, setLoanHours] = useState(4);
+  const [billingDays, setBillingDays] = useState(1);
+  const [availByDays, setAvailByDays] = useState<Record<string, WindowAvailability> | null>(
+    null
+  );
   const [pickupTimeEnd, setPickupTimeEnd] = useState(
     addHoursToTime(pickupDefaults.time, MAX_PICKUP_WINDOW_HOURS)
   );
@@ -178,11 +190,14 @@ function ReserveToolForm() {
   const fixedSchedule = useMemo(() => {
     if (!isFixedHours || !pickupDate || !pickupTimeStart) return null;
     try {
+      if (useBillingDays) {
+        return computeBillingDaysReservation(pickupDate, pickupTimeStart, billingDays);
+      }
       return computeFixedHoursReservation(pickupDate, pickupTimeStart, loanHours);
     } catch {
       return null;
     }
-  }, [isFixedHours, pickupDate, pickupTimeStart, loanHours]);
+  }, [isFixedHours, useBillingDays, pickupDate, pickupTimeStart, loanHours, billingDays]);
 
   // One availability request covers the selected window and all duration options.
   useEffect(() => {
@@ -196,7 +211,10 @@ function ReserveToolForm() {
           pickupDate,
           pickupTimeStart,
         });
-        if (isFixedHours) {
+        if (isFixedHours && useBillingDays) {
+          qs.set("days", Array.from({ length: MAX_RESERVATION_BILLING_DAYS }, (_, i) => i + 1).join(","));
+          qs.set("billingDays", String(billingDays));
+        } else if (isFixedHours) {
           qs.set("hours", hourOptions.join(","));
           qs.set("loanDurationHours", String(loanHours));
         } else if (returnDate && returnTimeEnd) {
@@ -216,7 +234,10 @@ function ReserveToolForm() {
         const data = (await res.json()) as WindowAvailability;
         if (data.byHours) setAvailByHours(data.byHours);
         else setAvailByHours(null);
-        const selected = data.byHours?.[String(loanHours)] ?? data;
+        if (data.byDays) setAvailByDays(data.byDays);
+        else setAvailByDays(null);
+        const selected =
+          data.byDays?.[String(billingDays)] ?? data.byHours?.[String(loanHours)] ?? data;
         setWindowAvail(selected);
         setQuantity((q) => {
           const next =
@@ -231,6 +252,15 @@ function ReserveToolForm() {
           setViableHours(okHours);
           setLoanHours((current) =>
             okHours.length > 0 && !okHours.includes(current) ? okHours[0] : current
+          );
+        }
+        if (data.byDays) {
+          const okDays = Array.from(
+            { length: MAX_RESERVATION_BILLING_DAYS },
+            (_, i) => i + 1
+          ).filter((d) => (data.byDays?.[String(d)]?.availableUnits ?? 0) > 0);
+          setBillingDays((current) =>
+            okDays.length > 0 && !okDays.includes(current) ? okDays[0] : current
           );
         }
       } catch (err) {
@@ -253,10 +283,24 @@ function ReserveToolForm() {
     returnDate,
     returnTimeEnd,
     hourOptions,
+    useBillingDays,
+    billingDays,
     getIdToken,
   ]);
 
   useEffect(() => {
+    if (availByDays) {
+      const selected = availByDays[String(billingDays)];
+      if (!selected) return;
+      setWindowAvail(selected);
+      setQuantity((q) => {
+        const next =
+          selected.availableUnits > 0 ? Math.min(q, selected.availableUnits) : q;
+        setQuantityDraft(String(next));
+        return next;
+      });
+      return;
+    }
     if (!availByHours) return;
     const selected = availByHours[String(loanHours)];
     if (!selected) return;
@@ -271,7 +315,7 @@ function ReserveToolForm() {
       (h) => (availByHours[String(h)]?.availableUnits ?? 0) > 0
     );
     setViableHours(okHours);
-  }, [availByHours, loanHours, hourOptions]);
+  }, [availByDays, billingDays, availByHours, loanHours, hourOptions]);
 
   function handlePickupStartChange(value: string) {
     setPickupTimeStart(value);
@@ -316,7 +360,25 @@ function ReserveToolForm() {
       }
     }
 
-    if (isFixedHours) {
+    if (isFixedHours && useBillingDays) {
+      let timeError = validateBillingDaysReservation(
+        effectivePickupDate,
+        effectivePickupTimeStart,
+        billingDays
+      );
+      if (timeError === pastMsg) {
+        bumpToEarliestFuture();
+        timeError = validateBillingDaysReservation(
+          effectivePickupDate,
+          effectivePickupTimeStart,
+          billingDays
+        );
+      }
+      if (timeError) {
+        setError(timeError);
+        return;
+      }
+    } else if (isFixedHours) {
       const limits = {
         minHours: kind.gemachDefaultLoanHours ?? 4,
         maxHours: kind.gemachMaxLoanHours ?? 24,
@@ -389,7 +451,9 @@ function ReserveToolForm() {
             quantity: submitQuantity,
             pickupDate: effectivePickupDate,
             pickupTimeStart: effectivePickupTimeStart,
-            loanDurationHours: loanHours,
+            ...(useBillingDays
+              ? { billingDays }
+              : { loanDurationHours: loanHours }),
           }
         : {
             kindId: kind.catalogId,
@@ -576,25 +640,53 @@ function ReserveToolForm() {
                     </p>
                   </div>
                   <div>
-                    <label htmlFor="loanHours" className="mb-1.5 block text-sm font-semibold text-stone-800">
+                    <label
+                      htmlFor={useBillingDays ? "billingDays" : "loanHours"}
+                      className="mb-1.5 block text-sm font-semibold text-stone-800"
+                    >
                       משך השאלה
                     </label>
-                    <select
-                      id="loanHours"
-                      value={loanHours}
-                      onChange={(e) => setLoanHours(Number(e.target.value))}
-                      className="w-full rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm focus:border-kerem-400 focus:outline-none focus:ring-2 focus:ring-kerem-200"
-                    >
-                      {displayedHours.map((h) => (
-                        <option key={h} value={h}>
-                          {formatLoanDurationLabel(h)}
-                        </option>
-                      ))}
-                    </select>
-                    {viableHours && viableHours.length < hourOptions.length && (
-                      <p className="mt-1 text-xs text-amber-800">
-                        משכים ארוכים יותר נחסמו כי הם חופפים לשריון/השאלה קיימים.
-                      </p>
+                    {useBillingDays ? (
+                      <>
+                        <select
+                          id="billingDays"
+                          value={billingDays}
+                          onChange={(e) => setBillingDays(Number(e.target.value))}
+                          className="w-full rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm focus:border-kerem-400 focus:outline-none focus:ring-2 focus:ring-kerem-200"
+                        >
+                          {Array.from({ length: MAX_RESERVATION_BILLING_DAYS }, (_, i) => i + 1).map(
+                            (d) => (
+                              <option key={d} value={d}>
+                                {formatBillingDaysLabel(d)}
+                              </option>
+                            )
+                          )}
+                        </select>
+                        <p className="mt-1 text-xs text-[var(--muted)]">
+                          יום חיוב נספר מ-22:00 עד 22:00 למחרת. מקסימום {MAX_RESERVATION_BILLING_DAYS}{" "}
+                          ימים בהזמנה אחת.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <select
+                          id="loanHours"
+                          value={loanHours}
+                          onChange={(e) => setLoanHours(Number(e.target.value))}
+                          className="w-full rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm focus:border-kerem-400 focus:outline-none focus:ring-2 focus:ring-kerem-200"
+                        >
+                          {displayedHours.map((h) => (
+                            <option key={h} value={h}>
+                              {formatLoanDurationLabel(h)}
+                            </option>
+                          ))}
+                        </select>
+                        {viableHours && viableHours.length < hourOptions.length && (
+                          <p className="mt-1 text-xs text-amber-800">
+                            משכים ארוכים יותר נחסמו כי הם חופפים לשריון/השאלה קיימים.
+                          </p>
+                        )}
+                      </>
                     )}
                   </div>
                 </fieldset>
@@ -604,7 +696,9 @@ function ReserveToolForm() {
                     <p className="font-bold text-stone-900">סיכום השריון</p>
                     <p className="mt-2 text-[var(--muted)]">
                       <span className="font-medium text-stone-800">משך:</span>{" "}
-                      {formatLoanDurationLabel(loanHours)}
+                      {useBillingDays
+                        ? formatBillingDaysLabel(billingDays)
+                        : formatLoanDurationLabel(loanHours)}
                     </p>
                     <p className="mt-1 text-[var(--muted)]">
                       <span className="font-medium text-stone-800">מתחיל:</span>{" "}

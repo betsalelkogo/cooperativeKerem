@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { ItemChecklist, ConditionNotes } from "@/components/loan/ItemChecklist";
+import { SafetyChecklist } from "@/components/loan/SafetyChecklist";
 import { PhotoCapture } from "@/components/loan/PhotoCapture";
 import { QrScanner } from "@/components/loan/QrScanner";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -15,15 +16,16 @@ import { authFetch } from "@/lib/api-client";
 import { compressImageFile } from "@/lib/compress-image";
 import { REQUIRE_QR_SCAN } from "@/lib/features";
 import { DEFECT_CATEGORIES } from "@/lib/defects";
-import type { DefectCategory, LateReturnFee, Loan, Tool } from "@/lib/types";
+import type { DefectCategory, LateReturnFee, Loan, SafetyRule, Tool } from "@/lib/types";
 import { formatLateDuration } from "@/lib/late-fees";
 import { formatDateHe } from "@/lib/dates";
 import { formatNIS } from "@/lib/pots";
 
-type Step = "qr" | "items" | "condition" | "photo" | "done";
+type Step = "qr" | "instructions" | "items" | "condition" | "photo" | "done";
 
-function initialStep(hasItems: boolean): Step {
+function initialStep(hasItems: boolean, hasInstructions: boolean): Step {
   if (REQUIRE_QR_SCAN) return "qr";
+  if (hasInstructions) return "instructions";
   return hasItems ? "items" : "condition";
 }
 
@@ -56,6 +58,7 @@ export default function ReturnPage() {
   const [error, setError] = useState("");
   const [faultReported, setFaultReported] = useState(false);
   const [lateFee, setLateFee] = useState<LateReturnFee | null>(null);
+  const [returnInstructions, setReturnInstructions] = useState<SafetyRule[]>([]);
 
   const includedItems = tool?.includedItems ?? [];
   const hasItems = includedItems.length > 0;
@@ -72,10 +75,16 @@ export default function ReturnPage() {
         const data = await res.json();
         setLoan(data.loan);
         setTool(data.tool);
+        const instructions = Array.isArray(data.returnInstructions)
+          ? (data.returnInstructions as SafetyRule[])
+          : [];
+        setReturnInstructions(instructions);
         if (data.gemach?.donationUrl) {
           setDonation({ name: data.gemach.name, donationUrl: data.gemach.donationUrl });
         }
-        setStep(initialStep((data.tool?.includedItems?.length ?? 0) > 0));
+        setStep(
+          initialStep((data.tool?.includedItems?.length ?? 0) > 0, instructions.length > 0)
+        );
       } catch (err) {
         setLoadError(err instanceof Error ? err.message : "שגיאה בטעינה");
       }
@@ -86,7 +95,9 @@ export default function ReturnPage() {
   function handleQrScan(code: string) {
     if (!tool) return;
     if (code === tool.qrCode) {
-      setStep(hasItems ? "items" : "condition");
+      setStep(
+        returnInstructions.length > 0 ? "instructions" : hasItems ? "items" : "condition"
+      );
       setError("");
     } else {
       setError("קוד ה-QR לא תואם. סרקו את המדבקה על הכלי שמוחזר.");
@@ -207,6 +218,7 @@ export default function ReturnPage() {
 
   const steps = [
     ...(REQUIRE_QR_SCAN ? [{ key: "qr", label: "סריקת QR" }] : []),
+    ...(returnInstructions.length > 0 ? [{ key: "instructions", label: "הנחיות החזרה" }] : []),
     ...(hasItems ? [{ key: "items", label: "מה בערכה" }] : []),
     { key: "condition", label: "מצב הכלי" },
     { key: "photo", label: "צילום" },
@@ -246,6 +258,16 @@ export default function ReturnPage() {
       )}
 
       {REQUIRE_QR_SCAN && step === "qr" && <QrScanner onScan={handleQrScan} />}
+
+      {step === "instructions" && returnInstructions.length > 0 && (
+        <SafetyChecklist
+          rules={returnInstructions}
+          title="הנחיות החזרה"
+          description="נקו, בדקו שלמות, והחזירו למיקום המדויק — סמנו שקראתם לפני הסגירה"
+          confirmLabel="קראתי ואפעל לפי ההנחיות"
+          onComplete={() => setStep(hasItems ? "items" : "condition")}
+        />
+      )}
 
       {step === "items" && hasItems && (
         <ItemChecklist

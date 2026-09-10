@@ -94,15 +94,39 @@ export function ToolDetailView({ kind }: { kind: ToolKindWithAvailability }) {
             </div>
           </div>
 
-          {stockLabel && kind.availableUnits === 0 && (
-            <p className="mb-4 rounded-xl bg-warm-50 px-4 py-3 text-sm font-medium text-stone-800 ring-1 ring-warm-200">
-              {stockLabel}
-              {kind.availableFrom && (
-                <span className="mr-2 text-accent-800">
-                  ({new Date(`${kind.availableFrom}T00:00:00`).toLocaleDateString("he-IL")})
-                </span>
+          {kind.availableUnits === 0 && (
+            <div className="mb-4 rounded-xl bg-warm-50 px-4 py-3 text-sm font-medium text-stone-800 ring-1 ring-warm-200">
+              {stockLabel && <p>{stockLabel}</p>}
+              {kind.currentHolder ? (
+                <div className="mt-2 space-y-1 text-sm text-stone-800">
+                  <p>
+                    מחזיק כרגע: <strong>{kind.currentHolder.name}</strong>
+                  </p>
+                  {kind.currentHolder.phone && (
+                    <p>
+                      טלפון:{" "}
+                      <a
+                        href={`tel:${kind.currentHolder.phone}`}
+                        className="font-semibold text-kerem-800 underline"
+                      >
+                        {kind.currentHolder.phone}
+                      </a>
+                    </p>
+                  )}
+                  {kind.currentHolder.dueLabel && (
+                    <p>
+                      החזרה צפויה: <strong>{kind.currentHolder.dueLabel}</strong>
+                    </p>
+                  )}
+                </div>
+              ) : (
+                kind.availableFrom && (
+                  <p className="mt-1 text-accent-800">
+                    זמין מ-{new Date(`${kind.availableFrom}T00:00:00`).toLocaleDateString("he-IL")}
+                  </p>
+                )
               )}
-            </p>
+            </div>
           )}
 
           <div className="mb-4">

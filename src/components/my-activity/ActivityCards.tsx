@@ -16,20 +16,12 @@ import type { Loan, Reservation, Tool } from "@/lib/types";
 export interface LoanWithTool {
   loan: Loan;
   tool: Tool | null;
+  canExtend?: boolean;
 }
 
 export interface ReservationWithTool {
   reservation: Reservation;
   tool: Tool | null;
-}
-
-function extendReservationHref(loan: Loan, tool: Tool | null): string | null {
-  const catalogId = tool?.kindId ?? tool?.id;
-  if (!catalogId) return null;
-  const params = new URLSearchParams({ extend: "1" });
-  if (loan.dueReturnDate) params.set("pickupDate", loan.dueReturnDate);
-  if (loan.dueReturnTimeEnd) params.set("pickupTimeStart", loan.dueReturnTimeEnd);
-  return `/tools/${catalogId}/reserve?${params.toString()}`;
 }
 
 export function formatActivityDate(iso?: string) {
@@ -118,15 +110,38 @@ export function ReservationCard({
 interface LoanCardProps {
   loan: Loan;
   tool: Tool | null;
+  canExtend?: boolean;
   getToken?: () => Promise<string | null>;
   onPhotoAdded?: () => void;
 }
 
-export function LoanCard({ loan, tool, getToken, onPhotoAdded }: LoanCardProps) {
+export function LoanCard({ loan, tool, canExtend, getToken, onPhotoAdded }: LoanCardProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [extending, setExtending] = useState(false);
+  const [extendError, setExtendError] = useState("");
   const extraPhotos = loan.additionalPhotoUrls?.length ?? 0;
-  const extendHref = extendReservationHref(loan, tool);
+
+  async function handleDirectExtend() {
+    if (!getToken) return;
+    setExtending(true);
+    setExtendError("");
+    try {
+      const token = await getToken();
+      if (!token) return;
+      const res = await authFetch(`/api/loans/${loan.id}/extend`, {
+        method: "POST",
+        token,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "ההארכה נכשלה");
+      onPhotoAdded?.();
+    } catch (err) {
+      setExtendError(err instanceof Error ? err.message : "ההארכה נכשלה");
+    } finally {
+      setExtending(false);
+    }
+  }
 
   async function handleExtraPhoto(file: File) {
     if (!getToken) return;
@@ -205,13 +220,16 @@ export function LoanCard({ loan, tool, getToken, onPhotoAdded }: LoanCardProps) 
               </Button>
             </>
           )}
-          {loan.status === "active" && extendHref && (
-            <Link
-              href={extendHref}
-              className="rounded-xl border border-kerem-300 bg-white px-4 py-2 text-sm font-semibold text-kerem-800 shadow-sm transition hover:bg-kerem-50"
+          {loan.status === "active" && canExtend && getToken && (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={extending}
+              onClick={() => void handleDirectExtend()}
             >
-              הארכת השאלה
-            </Link>
+              {extending ? "מאריך…" : "הארכה ליום נוסף"}
+            </Button>
           )}
           {loan.status === "active" && (
             <Link
@@ -237,10 +255,12 @@ interface LoanGroupCardProps {
 export function LoanGroupCard({ items, getToken, onPhotoAdded }: LoanGroupCardProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [extending, setExtending] = useState(false);
+  const [extendError, setExtendError] = useState("");
 
   if (items.length === 0) return null;
 
-  const { loan, tool } = items[0];
+  const { loan, tool, canExtend } = items[0];
   // A booking may be a single loan doc with a quantity, or (legacy) several docs.
   const docCount = items.length;
   const count = items.reduce((sum, i) => sum + (i.loan.quantity ?? 1), 0);
@@ -254,7 +274,27 @@ export function LoanGroupCard({ items, getToken, onPhotoAdded }: LoanGroupCardPr
     docCount > 1
       ? `/return/${loan.id}?loanIds=${encodeURIComponent(loanIds.join(","))}`
       : `/return/${loan.id}`;
-  const extendHref = extendReservationHref(loan, tool);
+
+  async function handleDirectExtend() {
+    if (!getToken) return;
+    setExtending(true);
+    setExtendError("");
+    try {
+      const token = await getToken();
+      if (!token) return;
+      const res = await authFetch(`/api/loans/${loan.id}/extend`, {
+        method: "POST",
+        token,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "ההארכה נכשלה");
+      onPhotoAdded?.();
+    } catch (err) {
+      setExtendError(err instanceof Error ? err.message : "ההארכה נכשלה");
+    } finally {
+      setExtending(false);
+    }
+  }
 
   async function handleExtraPhoto(file: File) {
     if (!getToken) return;
@@ -307,7 +347,11 @@ export function LoanGroupCard({ items, getToken, onPhotoAdded }: LoanGroupCardPr
             {loan.dueReturnDate && (
               <p className="text-xs text-[var(--muted)]">
                 החזרה מתוכננת: {formatDateHe(loan.dueReturnDate)}
+                {loan.dueReturnTimeEnd ? ` · ${loan.dueReturnTimeEnd}` : ""}
               </p>
+            )}
+            {extendError && (
+              <p className="mt-1 text-xs font-medium text-red-700">{extendError}</p>
             )}
             {extraPhotos > 0 && (
               <p className="text-xs text-sky-700">{extraPhotos} צילומים נוספים בתיעוד</p>
@@ -341,13 +385,16 @@ export function LoanGroupCard({ items, getToken, onPhotoAdded }: LoanGroupCardPr
               </Button>
             </>
           )}
-          {loan.status === "active" && extendHref && (
-            <Link
-              href={extendHref}
-              className="rounded-xl border border-kerem-300 bg-white px-4 py-2 text-sm font-semibold text-kerem-800 shadow-sm transition hover:bg-kerem-50"
+          {loan.status === "active" && canExtend && getToken && (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={extending}
+              onClick={() => void handleDirectExtend()}
             >
-              הארכת השאלה
-            </Link>
+              {extending ? "מאריך…" : "הארכה ליום נוסף"}
+            </Button>
           )}
           {loan.status === "active" && (
             <Link

@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { getUidFromRequest } from "@/lib/firebase/admin";
-import { getLoansByMember, getToolById } from "@/lib/firestore/repository";
+import {
+  canExtendActiveLoan,
+  getLoansByMember,
+  getToolById,
+} from "@/lib/firestore/repository";
 
 export async function GET(request: Request) {
   try {
@@ -11,10 +15,17 @@ export async function GET(request: Request) {
 
     const loans = await getLoansByMember(memberId);
     const withTools = await Promise.all(
-      loans.map(async (loan) => ({
-        loan,
-        tool: await getToolById(loan.toolId),
-      }))
+      loans.map(async (loan) => {
+        const [tool, extend] = await Promise.all([
+          getToolById(loan.toolId),
+          canExtendActiveLoan(loan),
+        ]);
+        return {
+          loan,
+          tool,
+          canExtend: extend.canExtend,
+        };
+      })
     );
 
     return NextResponse.json(withTools);

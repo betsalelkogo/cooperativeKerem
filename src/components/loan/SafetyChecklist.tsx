@@ -9,9 +9,18 @@ import { cn } from "@/lib/cn";
 interface SafetyChecklistProps {
   rules: SafetyRule[];
   onComplete: () => void;
+  title?: string;
+  description?: string;
+  confirmLabel?: string;
 }
 
-export function SafetyChecklist({ rules, onComplete }: SafetyChecklistProps) {
+export function SafetyChecklist({
+  rules,
+  onComplete,
+  title = "רשימת בטיחות",
+  description = "יש לאשר את כל הכללים לפני לקיחת הכלי",
+  confirmLabel = "אישור כללי הבטיחות",
+}: SafetyChecklistProps) {
   const [checked, setChecked] = useState<Record<string, boolean>>({});
 
   const allChecked = rules.every((rule) => checked[rule.id]);
@@ -23,10 +32,8 @@ export function SafetyChecklist({ rules, onComplete }: SafetyChecklistProps) {
   return (
     <Card className="overflow-hidden">
       <div className="bg-kerem-800 px-6 py-4">
-        <h3 className="text-lg font-bold text-white">רשימת בטיחות</h3>
-        <p className="mt-0.5 text-sm text-kerem-100">
-          יש לאשר את כל הכללים לפני לקיחת הכלי
-        </p>
+        <h3 className="text-lg font-bold text-white">{title}</h3>
+        <p className="mt-0.5 text-sm text-kerem-100">{description}</p>
       </div>
       <CardBody>
         <ul className="space-y-3">
@@ -61,7 +68,7 @@ export function SafetyChecklist({ rules, onComplete }: SafetyChecklistProps) {
           className="mt-5 w-full"
           size="lg"
         >
-          אישור כללי הבטיחות
+          {confirmLabel}
         </Button>
       </CardBody>
     </Card>

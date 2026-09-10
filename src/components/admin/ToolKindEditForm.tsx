@@ -62,6 +62,9 @@ export function ToolKindEditForm({
   const [safetyRulesText, setSafetyRulesText] = useState(
     safetyRulesToText(kind.safetyRules)
   );
+  const [returnInstructionsText, setReturnInstructionsText] = useState(
+    safetyRulesToText(kind.returnInstructions)
+  );
   const [location, setLocation] = useState(kind.location ?? "");
   const [brand, setBrand] = useState(kind.brand ?? "");
   const [supplier, setSupplier] = useState(kind.supplier ?? "");
@@ -245,6 +248,7 @@ export function ToolKindEditForm({
               ? { youtubeUrl: youtubeUrl.trim() || null }
               : {}),
             safetyRules: parseSafetyRules(safetyRulesText),
+            returnInstructions: parseSafetyRules(returnInstructionsText),
             imageUrls: galleryUrls.length ? galleryUrls : null,
             ...(imageToSave !== undefined ? { imageUrl: imageToSave } : {}),
           }),
@@ -529,6 +533,26 @@ export function ToolKindEditForm({
             <p className="mt-1 text-xs text-[var(--muted)]">
               השואל יאשר את ההוראות לפני לקיחת הכלי. אפשר להשאיר ריק — אז לא יוצג שלב בטיחות.
               {kind.totalUnits > 1 && ` השינוי יחול על כל ${kind.totalUnits} היחידות.`}
+            </p>
+          </div>
+
+          <div>
+            <label
+              htmlFor="returnInstructions"
+              className="mb-1.5 block text-sm font-semibold text-stone-800"
+            >
+              הנחיות החזרה (ייעודיות לכלי)
+            </label>
+            <textarea
+              id="returnInstructions"
+              rows={3}
+              value={returnInstructionsText}
+              onChange={(e) => setReturnInstructionsText(e.target.value)}
+              placeholder={"שורה לכל הנחיה, למשל:\nנקו את הלהב\nהחזירו למדף העליון במחסן"}
+              className="w-full rounded-xl border border-[var(--border)] px-4 py-3 text-sm focus:border-kerem-500 focus:outline-none focus:ring-2 focus:ring-kerem-200"
+            />
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              אם ממלאים כאן — הן מחליפות את ההנחיות הגנריות בסגירת ההשאלה. ריק = הנחיות ברירת המחדל של הקואופרטיב.
             </p>
           </div>
 

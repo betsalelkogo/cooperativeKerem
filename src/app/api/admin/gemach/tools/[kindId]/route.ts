@@ -75,6 +75,7 @@ export async function PATCH(
       youtubeUrl,
       imageUrls,
       safetyRules,
+      returnInstructions,
     } = body as {
       gemachId?: string;
       name?: string;
@@ -94,6 +95,7 @@ export async function PATCH(
       youtubeUrl?: string | null;
       imageUrls?: string[] | null;
       safetyRules?: unknown;
+      returnInstructions?: unknown;
     };
 
     const gemachId = resolveGemachAdminScope(adminAuth.member, requestedGemachId ?? null);
@@ -194,6 +196,10 @@ export async function PATCH(
       youtubeUrl: resolvedYoutubeUrl,
       imageUrls: imageUrls === null ? null : imageUrls,
       safetyRules: safetyRules === undefined ? undefined : (sanitizeSafetyRules(safetyRules) ?? []),
+      returnInstructions:
+        returnInstructions === undefined
+          ? undefined
+          : (sanitizeSafetyRules(returnInstructions) ?? []),
     });
 
     return NextResponse.json(result);

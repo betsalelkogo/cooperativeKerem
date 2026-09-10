@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS tools (
   product_age NUMERIC(8, 2),
   youtube_url TEXT,
   image_urls TEXT[],
+  return_instructions JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

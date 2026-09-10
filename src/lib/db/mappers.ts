@@ -91,6 +91,9 @@ export function toolFromRow(row: Record<string, unknown>): Tool {
     productAge: asNumberOpt(row.product_age),
     youtubeUrl: asStringOpt(row.youtube_url),
     imageUrls: asStringArray(row.image_urls),
+    returnInstructions: Array.isArray(row.return_instructions)
+      ? (row.return_instructions as Tool["returnInstructions"])
+      : undefined,
   };
 }
 

@@ -23,6 +23,8 @@ export type AvailabilityOptions = {
    */
   ignoreLoanMemberId?: string;
   preferToolIds?: string[];
+  /** Skip expire-no-show + global hard-lock sync (instant take / hot path). */
+  skipMaintain?: boolean;
 };
 
 function windowStartMs(w: ReservationWindow): number {

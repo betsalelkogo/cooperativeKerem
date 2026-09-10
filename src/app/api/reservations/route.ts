@@ -10,15 +10,13 @@ import {
   getMemberById,
   memberHasOpenPeerDebt,
   pickAvailableToolUnits,
-  syncReservationHardLocks,
-  updateToolStatus,
+  updateToolsStatus,
 } from "@/lib/firestore/repository";
 import { isReservationHardLockDue } from "@/lib/availability";
 import {
   isPlatformGemach,
   resolveGemachReservationMode,
   resolveTotalReservationFee,
-  resolveToolDefaultLoanHours,
 } from "@/lib/gemach";
 import {
   hasAcceptedTerms,
@@ -36,6 +34,11 @@ import {
 } from "@/lib/reservation-times";
 import type { ReservationSchedule } from "@/lib/reservation-times";
 import { israelNowParts } from "@/lib/israel-time";
+import {
+  computeBillingDaysReservation,
+  MAX_RESERVATION_BILLING_DAYS,
+  validateBillingDaysReservation,
+} from "@/lib/billing-days";
 
 export async function GET(request: Request) {
   try {
@@ -81,6 +84,7 @@ export async function POST(request: Request) {
       returnTimeStart,
       returnTimeEnd,
       loanDurationHours,
+      billingDays,
       date,
       immediate,
     } = body as {
@@ -94,6 +98,7 @@ export async function POST(request: Request) {
       returnTimeStart?: string;
       returnTimeEnd?: string;
       loanDurationHours?: number;
+      billingDays?: number;
       date?: string;
       immediate?: boolean;
     };
@@ -107,7 +112,7 @@ export async function POST(request: Request) {
 
     // Resolve kind/gemach first so we can compute the schedule, then pick units
     // that are free for that window (soft future holds stay usable until 1h before).
-    const kind = await getToolKindWithAvailability(catalogKey);
+    const kind = await getToolKindWithAvailability(catalogKey, { includeHolds: false });
     if (!kind) {
       return NextResponse.json({ error: "הכלי לא נמצא" }, { status: 404 });
     }
@@ -125,15 +130,34 @@ export async function POST(request: Request) {
     let schedule: ReservationSchedule;
 
     if (immediate) {
-      // Walk-in loan: book "now" so checkout can start immediately. Start a few
-      // minutes in the past to keep the pickup window open; duration = default.
       const { date: todayIL, minutes } = israelNowParts();
       const startTime = minutesToTime(Math.max(0, minutes - 5));
-      const hours = resolveToolDefaultLoanHours(
-        { defaultLoanHours: kind.defaultLoanHours },
-        gemach
+      const days = Math.min(
+        MAX_RESERVATION_BILLING_DAYS,
+        Math.max(1, Number(billingDays) || 1)
       );
-      schedule = computeFixedHoursReservation(todayIL, startTime, hours);
+      schedule = computeBillingDaysReservation(todayIL, startTime, days);
+    } else if (mode === "fixed_hours" && isPlatformGemach(gemach)) {
+      const resolvedPickup = pickupDate ?? date;
+      if (!resolvedPickup || !pickupTimeStart) {
+        return NextResponse.json(
+          { error: "נדרשים תאריך ושעת התחלה" },
+          { status: 400 }
+        );
+      }
+      const days = Math.min(
+        MAX_RESERVATION_BILLING_DAYS,
+        Math.max(1, Number(billingDays) || 1)
+      );
+      const timeError = validateBillingDaysReservation(
+        resolvedPickup,
+        pickupTimeStart,
+        days
+      );
+      if (timeError) {
+        return NextResponse.json({ error: timeError }, { status: 400 });
+      }
+      schedule = computeBillingDaysReservation(resolvedPickup, pickupTimeStart, days);
     } else if (mode === "fixed_hours") {
       const resolvedPickup = pickupDate ?? date;
       if (!resolvedPickup || !pickupTimeStart) {
@@ -202,6 +226,7 @@ export async function POST(request: Request) {
     }, {
       ignoreLoanMemberId: memberId,
       preferToolIds,
+      skipMaintain: Boolean(immediate),
     });
 
     if (units.length === 0) {
@@ -308,9 +333,7 @@ export async function POST(request: Request) {
     // Soft hold: keep tools available for gap loans until 1h before pickup.
     // Immediate / near-term pickups hard-lock right away.
     if (isReservationHardLockDue(reservation)) {
-      await Promise.all(toolIds.map((id) => updateToolStatus(id, "reserved")));
-    } else {
-      await syncReservationHardLocks();
+      await updateToolsStatus(toolIds, "reserved");
     }
 
     return NextResponse.json(reservation, { status: 201 });

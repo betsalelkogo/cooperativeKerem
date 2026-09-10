@@ -47,6 +47,16 @@ export interface Tool {
   youtubeUrl?: string;
   /** Additional gallery images (first may duplicate imageUrl). */
   imageUrls?: string[];
+  /** Per-tool return/close instructions. Empty = use cooperative defaults. */
+  returnInstructions?: SafetyRule[];
+}
+
+export interface CurrentToolHolder {
+  name: string;
+  phone?: string;
+  dueReturnDate?: string;
+  dueReturnTimeEnd?: string;
+  dueLabel: string;
 }
 
 /** Tool plus catalog availability hint for list/detail views. */
@@ -84,6 +94,9 @@ export interface ToolKindWithAvailability extends Omit<
   imageUrls?: string[];
   /** Catalog popularity / usage stats (when loaded for detail page). */
   stats?: ToolKindStats;
+  /** Who currently holds a unit when none are available. */
+  currentHolder?: CurrentToolHolder;
+  returnInstructions?: SafetyRule[];
 }
 
 export interface ToolKindStats {
@@ -619,6 +632,7 @@ export interface AdminToolKindEdit {
   adminNotes?: string;
   /** Custom safety instructions (empty = no safety step). */
   safetyRules?: SafetyRule[];
+  returnInstructions?: SafetyRule[];
   /** Gemach default location — shown when tool has no override. */
   gemachLocation?: string;
 }

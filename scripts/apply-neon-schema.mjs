@@ -1,5 +1,5 @@
 /**
- * Apply scripts/sql/001_init.sql to Neon.
+ * Apply scripts/sql/*.sql to Neon (001, 002, …).
  *
  *   npm run db:schema
  *
@@ -7,7 +7,7 @@
  * Do not print the connection string.
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { neon } from "@neondatabase/serverless";
@@ -44,24 +44,32 @@ if (!databaseUrl) {
   process.exit(1);
 }
 
-const sqlFile = readFileSync(resolve(__dirname, "sql/001_init.sql"), "utf8");
-const statements = sqlFile
-  .split(/;\s*\n/)
-  .map((s) =>
-    s
-      .split("\n")
-      .filter((line) => !line.trim().startsWith("--"))
-      .join("\n")
-      .trim()
-  )
-  .filter(Boolean);
+function splitSql(sqlFile) {
+  return sqlFile
+    .split(/;\s*\n/)
+    .map((s) =>
+      s
+        .split("\n")
+        .filter((line) => !line.trim().startsWith("--"))
+        .join("\n")
+        .trim()
+    )
+    .filter(Boolean);
+}
 
 const sql = neon(databaseUrl);
 
 async function main() {
-  console.log(`Applying ${statements.length} SQL statements…`);
-  for (const statement of statements) {
-    await sql.query(statement);
+  const dir = resolve(__dirname, "sql");
+  const files = readdirSync(dir)
+    .filter((name) => /^\d+_.*\.sql$/.test(name))
+    .sort();
+  for (const file of files) {
+    const statements = splitSql(readFileSync(resolve(dir, file), "utf8"));
+    console.log(`Applying ${file} (${statements.length} statements)…`);
+    for (const statement of statements) {
+      await sql.query(statement);
+    }
   }
   console.log("Neon schema is ready.");
 }

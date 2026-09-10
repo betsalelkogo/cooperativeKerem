@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { getUidFromRequest } from "@/lib/firebase/admin";
-import { getGemachById, getLoanById, getToolById } from "@/lib/firestore/repository";
+import {
+  getGemachById,
+  getLoanById,
+  getToolById,
+  resolveReturnInstructions,
+} from "@/lib/firestore/repository";
 
 export async function GET(
   request: Request,
@@ -20,10 +25,14 @@ export async function GET(
     }
 
     const tool = await getToolById(loan.toolId);
-    const gemach = tool ? await getGemachById(tool.gemachId) : null;
+    const [gemach, returnInstructions] = await Promise.all([
+      tool ? getGemachById(tool.gemachId) : Promise.resolve(null),
+      resolveReturnInstructions(tool),
+    ]);
     return NextResponse.json({
       loan,
       tool,
+      returnInstructions,
       gemach: gemach
         ? {
             id: gemach.id,

@@ -127,6 +127,7 @@ export function buildToolKindWithAvailability(
     defaultLoanHours: representative.defaultLoanHours,
     maxLoanHours: representative.maxLoanHours,
     safetyRules: representative.safetyRules,
+    returnInstructions: representative.returnInstructions,
     imageUrl: representative.imageUrl,
     imageUrls: representative.imageUrls,
     location: representative.location ?? extras?.location,

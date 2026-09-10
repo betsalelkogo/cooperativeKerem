@@ -49,6 +49,7 @@ import type {
   ToolKindWithAvailability,
   SafetyRule,
   AdminToolKindEdit,
+  CurrentToolHolder,
 } from "@/lib/types";
 import {
   calculateLateFeeAmount,
@@ -98,6 +99,7 @@ import {
   qrCodeForUnit,
   resolveToolFees,
   DEFAULT_SAFETY_RULES,
+  DEFAULT_RETURN_INSTRUCTIONS,
   validateToolInput,
 } from "@/lib/tools-admin";
 import { disputeProgressLabel, isDisputeOpen, pickRandomMediators } from "@/lib/disputes";
@@ -119,8 +121,15 @@ import {
   type ReservationsByTool,
   type ReservationWindow,
 } from "@/lib/availability";
-import { formatReservationDateTimeHe, reservationDateTime } from "@/lib/israel-time";
+import { formatReservationDateTimeHe, israelNowParts, reservationDateTime } from "@/lib/israel-time";
 import { computeFixedHoursReservation } from "@/lib/reservation-times";
+import {
+  addOneBillingDay,
+  BILLING_DAY_END_TIME,
+  computeBillingDaysReservation,
+  formatBillingDueLabel,
+  isRemoteExtendDay,
+} from "@/lib/billing-days";
 import {
   isReservationNoShowExpired,
   reservationPickupStart,
@@ -723,6 +732,7 @@ export async function getToolKindForAdmin(
     youtubeUrl: representative.youtubeUrl,
     adminNotes: representative.adminNotes,
     safetyRules: representative.safetyRules,
+    returnInstructions: representative.returnInstructions,
     gemachLocation: gemach.location,
   };
 }
@@ -747,6 +757,7 @@ export async function updateToolKindDetails(params: {
   youtubeUrl?: string | null;
   adminNotes?: string | null;
   safetyRules?: SafetyRule[] | null;
+  returnInstructions?: SafetyRule[] | null;
 }): Promise<{ updated: number }> {
   const gemach = await getGemachById(params.gemachId);
   if (!gemach) {
@@ -849,6 +860,11 @@ export async function updateToolKindDetails(params: {
   if (params.safetyRules !== undefined) {
     sets.push(`safety_rules = $${i++}::jsonb`);
     values.push(JSON.stringify(params.safetyRules ?? []));
+  }
+
+  if (params.returnInstructions !== undefined) {
+    sets.push(`return_instructions = $${i++}::jsonb`);
+    values.push(JSON.stringify(params.returnInstructions ?? []));
   }
 
   if (params.location === null) {
@@ -960,16 +976,23 @@ export async function getToolKindsWithAvailability(): Promise<ToolKindWithAvaila
 }
 
 export async function getToolKindWithAvailability(
-  catalogKey: string
+  catalogKey: string,
+  options?: { includeHolds?: boolean }
 ): Promise<ToolKindWithAvailability | null> {
   const units = await getToolsForCatalogKey(catalogKey);
   if (units.length === 0) return null;
 
-  const gemach = await getGemachById(units[0].gemachId);
+  const includeHolds = options?.includeHolds !== false;
+  const [gemach, holds] = await Promise.all([
+    getGemachById(units[0].gemachId),
+    includeHolds ? getHoldsForAvailability() : Promise.resolve(null),
+  ]);
   if (!gemach?.active) return null;
-  const { loanByTool, reservationByTool } = emptyHolders();
 
-  return buildToolKindWithAvailability(units, loanByTool, reservationByTool, {
+  const loanByTool = holds?.loanByTool ?? emptyHolders().loanByTool;
+  const reservationByTool = holds?.reservationByTool ?? emptyHolders().reservationByTool;
+
+  const kind = buildToolKindWithAvailability(units, loanByTool, reservationByTool, {
     ...gemachCatalogFields(gemach, units[0]),
     location: units[0].location ?? gemach.location,
     stats: {
@@ -978,6 +1001,37 @@ export async function getToolKindWithAvailability(
       uniqueBorrowers: 0,
     },
   });
+  if (!kind) return null;
+
+  const currentHolder =
+    includeHolds && kind.availableUnits === 0 && holds
+      ? await currentHolderForUnits(units, holds.loans)
+      : undefined;
+
+  return {
+    ...kind,
+    currentHolder,
+    returnInstructions: units[0].returnInstructions,
+  };
+}
+
+async function currentHolderForUnits(
+  units: Tool[],
+  loans: Loan[]
+): Promise<CurrentToolHolder | undefined> {
+  const unitIds = new Set(units.map((u) => u.id));
+  const loan = loans.find((l) => loanToolIds(l).some((id) => unitIds.has(id)));
+  if (!loan) return undefined;
+  const member = await getMemberById(loan.memberId);
+  const dueReturnDate = loan.dueReturnDate;
+  const dueReturnTimeEnd = loan.dueReturnTimeEnd ?? BILLING_DAY_END_TIME;
+  return {
+    name: member?.name ?? "חבר",
+    phone: member?.phone,
+    dueReturnDate,
+    dueReturnTimeEnd,
+    dueLabel: formatBillingDueLabel(dueReturnDate, dueReturnTimeEnd),
+  };
 }
 
 /**
@@ -1055,7 +1109,9 @@ export async function pickAvailableToolUnits(
   schedule?: ReservationWindow,
   options?: AvailabilityOptions
 ): Promise<Tool[]> {
-  await maintainReservationState();
+  if (!options?.skipMaintain) {
+    await maintainReservationState();
+  }
   const [units, holds] = await Promise.all([
     getToolsForCatalogKey(catalogKey),
     getHoldsForAvailability(),
@@ -1144,8 +1200,14 @@ export async function getToolByQrCode(qrCode: string): Promise<Tool | null> {
 }
 
 export async function updateToolStatus(id: string, status: Tool["status"]) {
+  await updateToolsStatus([id], status);
+}
+
+export async function updateToolsStatus(ids: string[], status: Tool["status"]) {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (unique.length === 0) return;
   const sql = getSql();
-  await sql`UPDATE tools SET status = ${status}, updated_at = NOW() WHERE id = ${id}`;
+  await sql`UPDATE tools SET status = ${status}, updated_at = NOW() WHERE id = ANY(${unique})`;
   invalidateQueryMemo();
 }
 
@@ -1270,6 +1332,7 @@ export async function createToolsForGemach(params: {
   loanFeeMax: number;
   kindId?: string;
   safetyRules?: SafetyRule[];
+  returnInstructions?: SafetyRule[];
   defaultLoanHours?: number;
   maxLoanHours?: number;
   location?: string;
@@ -1314,12 +1377,12 @@ export async function createToolsForGemach(params: {
           id, name, description, category, qr_code, status,
           loan_fee_min, loan_fee_max, gemach_id, kind_id, unit_label,
           default_loan_hours, max_loan_hours, location, brand, supplier,
-          purpose, product_age, youtube_url, safety_rules
+          purpose, product_age, youtube_url, safety_rules, return_instructions
         ) VALUES (
           $1, $2, $3, $4, $5, 'available',
           $6, $7, $8, $9, $10,
           $11, $12, $13, $14, $15,
-          $16, $17, $18, $19::jsonb
+          $16, $17, $18, $19::jsonb, $20::jsonb
         )`,
         [
           toolId,
@@ -1343,6 +1406,7 @@ export async function createToolsForGemach(params: {
             : null,
           params.youtubeUrl?.trim() || null,
           JSON.stringify(safetyRules),
+          JSON.stringify(params.returnInstructions ?? []),
         ]
       );
       await client.query(
@@ -1396,40 +1460,22 @@ export async function createReservation(
 ): Promise<Reservation> {
   const id = newId("res");
   const createdAt = new Date().toISOString();
-
-  await withTransaction(async (raw) => {
-    const client = raw as unknown as QueryClient;
-    await client.query(
-      `INSERT INTO reservations (
-        id, member_id, tool_id, pickup_date, pickup_time_start, pickup_time_end,
-        return_date, return_time_start, return_time_end, status, fee_amount,
-        loan_duration_hours, kind_id, quantity, tool_ids, group_id, cooperative_fee_amount
-      ) VALUES (
-        $1, $2, $3, $4, $5, $6,
-        $7, $8, $9, $10, $11,
-        $12, $13, $14, $15, $16, $17
-      )`,
-      [
-        id,
-        data.memberId,
-        data.toolId,
-        data.pickupDate,
-        data.pickupTimeStart ?? null,
-        data.pickupTimeEnd ?? null,
-        data.returnDate,
-        data.returnTimeStart ?? null,
-        data.returnTimeEnd ?? null,
-        data.status,
-        data.feeAmount,
-        data.loanDurationHours ?? null,
-        data.kindId ?? null,
-        data.quantity ?? null,
-        data.toolIds?.length ? data.toolIds : null,
-        data.groupId ?? null,
-        data.cooperativeFeeAmount ?? null,
-      ]
-    );
-  });
+  const sql = getSql();
+  await sql`
+    INSERT INTO reservations (
+      id, member_id, tool_id, pickup_date, pickup_time_start, pickup_time_end,
+      return_date, return_time_start, return_time_end, status, fee_amount,
+      loan_duration_hours, kind_id, quantity, tool_ids, group_id, cooperative_fee_amount
+    ) VALUES (
+      ${id}, ${data.memberId}, ${data.toolId}, ${data.pickupDate},
+      ${data.pickupTimeStart ?? null}, ${data.pickupTimeEnd ?? null},
+      ${data.returnDate}, ${data.returnTimeStart ?? null}, ${data.returnTimeEnd ?? null},
+      ${data.status}, ${data.feeAmount}, ${data.loanDurationHours ?? null},
+      ${data.kindId ?? null}, ${data.quantity ?? null},
+      ${data.toolIds?.length ? data.toolIds : null}, ${data.groupId ?? null},
+      ${data.cooperativeFeeAmount ?? null}
+    )
+  `;
   invalidateQueryMemo();
   return { ...data, id, createdAt };
 }
@@ -2708,8 +2754,6 @@ export async function getPotsOverviewForGemach(gemachId: string) {
 }
 
 async function claimToolsForCheckout(reservation: Reservation): Promise<string[]> {
-  await syncReservationHardLocks();
-
   const quantity = Math.max(
     1,
     reservation.quantity ?? reservationToolIds(reservation).length
@@ -3007,6 +3051,16 @@ export async function completeLoanReturn(
       "UPDATE tools SET status = $1, updated_at = NOW() WHERE id = ANY($2)",
       [toolStatus, ids]
     );
+
+    if (reservation && !hasDefect) {
+      const nowParts = israelNowParts(returnedAt);
+      await client.query(
+        `UPDATE reservations
+         SET return_date = $1, return_time_start = $2, return_time_end = $2
+         WHERE id = $3`,
+        [nowParts.date, nowParts.time, reservation.id]
+      );
+    }
 
     if (lateFee) {
       await client.query(
@@ -3321,6 +3375,48 @@ export async function updateAccessCodes(params: {
   });
   invalidateQueryMemo();
   return getAccessCodes();
+}
+
+const RETURN_INSTRUCTIONS_DOC = "return-instructions";
+
+export async function getDefaultReturnInstructions(): Promise<SafetyRule[]> {
+  return memoQuery("returnInstructions", async () => {
+    const sql = getSql();
+    const rows = await sql`SELECT data FROM settings WHERE id = ${RETURN_INSTRUCTIONS_DOC}`;
+    const data = rows[0]
+      ? (asRecord(rows[0]).data as { rules?: SafetyRule[] } | undefined)
+      : undefined;
+    if (Array.isArray(data?.rules) && data.rules.length > 0) {
+      return data.rules.filter((r) => r?.text?.trim()).map((r, i) => ({
+        id: r.id || `ri-${i + 1}`,
+        text: r.text.trim(),
+      }));
+    }
+    return DEFAULT_RETURN_INSTRUCTIONS;
+  });
+}
+
+export async function updateDefaultReturnInstructions(
+  rules: SafetyRule[]
+): Promise<SafetyRule[]> {
+  const payload = {
+    rules: rules
+      .map((r) => ({ text: String(r.text ?? "").trim() }))
+      .filter((r) => r.text)
+      .map((r, i) => ({ id: `ri-${i + 1}`, text: r.text })),
+  };
+  const sql = getSql();
+  await sql`
+    INSERT INTO settings (id, data) VALUES (${RETURN_INSTRUCTIONS_DOC}, ${payload})
+    ON CONFLICT (id) DO UPDATE SET data = ${payload}
+  `;
+  invalidateQueryMemo();
+  return getDefaultReturnInstructions();
+}
+
+export async function resolveReturnInstructions(tool?: Tool | null): Promise<SafetyRule[]> {
+  if (tool?.returnInstructions?.length) return tool.returnInstructions;
+  return getDefaultReturnInstructions();
 }
 
 export async function getPaymentById(id: string): Promise<MemberPayment | null> {
@@ -3986,4 +4082,116 @@ export async function getKindScheduleAvailabilityForHours(
       ),
     };
   });
+}
+
+export async function getKindScheduleAvailabilityForDays(
+  catalogKey: string,
+  pickupDate: string,
+  pickupTimeStart: string,
+  days: number[],
+  options?: Pick<AvailabilityOptions, "ignoreLoanMemberId">
+): Promise<{ days: number; availability: KindScheduleAvailability }[]> {
+  const [units, holds] = await Promise.all([
+    getToolsForCatalogKey(catalogKey),
+    getHoldsForAvailability(),
+  ]);
+  return days.map((d) => {
+    const fixed = computeBillingDaysReservation(pickupDate, pickupTimeStart, d);
+    const schedule: ReservationWindow = {
+      pickupDate: fixed.pickupDate,
+      pickupTimeStart: fixed.pickupTimeStart,
+      returnDate: fixed.returnDate,
+      returnTimeEnd: fixed.returnTimeEnd,
+    };
+    return {
+      days: d,
+      availability: computeKindScheduleAvailability(
+        units,
+        holds.loanByTool,
+        holds.reservationByTool,
+        schedule,
+        options
+      ),
+    };
+  });
+}
+
+export async function canExtendActiveLoan(loan: Loan): Promise<{
+  canExtend: boolean;
+  reason?: string;
+}> {
+  if (loan.status !== "active") {
+    return { canExtend: false, reason: "ההשאלה אינה פעילה" };
+  }
+  if (!isRemoteExtendDay(loan.checkedOutAt)) {
+    return { canExtend: false, reason: "הארכה מקוונת נפתחת ביום השלישי להשאלה" };
+  }
+  if (!loan.dueReturnDate) {
+    return { canExtend: false, reason: "חסר מועד החזרה" };
+  }
+  return { canExtend: true };
+}
+
+export async function extendActiveLoan(params: {
+  loanId: string;
+  memberId: string;
+}): Promise<Loan> {
+  const loan = await getLoanById(params.loanId);
+  if (!loan) throw new Error("ההשאלה לא נמצאה");
+  if (loan.memberId !== params.memberId) {
+    throw new Error("אין הרשאה להאריך השאלה זו");
+  }
+
+  const eligibility = await canExtendActiveLoan(loan);
+  if (!eligibility.canExtend) {
+    throw new Error(eligibility.reason ?? "לא ניתן להאריך");
+  }
+
+  const dueDate = loan.dueReturnDate as string;
+  const dueTime = loan.dueReturnTimeEnd ?? BILLING_DAY_END_TIME;
+  const next = addOneBillingDay(dueDate, dueTime);
+  const toolIds = loanToolIds(loan);
+  const catalogKey = toolIds[0];
+  const firstTool = await getToolById(catalogKey);
+  const kindKey = firstTool?.kindId ?? catalogKey;
+
+  const extensionWindow: ReservationWindow = {
+    pickupDate: dueDate,
+    pickupTimeStart: dueTime,
+    returnDate: next.date,
+    returnTimeEnd: next.time,
+  };
+
+  const units = await pickAvailableToolUnits(kindKey, toolIds.length, extensionWindow, {
+    skipMaintain: true,
+    ignoreLoanMemberId: params.memberId,
+    preferToolIds: toolIds,
+  });
+  const claimed = new Set(units.map((u) => u.id));
+  if (toolIds.some((id) => !claimed.has(id))) {
+    throw new Error("לא ניתן להאריך — הכלי משוריין למשתמש אחר בחלון הבא");
+  }
+
+  const sql = getSql();
+  await sql`
+    UPDATE loans
+    SET due_return_date = ${next.date},
+        due_return_time_end = ${next.time}
+    WHERE id = ${loan.id}
+  `;
+  if (loan.reservationId) {
+    await sql`
+      UPDATE reservations
+      SET return_date = ${next.date},
+          return_time_start = ${next.time},
+          return_time_end = ${next.time}
+      WHERE id = ${loan.reservationId}
+    `;
+  }
+  invalidateQueryMemo();
+  return {
+    ...loan,
+    dueReturnDate: next.date,
+    dueReturnTimeEnd: next.time,
+  };
 }

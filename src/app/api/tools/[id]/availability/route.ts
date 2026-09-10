@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getUidFromRequest } from "@/lib/firebase/admin";
 import {
   getKindScheduleAvailability,
+  getKindScheduleAvailabilityForDays,
   getKindScheduleAvailabilityForHours,
 } from "@/lib/firestore/repository";
 import { computeFixedHoursReservation } from "@/lib/reservation-times";
@@ -21,6 +22,7 @@ export async function GET(
     const returnTimeEnd = searchParams.get("returnTimeEnd") ?? undefined;
     const loanDurationHoursRaw = searchParams.get("loanDurationHours");
     const hoursRaw = searchParams.get("hours");
+    const daysRaw = searchParams.get("days");
 
     if (!pickupDate || !pickupTimeStart) {
       return NextResponse.json(
@@ -30,6 +32,32 @@ export async function GET(
     }
 
     const options = memberId ? { ignoreLoanMemberId: memberId } : undefined;
+
+    if (daysRaw) {
+      const days = daysRaw
+        .split(",")
+        .map((v) => Number(v))
+        .filter((n) => Number.isFinite(n) && n > 0);
+      if (days.length === 0) {
+        return NextResponse.json({ error: "מספר ימים אינו תקין" }, { status: 400 });
+      }
+      const rows = await getKindScheduleAvailabilityForDays(
+        id,
+        pickupDate,
+        pickupTimeStart,
+        days,
+        options
+      );
+      const selectedDays = searchParams.get("billingDays")
+        ? Number(searchParams.get("billingDays"))
+        : days[0];
+      const selected =
+        rows.find((r) => r.days === selectedDays)?.availability ?? rows[0]?.availability;
+      return NextResponse.json({
+        ...selected,
+        byDays: Object.fromEntries(rows.map((r) => [r.days, r.availability])),
+      });
+    }
 
     if (hoursRaw) {
       const hours = hoursRaw

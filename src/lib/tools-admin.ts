@@ -20,6 +20,12 @@ export const DEFAULT_SAFETY_RULES: SafetyRule[] = [
   { id: "sr-default-2", text: "אשתמש בכלי בזהירות ואחזיר אותו במצב תקין" },
 ];
 
+export const DEFAULT_RETURN_INSTRUCTIONS: SafetyRule[] = [
+  { id: "ri-1", text: "נקו את הכלי לפני ההחזרה" },
+  { id: "ri-2", text: "בדקו שכל החלקים במקום ותקינים" },
+  { id: "ri-3", text: "החזירו את הכלי למיקום המדויק במחסן" },
+];
+
 /** Parse a newline-separated textarea into safety rules. Empty input = no rules. */
 export function parseSafetyRules(text: string): SafetyRule[] {
   return text

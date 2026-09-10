@@ -7,7 +7,8 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
-import type { AccessCodesRecord } from "@/lib/types";
+import type { AccessCodesRecord, SafetyRule } from "@/lib/types";
+import { parseSafetyRules, safetyRulesToText } from "@/lib/tools-admin";
 
 export default function AdminAccessCodesPage() {
   const { getIdToken } = useAuth();
@@ -20,6 +21,9 @@ export default function AdminAccessCodesPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+  const [returnText, setReturnText] = useState("");
+  const [returnSaving, setReturnSaving] = useState(false);
+  const [returnSuccess, setReturnSuccess] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -36,6 +40,11 @@ export default function AdminAccessCodesPage() {
         setClubRoomCode(data.clubRoomCode);
         setClubRoomNote(data.clubRoomNote);
         setUpdatedAt(data.clubRoomUpdatedAt);
+        const instr = await authFetch("/api/admin/return-instructions", { token });
+        if (instr.ok) {
+          const body = (await instr.json()) as { rules?: SafetyRule[] };
+          setReturnText(safetyRulesToText(body.rules));
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "שגיאה");
       } finally {
@@ -177,6 +186,54 @@ export default function AdminAccessCodesPage() {
 
             <Button type="submit" disabled={saving} className="w-full">
               {saving ? "שומר…" : "שמירת קודים"}
+            </Button>
+          </form>
+        </CardBody>
+      </Card>
+
+      <Card className="mt-6">
+        <CardBody>
+          <h2 className="text-lg font-bold text-stone-900">הנחיות החזרה גנריות</h2>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            מוצגות בסגירת השאלה כשאין הנחיות ייעודיות לכלי. שורה אחת לכל הנחיה.
+          </p>
+          <form
+            className="mt-4 space-y-4"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setReturnSaving(true);
+              setReturnSuccess(false);
+              setError("");
+              try {
+                const token = await getIdToken();
+                const res = await authFetch("/api/admin/return-instructions", {
+                  method: "PATCH",
+                  token,
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ rules: parseSafetyRules(returnText) }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error ?? "שמירה נכשלה");
+                setReturnText(safetyRulesToText(data.rules));
+                setReturnSuccess(true);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "שגיאה");
+              } finally {
+                setReturnSaving(false);
+              }
+            }}
+          >
+            <textarea
+              rows={5}
+              value={returnText}
+              onChange={(e) => setReturnText(e.target.value)}
+              className="w-full rounded-xl border border-[var(--border)] px-4 py-3 text-sm focus:border-kerem-400 focus:outline-none focus:ring-2 focus:ring-kerem-200"
+            />
+            {returnSuccess && (
+              <Alert variant="success">הנחיות ההחזרה הגנריות נשמרו.</Alert>
+            )}
+            <Button type="submit" disabled={returnSaving} className="w-full">
+              {returnSaving ? "שומר…" : "שמירת הנחיות החזרה"}
             </Button>
           </form>
         </CardBody>
