@@ -24,6 +24,7 @@ export async function GET(request: Request) {
           loan,
           tool,
           canExtend: extend.canExtend,
+          extendFee: extend.extendFee ?? 0,
         };
       })
     );

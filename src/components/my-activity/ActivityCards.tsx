@@ -7,8 +7,10 @@ import { loanStatusLabels, reservationStatusLabels } from "@/lib/labels";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { formatDateHe, formatReservationSchedule } from "@/lib/dates";
+import { formatCredits } from "@/lib/pots";
 import { canStartCheckout } from "@/lib/reservation-checkout";
 import { formatNoShowDeadlineHe } from "@/lib/reservation-expiry";
+import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
 import { compressImageFile } from "@/lib/compress-image";
 import type { Loan, Reservation, Tool } from "@/lib/types";
@@ -17,6 +19,7 @@ export interface LoanWithTool {
   loan: Loan;
   tool: Tool | null;
   canExtend?: boolean;
+  extendFee?: number;
 }
 
 export interface ReservationWithTool {
@@ -111,19 +114,28 @@ interface LoanCardProps {
   loan: Loan;
   tool: Tool | null;
   canExtend?: boolean;
+  extendFee?: number;
   getToken?: () => Promise<string | null>;
   onPhotoAdded?: () => void;
 }
 
-export function LoanCard({ loan, tool, canExtend, getToken, onPhotoAdded }: LoanCardProps) {
+export function LoanCard({ loan, tool, canExtend, extendFee, getToken, onPhotoAdded }: LoanCardProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [extending, setExtending] = useState(false);
   const [extendError, setExtendError] = useState("");
   const extraPhotos = loan.additionalPhotoUrls?.length ?? 0;
+  const { refreshMember } = useAuth();
 
   async function handleDirectExtend() {
     if (!getToken) return;
+    const fee = extendFee ?? 0;
+    const confirmed = window.confirm(
+      fee > 0
+        ? `הארכה ליום נוסף (עד 22:00) תחייב ${formatCredits(fee)} מהיתרה. להמשיך?`
+        : "להאריך את ההשאלה ביום נוסף עד 22:00?"
+    );
+    if (!confirmed) return;
     setExtending(true);
     setExtendError("");
     try {
@@ -135,6 +147,7 @@ export function LoanCard({ loan, tool, canExtend, getToken, onPhotoAdded }: Loan
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "ההארכה נכשלה");
+      await refreshMember();
       onPhotoAdded?.();
     } catch (err) {
       setExtendError(err instanceof Error ? err.message : "ההארכה נכשלה");
@@ -181,7 +194,11 @@ export function LoanCard({ loan, tool, canExtend, getToken, onPhotoAdded }: Loan
             {loan.dueReturnDate && (
               <p className="text-xs text-[var(--muted)]">
                 החזרה מתוכננת: {formatDateHe(loan.dueReturnDate)}
+                {loan.dueReturnTimeEnd ? ` · ${loan.dueReturnTimeEnd}` : ""}
               </p>
+            )}
+            {extendError && (
+              <p className="mt-1 text-xs font-medium text-red-700">{extendError}</p>
             )}
             {loan.checkoutConditionNotes && (
               <p className="mt-1 text-xs text-stone-600">
@@ -257,10 +274,11 @@ export function LoanGroupCard({ items, getToken, onPhotoAdded }: LoanGroupCardPr
   const [uploading, setUploading] = useState(false);
   const [extending, setExtending] = useState(false);
   const [extendError, setExtendError] = useState("");
+  const { refreshMember } = useAuth();
 
   if (items.length === 0) return null;
 
-  const { loan, tool, canExtend } = items[0];
+  const { loan, tool, canExtend, extendFee } = items[0];
   // A booking may be a single loan doc with a quantity, or (legacy) several docs.
   const docCount = items.length;
   const count = items.reduce((sum, i) => sum + (i.loan.quantity ?? 1), 0);
@@ -277,6 +295,13 @@ export function LoanGroupCard({ items, getToken, onPhotoAdded }: LoanGroupCardPr
 
   async function handleDirectExtend() {
     if (!getToken) return;
+    const fee = extendFee ?? 0;
+    const confirmed = window.confirm(
+      fee > 0
+        ? `הארכה ליום נוסף (עד 22:00) תחייב ${formatCredits(fee)} מהיתרה. להמשיך?`
+        : "להאריך את ההשאלה ביום נוסף עד 22:00?"
+    );
+    if (!confirmed) return;
     setExtending(true);
     setExtendError("");
     try {
@@ -288,6 +313,7 @@ export function LoanGroupCard({ items, getToken, onPhotoAdded }: LoanGroupCardPr
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "ההארכה נכשלה");
+      await refreshMember();
       onPhotoAdded?.();
     } catch (err) {
       setExtendError(err instanceof Error ? err.message : "ההארכה נכשלה");

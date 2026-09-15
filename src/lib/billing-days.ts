@@ -11,10 +11,17 @@ export const BILLING_DAY_END_HOUR = 22;
 export const BILLING_DAY_END_TIME = "22:00";
 export const MAX_RESERVATION_BILLING_DAYS = 3;
 
+/** Shift a YYYY-MM-DD calendar date. Do not convert through timezone instants. */
 function addDaysToDate(dateStr: string, days: number): string {
-  const d = reservationDateTime(dateStr, "00:00");
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().split("T")[0];
+  const [year, month, day] = dateStr.split("-").map(Number);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    return dateStr;
+  }
+  const utc = new Date(Date.UTC(year, month - 1, day + days));
+  const y = utc.getUTCFullYear();
+  const m = String(utc.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(utc.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 /** Next 22:00 close at or after `from`. Exactly 22:00 counts as this window's close. */

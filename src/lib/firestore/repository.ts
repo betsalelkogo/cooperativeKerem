@@ -74,6 +74,7 @@ import {
   isPartnerGemach,
   isPlatformGemach,
   resolveReservationFee,
+  resolveTotalReservationFee,
   displayGemachName,
   resolveGemachReservationMode,
   resolveGemachDefaultLoanHours,
@@ -129,7 +130,6 @@ import {
   BILLING_DAY_END_TIME,
   computeBillingDaysReservation,
   formatBillingDueLabel,
-  isRemoteExtendDay,
 } from "@/lib/billing-days";
 import {
   isReservationNoShowExpired,
@@ -2803,22 +2803,19 @@ async function claimToolsForCheckout(reservation: Reservation): Promise<string[]
   return claimed.map((t) => t.id);
 }
 
-/** Debit cooperative loan fee from credit at actual checkout (same transaction). */
-async function debitReservationFeeFromCredit(
+/** Debit cooperative credit and record a paid payment (same transaction). */
+async function chargeCreditFeeInTx(
   client: QueryClient,
-  params: { reservation: Reservation; memberId: string }
+  params: {
+    memberId: string;
+    reservationId: string;
+    toolId: string;
+    amount: number;
+    note: string;
+  }
 ): Promise<void> {
-  const fee = Math.round(params.reservation.feeAmount * 100) / 100;
+  const fee = Math.round(params.amount * 100) / 100;
   if (!(fee > 0)) return;
-
-  const paidRows = await txRows(
-    client,
-    `SELECT id FROM payments
-     WHERE reservation_id = $1 AND status = 'paid'
-     LIMIT 1`,
-    [params.reservation.id]
-  );
-  if (paidRows.length) return;
 
   const memberRows = await txRows(
     client,
@@ -2853,8 +2850,8 @@ async function debitReservationFeeFromCredit(
       -fee,
       balanceAfter,
       "payment_debit",
-      `תשלום מהיתרה בעת לקיחה — ${params.reservation.id}`,
-      params.reservation.id,
+      params.note,
+      params.reservationId,
       params.memberId,
     ]
   );
@@ -2868,13 +2865,82 @@ async function debitReservationFeeFromCredit(
     )`,
     [
       paymentId,
-      params.reservation.id,
+      params.reservationId,
       params.memberId,
-      params.reservation.toolId,
+      params.toolId,
       fee,
       fee,
     ]
   );
+}
+
+async function creditPotsInTx(
+  client: QueryClient,
+  params: { toolIds: string[]; amount: number; loanId: string; memberId: string }
+): Promise<void> {
+  const split = splitPayment(params.amount);
+  const quantity = params.toolIds.length || 1;
+  const perUnitDevice = split.deviceAmount / quantity;
+
+  for (const toolId of params.toolIds) {
+    await client.query(
+      `INSERT INTO device_pots (id, tool_id, balance, total_earned, total_spent)
+       VALUES ($1, $2, $3, $3, 0)
+       ON CONFLICT (id) DO UPDATE SET
+         balance = device_pots.balance + $3,
+         total_earned = device_pots.total_earned + $3`,
+      [toolId, toolId, perUnitDevice]
+    );
+  }
+
+  await client.query(
+    `INSERT INTO transactions (
+      id, member_id, tool_id, loan_id, amount, operations_amount, device_amount
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [
+      newId("txn"),
+      params.memberId,
+      params.toolIds[0],
+      params.loanId,
+      split.totalAmount,
+      split.operationsAmount,
+      split.deviceAmount,
+    ]
+  );
+  await client.query(
+    `INSERT INTO operations_pot (id, balance, total_earned, total_spent)
+     VALUES ('main', $1, $1, 0)
+     ON CONFLICT (id) DO UPDATE SET
+       balance = operations_pot.balance + $1,
+       total_earned = operations_pot.total_earned + $1`,
+    [split.operationsAmount]
+  );
+}
+
+/** Debit cooperative loan fee from credit at actual checkout (same transaction). */
+async function debitReservationFeeFromCredit(
+  client: QueryClient,
+  params: { reservation: Reservation; memberId: string }
+): Promise<void> {
+  const fee = Math.round(params.reservation.feeAmount * 100) / 100;
+  if (!(fee > 0)) return;
+
+  const paidRows = await txRows(
+    client,
+    `SELECT id FROM payments
+     WHERE reservation_id = $1 AND status = 'paid'
+     LIMIT 1`,
+    [params.reservation.id]
+  );
+  if (paidRows.length) return;
+
+  await chargeCreditFeeInTx(client, {
+    memberId: params.memberId,
+    reservationId: params.reservation.id,
+    toolId: params.reservation.toolId,
+    amount: fee,
+    note: `תשלום מהיתרה בעת לקיחה — ${params.reservation.id}`,
+  });
 }
 
 export async function createLoanFromCheckout(params: {
@@ -4217,17 +4283,24 @@ export async function getKindScheduleAvailabilityForDays(
 export async function canExtendActiveLoan(loan: Loan): Promise<{
   canExtend: boolean;
   reason?: string;
+  extendFee?: number;
 }> {
   if (loan.status !== "active") {
     return { canExtend: false, reason: "ההשאלה אינה פעילה" };
   }
-  if (!isRemoteExtendDay(loan.checkedOutAt)) {
-    return { canExtend: false, reason: "הארכה מקוונת נפתחת ביום השלישי להשאלה" };
-  }
   if (!loan.dueReturnDate) {
     return { canExtend: false, reason: "חסר מועד החזרה" };
   }
-  return { canExtend: true };
+
+  const tool = await getToolById(loan.toolId);
+  const gemach = tool ? await getGemachById(tool.gemachId) : null;
+  const quantity = Math.max(1, loan.quantity ?? loanToolIds(loan).length);
+  const extendFee =
+    tool && gemach
+      ? resolveTotalReservationFee(gemach, tool, quantity, 1).feeAmount
+      : 0;
+
+  return { canExtend: true, extendFee };
 }
 
 export async function extendActiveLoan(params: {
@@ -4248,10 +4321,20 @@ export async function extendActiveLoan(params: {
   const dueDate = loan.dueReturnDate as string;
   const dueTime = loan.dueReturnTimeEnd ?? BILLING_DAY_END_TIME;
   const next = addOneBillingDay(dueDate, dueTime);
+  if (next.date === dueDate && next.time === dueTime) {
+    throw new Error("לא ניתן להאריך — מועד ההחזרה לא התקדם");
+  }
+
   const toolIds = loanToolIds(loan);
-  const catalogKey = toolIds[0];
-  const firstTool = await getToolById(catalogKey);
-  const kindKey = firstTool?.kindId ?? catalogKey;
+  const firstTool = await getToolById(toolIds[0]);
+  if (!firstTool) throw new Error("הכלי לא נמצא");
+  const kindKey = firstTool.kindId ?? toolIds[0];
+  const gemach = await getGemachById(firstTool.gemachId);
+  const quantity = Math.max(1, loan.quantity ?? toolIds.length);
+  const extendFee =
+    gemach && isPlatformGemach(gemach)
+      ? resolveTotalReservationFee(gemach, firstTool, quantity, 1).feeAmount
+      : 0;
 
   const extensionWindow: ReservationWindow = {
     pickupDate: dueDate,
@@ -4270,22 +4353,40 @@ export async function extendActiveLoan(params: {
     throw new Error("לא ניתן להאריך — הכלי משוריין למשתמש אחר בחלון הבא");
   }
 
-  const sql = getSql();
-  await sql`
-    UPDATE loans
-    SET due_return_date = ${next.date},
-        due_return_time_end = ${next.time}
-    WHERE id = ${loan.id}
-  `;
-  if (loan.reservationId) {
-    await sql`
-      UPDATE reservations
-      SET return_date = ${next.date},
-          return_time_start = ${next.time},
-          return_time_end = ${next.time}
-      WHERE id = ${loan.reservationId}
-    `;
-  }
+  await withTransaction(async (raw) => {
+    const client = raw as unknown as QueryClient;
+    if (extendFee > 0) {
+      await chargeCreditFeeInTx(client, {
+        memberId: params.memberId,
+        reservationId: loan.reservationId,
+        toolId: loan.toolId,
+        amount: extendFee,
+        note: `חיוב יום נוסף בהשאלה — ${loan.id}`,
+      });
+      await creditPotsInTx(client, {
+        toolIds,
+        amount: extendFee,
+        loanId: loan.id,
+        memberId: params.memberId,
+      });
+    }
+
+    await client.query(
+      `UPDATE loans
+       SET due_return_date = $1, due_return_time_end = $2
+       WHERE id = $3`,
+      [next.date, next.time, loan.id]
+    );
+    if (loan.reservationId) {
+      await client.query(
+        `UPDATE reservations
+         SET return_date = $1, return_time_start = $2, return_time_end = $2
+         WHERE id = $3`,
+        [next.date, next.time, loan.reservationId]
+      );
+    }
+  });
+
   invalidateQueryMemo();
   return {
     ...loan,

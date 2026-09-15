@@ -16,7 +16,11 @@ export async function POST(
     return NextResponse.json({ loan });
   } catch (err) {
     const message = err instanceof Error ? err.message : "שגיאת שרת";
-    const status = message.includes("משוריין") || message.includes("נפתחת") ? 409 : 400;
+    const status = message.includes("יתרה")
+      ? 402
+      : message.includes("משוריין") || message.includes("נפתחת")
+        ? 409
+        : 400;
     return NextResponse.json({ error: message }, { status });
   }
 }

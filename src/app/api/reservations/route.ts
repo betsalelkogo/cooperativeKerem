@@ -128,15 +128,16 @@ export async function POST(request: Request) {
 
     const mode = resolveGemachReservationMode(gemach);
     let schedule: ReservationSchedule;
+    let billedDays = 1;
 
     if (immediate) {
       const { date: todayIL, minutes } = israelNowParts();
       const startTime = minutesToTime(Math.max(0, minutes - 5));
-      const days = Math.min(
+      billedDays = Math.min(
         MAX_RESERVATION_BILLING_DAYS,
         Math.max(1, Number(billingDays) || 1)
       );
-      schedule = computeBillingDaysReservation(todayIL, startTime, days);
+      schedule = computeBillingDaysReservation(todayIL, startTime, billedDays);
     } else if (mode === "fixed_hours" && isPlatformGemach(gemach)) {
       const resolvedPickup = pickupDate ?? date;
       if (!resolvedPickup || !pickupTimeStart) {
@@ -145,19 +146,19 @@ export async function POST(request: Request) {
           { status: 400 }
         );
       }
-      const days = Math.min(
+      billedDays = Math.min(
         MAX_RESERVATION_BILLING_DAYS,
         Math.max(1, Number(billingDays) || 1)
       );
       const timeError = validateBillingDaysReservation(
         resolvedPickup,
         pickupTimeStart,
-        days
+        billedDays
       );
       if (timeError) {
         return NextResponse.json({ error: timeError }, { status: 400 });
       }
-      schedule = computeBillingDaysReservation(resolvedPickup, pickupTimeStart, days);
+      schedule = computeBillingDaysReservation(resolvedPickup, pickupTimeStart, billedDays);
     } else if (mode === "fixed_hours") {
       const resolvedPickup = pickupDate ?? date;
       if (!resolvedPickup || !pickupTimeStart) {
@@ -249,7 +250,8 @@ export async function POST(request: Request) {
     const { feeAmount, cooperativeFeeAmount } = resolveTotalReservationFee(
       gemach,
       tool,
-      units.length
+      units.length,
+      isPlatformGemach(gemach) ? billedDays : 1
     );
 
     const member = await getMemberById(memberId);

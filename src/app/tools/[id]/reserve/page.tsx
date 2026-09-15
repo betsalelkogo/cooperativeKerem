@@ -19,6 +19,7 @@ import {
 } from "@/lib/reservation-times";
 import { israelNowParts, reservationDateTime } from "@/lib/israel-time";
 import { formatDateHe } from "@/lib/dates";
+import { formatCredits } from "@/lib/pots";
 import { BackLink } from "@/components/ui/PageHeader";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -521,7 +522,13 @@ function ReserveToolForm() {
 
   const today = israelNowParts().date;
   const stockLabel = inventoryLabel(kind);
-  const priceText = kind.priceLabel ?? "—";
+  const billedDays = useBillingDays ? billingDays : 1;
+  const dayFee = Math.max(0, kind.loanFeeMin) * quantity;
+  const totalFee = dayFee * billedDays;
+  const priceText =
+    !kind.isPartnerGemach && dayFee > 0
+      ? formatCredits(totalFee)
+      : (kind.priceLabel ?? "—");
   const maxQuantity = Math.min(
     windowAvail?.availableUnits ?? kind.availableUnits,
     500
@@ -851,6 +858,11 @@ function ReserveToolForm() {
               <p className="mt-1 text-xl font-bold text-kerem-800">{priceText}</p>
               {!kind.isPartnerGemach && (
                 <p className="mt-1 text-xs text-kerem-800">
+                  {dayFee > 0
+                    ? billedDays > 1
+                      ? `${formatCredits(dayFee)} ליום × ${billedDays} ימים. הארכה ליום נוסף תחויב בנפרד. `
+                      : "לחיוב ליום. הארכה ליום נוסף תחויב בנפרד מהיתרה. "
+                    : ""}
                   החיוב מהיתרה מתבצע רק בלקיחה בפועל. ביטול שריון לא מוריד כסף.
                 </p>
               )}

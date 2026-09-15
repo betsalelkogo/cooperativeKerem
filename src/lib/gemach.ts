@@ -80,13 +80,15 @@ export function resolveCooperativeFee(gemach: Gemach): number {
 export function resolveTotalReservationFee(
   gemach: Gemach,
   tool: Tool,
-  quantity = 1
+  quantity = 1,
+  billingDays = 1
 ): { feeAmount: number; cooperativeFeeAmount: number } {
   const qty = Math.max(1, quantity);
+  const days = Math.max(1, Math.floor(billingDays) || 1);
   const unitFee = resolveReservationFee(gemach, tool);
-  const cooperativeFeeAmount = resolveCooperativeFee(gemach) * qty;
+  const cooperativeFeeAmount = resolveCooperativeFee(gemach) * qty * days;
   return {
-    feeAmount: unitFee * qty + cooperativeFeeAmount,
+    feeAmount: (unitFee * qty + resolveCooperativeFee(gemach) * qty) * days,
     cooperativeFeeAmount,
   };
 }
