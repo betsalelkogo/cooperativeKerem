@@ -48,13 +48,16 @@ export function JoinMembershipBanner({
     };
   }, [member]);
 
-  if (!member || isPaidMember(member)) return null;
+  if (!member) return null;
+  if (isPaidMember(member) && reason !== TERMS_REQUIRED_CODE) return null;
 
   const termsOk = hasAcceptedTerms(member);
+  const paid = isPaidMember(member);
   const needsTerms =
     reason === TERMS_REQUIRED_CODE || (!termsOk && reason !== MEMBERSHIP_REQUIRED_CODE);
   const needsMembership =
-    reason === MEMBERSHIP_REQUIRED_CODE || reason === TERMS_REQUIRED_CODE || !reason;
+    !paid &&
+    (reason === MEMBERSHIP_REQUIRED_CODE || reason === TERMS_REQUIRED_CODE || !reason);
 
   async function acceptTerms() {
     setAccepting(true);
@@ -85,9 +88,9 @@ export function JoinMembershipBanner({
     >
       <p className="text-sm font-bold text-stone-900">{title}</p>
       <p className="mt-1 break-words text-xs leading-relaxed text-[var(--muted)]">
-        אפשר לגלוש ולהשתמש בגמ״חים שותפים בלי תשלום. להשאלת כלי מהקואופרטיב — אשרו את
-        התקנון ושלמו דמי הצטרפות (מ־₪{MEMBERSHIP_JOIN_MIN_NIS}). לאחר התשלום מנהל יאשר
-        את החברות.
+        {paid
+          ? "יש לאשר את תקנון הקואופרטיב לפני שריון או השאלה."
+          : `אפשר לגלוש ולהשתמש בגמ״חים שותפים בלי תשלום. להשאלת כלי מהקואופרטיב — אשרו את התקנון ושלמו דמי הצטרפות (מ־₪${MEMBERSHIP_JOIN_MIN_NIS}). לאחר התשלום מנהל יאשר את החברות.`}
       </p>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
