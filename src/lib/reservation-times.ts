@@ -11,12 +11,20 @@ export const DEFAULT_PICKUP_START = "09:00";
 export const DEFAULT_RETURN_START = "17:00";
 export const DEFAULT_RETURN_END = "18:00";
 
-export function parseTimeToMinutes(value: string): number | null {
-  const match = /^(\d{2}):(\d{2})$/.exec(value);
+/** Chrome Android `type="time"` often emits `HH:MM:SS` or `H:MM`. */
+export function normalizeTimeToHhMm(value: string): string | null {
+  const match = /^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/.exec(value.trim());
   if (!match) return null;
   const hours = Number(match[1]);
   const minutes = Number(match[2]);
   if (hours > 23 || minutes > 59) return null;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+export function parseTimeToMinutes(value: string): number | null {
+  const normalized = normalizeTimeToHhMm(value);
+  if (!normalized) return null;
+  const [hours, minutes] = normalized.split(":").map(Number);
   return hours * 60 + minutes;
 }
 
@@ -34,9 +42,15 @@ export function addHoursToTime(start: string, hours: number): string {
 }
 
 function addDaysToDate(dateStr: string, days: number): string {
-  const d = reservationDateTime(dateStr, "00:00");
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().split("T")[0];
+  const [year, month, day] = dateStr.split("-").map(Number);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    return dateStr;
+  }
+  const utc = new Date(Date.UTC(year, month - 1, day + days));
+  const y = utc.getUTCFullYear();
+  const m = String(utc.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(utc.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 /**

@@ -298,7 +298,11 @@ async function getHoldsForAvailability() {
     getActiveLoans(),
     getActiveReservations(),
   ]);
-  return { loans, reservations, ...buildActiveHolders(loans, reservations) };
+  const now = new Date();
+  // No-shows stay `confirmed` until a TCP cleanup runs. They must not keep
+  // blocking inventory — that made both instant and same-day reserve fail.
+  const live = reservations.filter((r) => !isReservationNoShowExpired(r, now));
+  return { loans, reservations: live, ...buildActiveHolders(loans, live) };
 }
 
 async function getToolsByIds(ids: string[]): Promise<Tool[]> {
@@ -344,7 +348,11 @@ async function maintainReservationState(): Promise<void> {
   await memoQuery(
     "maintainReservationState",
     async () => {
-      await expireStaleNoShowReservations();
+      try {
+        await expireStaleNoShowReservations();
+      } catch (err) {
+        console.error("[maintainReservationState]", err);
+      }
       return null;
     },
     MAINTAIN_MEMO_MS

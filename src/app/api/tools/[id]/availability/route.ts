@@ -5,7 +5,7 @@ import {
   getKindScheduleAvailabilityForDays,
   getKindScheduleAvailabilityForHours,
 } from "@/lib/firestore/repository";
-import { computeFixedHoursReservation } from "@/lib/reservation-times";
+import { computeFixedHoursReservation, normalizeTimeToHhMm } from "@/lib/reservation-times";
 
 export async function GET(
   request: Request,
@@ -17,9 +17,15 @@ export async function GET(
     const memberId = await getUidFromRequest(request);
 
     const pickupDate = searchParams.get("pickupDate") ?? undefined;
-    const pickupTimeStart = searchParams.get("pickupTimeStart") ?? undefined;
+    const pickupTimeStartRaw = searchParams.get("pickupTimeStart") ?? undefined;
+    const pickupTimeStart = pickupTimeStartRaw
+      ? normalizeTimeToHhMm(pickupTimeStartRaw) ?? pickupTimeStartRaw
+      : undefined;
     const returnDate = searchParams.get("returnDate") ?? undefined;
-    const returnTimeEnd = searchParams.get("returnTimeEnd") ?? undefined;
+    const returnTimeEndRaw = searchParams.get("returnTimeEnd") ?? undefined;
+    const returnTimeEnd = returnTimeEndRaw
+      ? normalizeTimeToHhMm(returnTimeEndRaw) ?? returnTimeEndRaw
+      : undefined;
     const loanDurationHoursRaw = searchParams.get("loanDurationHours");
     const hoursRaw = searchParams.get("hours");
     const daysRaw = searchParams.get("days");

@@ -127,7 +127,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const getIdToken = useCallback(async () => {
     if (!user) return null;
-    return user.getIdToken();
+    const withTimeout = (force: boolean) =>
+      Promise.race([
+        user.getIdToken(force),
+        new Promise<string>((_, reject) => {
+          setTimeout(() => reject(new Error("token-timeout")), 8_000);
+        }),
+      ]);
+    try {
+      return await withTimeout(false);
+    } catch {
+      try {
+        return await withTimeout(true);
+      } catch {
+        return null;
+      }
+    }
   }, [user]);
 
   const refreshMember = useCallback(async () => {

@@ -13,6 +13,7 @@ import {
   formatLoanDurationLabel,
   MAX_PICKUP_WINDOW_HOURS,
   parseTimeToMinutes,
+  normalizeTimeToHhMm,
   validateDateRangeReservation,
   validateFixedHoursReservation,
   addHoursToTime,
@@ -319,8 +320,9 @@ function ReserveToolForm() {
   }, [availByDays, billingDays, availByHours, loanHours, hourOptions]);
 
   function handlePickupStartChange(value: string) {
-    setPickupTimeStart(value);
-    setPickupTimeEnd(addHoursToTime(value, MAX_PICKUP_WINDOW_HOURS));
+    const next = normalizeTimeToHhMm(value) ?? value;
+    setPickupTimeStart(next);
+    setPickupTimeEnd(addHoursToTime(next, MAX_PICKUP_WINDOW_HOURS));
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -446,6 +448,10 @@ function ReserveToolForm() {
 
     try {
       const token = await getIdToken();
+      if (!token) {
+        router.push("/login");
+        return;
+      }
       const body = isFixedHours
         ? {
             kindId: kind.catalogId,
@@ -637,9 +643,10 @@ function ReserveToolForm() {
                     <input
                       id="pickupTimeStart"
                       type="time"
+                      step="60"
                       required
                       value={pickupTimeStart}
-                      onChange={(e) => setPickupTimeStart(e.target.value)}
+                      onChange={(e) => handlePickupStartChange(e.target.value)}
                       className="w-full rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm focus:border-kerem-400 focus:outline-none focus:ring-2 focus:ring-kerem-200"
                     />
                     <p className="mt-1 text-xs text-[var(--muted)]">
@@ -765,6 +772,7 @@ function ReserveToolForm() {
                       <input
                         id="pickupTimeStart"
                         type="time"
+                        step="60"
                         required
                         value={pickupTimeStart}
                         onChange={(e) => handlePickupStartChange(e.target.value)}
@@ -778,9 +786,12 @@ function ReserveToolForm() {
                       <input
                         id="pickupTimeEnd"
                         type="time"
+                        step="60"
                         required
                         value={pickupTimeEnd}
-                        onChange={(e) => setPickupTimeEnd(e.target.value)}
+                        onChange={(e) =>
+                          setPickupTimeEnd(normalizeTimeToHhMm(e.target.value) ?? e.target.value)
+                        }
                         className="w-full rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm focus:border-kerem-400 focus:outline-none focus:ring-2 focus:ring-kerem-200"
                       />
                     </div>
@@ -811,9 +822,12 @@ function ReserveToolForm() {
                       <input
                         id="returnTimeStart"
                         type="time"
+                        step="60"
                         required
                         value={returnTimeStart}
-                        onChange={(e) => setReturnTimeStart(e.target.value)}
+                        onChange={(e) =>
+                          setReturnTimeStart(normalizeTimeToHhMm(e.target.value) ?? e.target.value)
+                        }
                         className="w-full rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm focus:border-kerem-400 focus:outline-none focus:ring-2 focus:ring-kerem-200"
                       />
                     </div>
@@ -824,9 +838,12 @@ function ReserveToolForm() {
                       <input
                         id="returnTimeEnd"
                         type="time"
+                        step="60"
                         required
                         value={returnTimeEnd}
-                        onChange={(e) => setReturnTimeEnd(e.target.value)}
+                        onChange={(e) =>
+                          setReturnTimeEnd(normalizeTimeToHhMm(e.target.value) ?? e.target.value)
+                        }
                         className="w-full rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm focus:border-kerem-400 focus:outline-none focus:ring-2 focus:ring-kerem-200"
                       />
                     </div>
@@ -885,7 +902,6 @@ function ReserveToolForm() {
               type="submit"
               disabled={
                 loading ||
-                availLoading ||
                 !pickupDate ||
                 !pickupTimeStart ||
                 (!isFixedHours && !returnDate) ||

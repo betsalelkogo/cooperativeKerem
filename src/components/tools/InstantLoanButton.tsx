@@ -70,6 +70,10 @@ export function InstantLoanButton({
     setGateCode(null);
     try {
       const token = await getIdToken();
+      if (!token) {
+        router.push("/login");
+        return;
+      }
       const res = await authFetch("/api/reservations", {
         method: "POST",
         token,

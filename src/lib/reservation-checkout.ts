@@ -32,8 +32,9 @@ export function canStartCheckout(
 
   const windowStart = reservationPickupWindowStart(reservation, now);
   const windowEnd = reservationPickupWindowEnd(reservation);
+  const CLOCK_SKEW_MS = 3 * 60 * 1000;
 
-  if (now.getTime() < windowStart.getTime()) {
+  if (now.getTime() + CLOCK_SKEW_MS < windowStart.getTime()) {
     return {
       allowed: false,
       reason: `ניתן להתחיל לקיחה החל מ-${formatReservationDateTimeHe(windowStart)}`,

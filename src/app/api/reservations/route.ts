@@ -29,6 +29,7 @@ import { formatCredits } from "@/lib/pots";
 import {
   computeFixedHoursReservation,
   minutesToTime,
+  normalizeTimeToHhMm,
   validateDateRangeReservation,
   validateFixedHoursReservation,
 } from "@/lib/reservation-times";
@@ -78,11 +79,11 @@ export async function POST(request: Request) {
       kindId,
       quantity: quantityRaw,
       pickupDate,
-      pickupTimeStart,
-      pickupTimeEnd,
+      pickupTimeStart: pickupTimeStartRaw,
+      pickupTimeEnd: pickupTimeEndRaw,
       returnDate,
-      returnTimeStart,
-      returnTimeEnd,
+      returnTimeStart: returnTimeStartRaw,
+      returnTimeEnd: returnTimeEndRaw,
       loanDurationHours,
       billingDays,
       date,
@@ -102,6 +103,19 @@ export async function POST(request: Request) {
       date?: string;
       immediate?: boolean;
     };
+
+    const pickupTimeStart = pickupTimeStartRaw
+      ? normalizeTimeToHhMm(pickupTimeStartRaw) ?? pickupTimeStartRaw
+      : undefined;
+    const pickupTimeEnd = pickupTimeEndRaw
+      ? normalizeTimeToHhMm(pickupTimeEndRaw) ?? pickupTimeEndRaw
+      : undefined;
+    const returnTimeStart = returnTimeStartRaw
+      ? normalizeTimeToHhMm(returnTimeStartRaw) ?? returnTimeStartRaw
+      : undefined;
+    const returnTimeEnd = returnTimeEndRaw
+      ? normalizeTimeToHhMm(returnTimeEndRaw) ?? returnTimeEndRaw
+      : undefined;
 
     const catalogKey = kindId ?? toolId;
     if (!catalogKey) {
@@ -227,7 +241,7 @@ export async function POST(request: Request) {
     }, {
       ignoreLoanMemberId: memberId,
       preferToolIds,
-      skipMaintain: Boolean(immediate),
+      skipMaintain: true,
     });
 
     if (units.length === 0) {
@@ -339,7 +353,13 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json(reservation, { status: 201 });
-  } catch {
-    return NextResponse.json({ error: "שגיאת שרת" }, { status: 500 });
+  } catch (err) {
+    const raw = err instanceof Error ? err.message : "";
+    console.error("[api/reservations]", raw || err);
+    const leak = /sql|database|neon|postgres|ECONN|password|token/i.test(raw);
+    return NextResponse.json(
+      { error: raw && !leak ? raw : "שגיאת שרת" },
+      { status: 500 }
+    );
   }
 }
