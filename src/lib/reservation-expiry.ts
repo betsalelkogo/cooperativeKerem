@@ -1,5 +1,5 @@
 import type { Reservation } from "@/lib/types";
-import { formatReservationDateTimeHe, reservationDateTime } from "@/lib/israel-time";
+import { israelNowParts, reservationDateTime } from "@/lib/israel-time";
 
 /** Hours after scheduled pickup start before a no-show reservation is cancelled. */
 export const PICKUP_NO_SHOW_HOURS = 2;
@@ -22,7 +22,12 @@ export function isReservationNoShowExpired(
   if (reservation.status !== "pending" && reservation.status !== "confirmed") {
     return false;
   }
-  return now.getTime() > reservationNoShowDeadline(reservation).getTime();
+  const deadline = reservationNoShowDeadline(reservation);
+  if (Number.isNaN(deadline.getTime())) {
+    const pickupDate = reservation.pickupDate.slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(pickupDate) && pickupDate < israelNowParts(now).date;
+  }
+  return now.getTime() > deadline.getTime();
 }
 
 export function formatNoShowDeadlineHe(reservation: Reservation): string {

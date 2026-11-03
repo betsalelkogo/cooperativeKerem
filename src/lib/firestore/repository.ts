@@ -1149,6 +1149,7 @@ export async function pickAvailableToolUnit(
 }
 
 export async function getToolsWithAvailability(): Promise<ToolWithAvailability[]> {
+  await maintainReservationState();
   const [tools, holds, gemachim] = await Promise.all([
     getAllTools(),
     getHoldsForAvailability(),
@@ -1591,8 +1592,12 @@ export async function expireStaleNoShowReservations(): Promise<number> {
 
   let count = 0;
   for (const r of expired) {
-    const result = await autoCancelNoShowReservation(r.id);
-    if (result?.status === "cancelled") count += 1;
+    try {
+      const result = await autoCancelNoShowReservation(r.id);
+      if (result?.status === "cancelled") count += 1;
+    } catch (err) {
+      console.error("[expireStaleNoShowReservations]", r.id, err);
+    }
   }
 
   await syncReservationHardLocks();
@@ -1740,6 +1745,7 @@ export async function getAllReservations(): Promise<Reservation[]> {
 }
 
 export async function getReservationsByMember(memberId: string): Promise<Reservation[]> {
+  await maintainReservationState();
   const sql = getSql();
   const rows = await sql`SELECT * FROM reservations WHERE member_id = ${memberId}`;
   return mapRows(rows, reservationFromRow);
@@ -1919,6 +1925,7 @@ export async function getAdminDashboard(options?: {
   gemachId?: string;
   includeGemachim?: boolean;
 }): Promise<AdminDashboardData> {
+  await maintainReservationState();
   await syncReservationHardLocks();
   const gemachId = options?.gemachId;
   const lateFeeGemachFilter =
@@ -4046,6 +4053,7 @@ export async function submitMediatorDecision(params: {
 }
 
 export async function getBoardDashboardData(): Promise<BoardDashboardData> {
+  await maintainReservationState();
   await syncReservationHardLocks();
   const [tools, loans, reservations, disputes, tickets, lateFees, opsPot, devicePots, payouts] =
     await Promise.all([
