@@ -35,6 +35,22 @@ export function formatAvailableFromLabel(returnDate: string): string | undefined
   return `זמין בעוד ${days} ימים`;
 }
 
+export function formatDatePartsHe(iso?: string): { day: string; month: string } | null {
+  if (!iso) return null;
+  const hasTime = iso.includes("T");
+  const date = hasTime ? new Date(iso) : new Date(`${iso.slice(0, 10)}T12:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return null;
+  const day = new Intl.DateTimeFormat("he-IL", {
+    timeZone: COOP_TIMEZONE,
+    day: "numeric",
+  }).format(date);
+  const month = new Intl.DateTimeFormat("he-IL", {
+    timeZone: COOP_TIMEZONE,
+    month: "short",
+  }).format(date);
+  return { day, month };
+}
+
 export function formatDateHe(iso?: string, withTime = false) {
   if (!iso) return "—";
   const hasTime = iso.includes("T");

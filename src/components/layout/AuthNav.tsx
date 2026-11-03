@@ -9,6 +9,7 @@ import { formatCredits } from "@/lib/pots";
 import { cn } from "@/lib/cn";
 import type { Member } from "@/lib/types";
 import { SiteLogo } from "@/components/layout/SiteLogo";
+import { BrandStripe } from "@/components/brand/Marks";
 
 const baseNavItems = [
   { href: "/tools", label: "כלים" },
@@ -61,9 +62,10 @@ export function AuthNav() {
   if (isLoginPage) {
     return (
       <header
-        className="border-b border-[var(--border)] bg-white/90 backdrop-blur-lg"
+        className="border-b border-[var(--border)] bg-white"
         style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
       >
+        <BrandStripe />
         <div className="mx-auto flex max-w-6xl items-center justify-center px-4 py-4">
           <div className="flex items-center gap-3">
             <SiteLogo size="sm" priority />
@@ -76,9 +78,10 @@ export function AuthNav() {
 
   return (
     <header
-      className="sticky top-0 z-50 border-b border-[var(--border)] bg-white/90 backdrop-blur-lg"
+      className="sticky top-0 z-50 border-b border-[var(--border)] bg-white"
       style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
     >
+      <BrandStripe />
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-2.5 sm:px-6 sm:py-3">
         <Link href="/tools" className="group flex shrink-0 items-center gap-3">
           <SiteLogo size="sm" priority />

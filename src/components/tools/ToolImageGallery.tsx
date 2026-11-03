@@ -3,14 +3,16 @@
 import { useState } from "react";
 import Image from "next/image";
 import { cloudinaryThumbnailUrl, isDisplayableImageUrl } from "@/lib/cloudinary-image";
+import { ToolMark } from "@/components/brand/Marks";
 
 interface ToolImageGalleryProps {
   imageUrl?: string;
   imageUrls?: string[];
   alt: string;
+  category?: string;
 }
 
-export function ToolImageGallery({ imageUrl, imageUrls, alt }: ToolImageGalleryProps) {
+export function ToolImageGallery({ imageUrl, imageUrls, alt, category }: ToolImageGalleryProps) {
   const slides = [...(imageUrls?.length ? imageUrls : []), ...(imageUrl ? [imageUrl] : [])].filter(
     (url, i, arr) => url && arr.indexOf(url) === i
   );
@@ -20,8 +22,8 @@ export function ToolImageGallery({ imageUrl, imageUrls, alt }: ToolImageGalleryP
 
   if (displayable.length === 0) {
     return (
-      <div className="flex aspect-[4/3] items-center justify-center rounded-xl bg-warm-100 text-4xl text-[var(--muted)]">
-        🔧
+      <div className="flex aspect-[4/3] items-center justify-center rounded-xl bg-[#f7f3ea]">
+        <ToolMark category={category} className="h-32 w-52" />
       </div>
     );
   }

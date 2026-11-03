@@ -8,6 +8,7 @@ import { useAuth } from "@/contexts/AuthProvider";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Alert } from "@/components/ui/Alert";
 import { SiteLogo } from "@/components/layout/SiteLogo";
+import { YardBand } from "@/components/brand/Marks";
 
 function resolveRedirect(path: string | null): string {
   if (!path || path === "/" || path.startsWith("/login")) return "/tools";
@@ -68,6 +69,7 @@ function LoginContent() {
           </p>
         </CardBody>
       </Card>
+      <YardBand className="mt-8 h-24 w-full" />
     </div>
   );
 }

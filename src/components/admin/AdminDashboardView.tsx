@@ -13,6 +13,7 @@ import { formatNIS } from "@/lib/pots";
 import { AdminToolKindsTable } from "@/components/admin/AdminToolKindsTable";
 import { ProblemReportsPanel } from "@/components/admin/ProblemReportsPanel";
 import { LoanPhotoThumb } from "@/components/admin/LoanPhotoThumb";
+import { DateSlip, ToolMark } from "@/components/brand/Marks";
 import type { AdminDashboardData, AdminDashboardLoan } from "@/lib/types";
 
 /**
@@ -44,9 +45,20 @@ function CountBadge({ count }: { count: number }) {
   );
 }
 
-function StatCard({ label, value, accent }: { label: string; value: number; accent?: string }) {
+function StatCard({
+  label,
+  value,
+  accent,
+  bar,
+}: {
+  label: string;
+  value: number;
+  accent?: string;
+  bar: string;
+}) {
   return (
-    <Card>
+    <Card className="overflow-hidden">
+      <div className={`h-1.5 ${bar}`} />
       <CardBody className="py-4 text-center">
         <p className={`text-3xl font-bold ${accent ?? "text-kerem-800"}`}>{value}</p>
         <p className="mt-1 text-xs font-medium text-[var(--muted)]">{label}</p>
@@ -183,20 +195,22 @@ export function AdminDashboardView({
       )}
 
       <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-8">
-        <StatCard label="סה״כ כלים" value={data.stats.totalTools} />
-        <StatCard label="זמינים" value={data.stats.available} accent="text-emerald-700" />
-        <StatCard label="מושאלים" value={data.stats.onLoan} accent="text-amber-700" />
-        <StatCard label="שריונים פעילות" value={data.stats.activeReservations} accent="text-sky-700" />
-        <StatCard label="בתחזוקה" value={data.stats.maintenance} accent="text-orange-700" />
-        <StatCard label="השאלות פעילות" value={data.stats.activeLoans} accent="text-violet-700" />
+        <StatCard label="סה״כ כלים" value={data.stats.totalTools} bar="bg-kerem-800" />
+        <StatCard label="זמינים" value={data.stats.available} accent="text-olive" bar="bg-olive" />
+        <StatCard label="מושאלים" value={data.stats.onLoan} accent="text-accent-800" bar="bg-accent" />
+        <StatCard label="שריונים פעילות" value={data.stats.activeReservations} bar="bg-kerem-600" />
+        <StatCard label="בתחזוקה" value={data.stats.maintenance} accent="text-accent-800" bar="bg-accent" />
+        <StatCard label="השאלות פעילות" value={data.stats.activeLoans} accent="text-olive" bar="bg-olive" />
         <StatCard
           label="דיווחי בעיות"
           value={data.stats.openProblemReports}
           accent={data.stats.openProblemReports > 0 ? "text-red-700" : undefined}
+          bar={data.stats.openProblemReports > 0 ? "bg-red-700" : "bg-kerem-200"}
         />
         <StatCard
           label="קנסות שלא שולמו"
           value={data.stats.unpaidLateFees}
+          bar={data.stats.unpaidLateFees > 0 ? "bg-accent" : "bg-kerem-200"}
           accent={data.stats.unpaidLateFees > 0 ? "text-red-700" : undefined}
         />
       </div>
@@ -380,10 +394,14 @@ export function AdminDashboardView({
       />
 
       <section className="mb-10">
-        <h2 className="mb-4 text-lg font-bold text-stone-900">שריונים פעילות</h2>
+        <h2 className="mb-1 text-lg font-bold text-stone-900">שריונים פעילות</h2>
+        <p className="mb-4 text-sm text-[var(--muted)]">
+          שריון שלא נלקח יורד מהרשימה שעתיים אחרי מועד האיסוף, והכלי חוזר למלאי.
+        </p>
         {data.activeReservations.length === 0 ? (
           <Card>
             <CardBody className="py-8 text-center text-[var(--muted)]">
+              <ToolMark className="mx-auto mb-3 h-16 w-28" />
               אין שריונים פעילות כרגע
             </CardBody>
           </Card>
@@ -392,32 +410,34 @@ export function AdminDashboardView({
             {data.activeReservations.map((reservation) => {
               const units = reservation.quantity ?? 1;
               return (
-                <Card key={reservation.id}>
-                  <CardBody className="py-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-bold text-stone-900">
-                          {reservation.toolName}
-                          <CountBadge count={units} />
-                          {units > 1 && (
-                            <span className="mr-1 text-sm font-semibold text-kerem-700">
-                              ({units} יחידות)
-                            </span>
-                          )}
-                        </p>
-                        <p className="mt-1 text-sm text-stone-700">{reservation.memberName}</p>
-                        <p className="text-xs text-[var(--muted)]">{reservation.memberEmail}</p>
+                <Card key={reservation.id} className="overflow-hidden">
+                  <div className="flex min-h-[8.5rem]">
+                    <DateSlip label="איסוף" iso={reservation.pickupDate} />
+                    <CardBody className="min-w-0 flex-1 py-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="font-bold text-stone-900">
+                            {reservation.toolName}
+                            <CountBadge count={units} />
+                            {units > 1 && (
+                              <span className="mr-1 text-sm font-semibold text-kerem-700">
+                                ({units} יחידות)
+                              </span>
+                            )}
+                          </p>
+                          <p className="mt-1 text-sm text-stone-700">{reservation.memberName}</p>
+                          <p className="truncate text-xs text-[var(--muted)]">{reservation.memberEmail}</p>
+                        </div>
+                        <span className="shrink-0 border border-accent-800/30 bg-accent-50 px-2 py-1 text-[11px] font-bold text-accent-800">
+                          {reservationStatusLabels[reservation.status]}
+                        </span>
                       </div>
-                      <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-800 ring-1 ring-inset ring-amber-200">
-                        {reservationStatusLabels[reservation.status]}
-                      </span>
-                    </div>
-                    <p className="mt-3 space-y-1 text-xs text-[var(--muted)]">
-                      <span className="block">נשמר: {formatDateTime(reservation.createdAt)}</span>
-                      <span className="block">איסוף מתוכנן: {formatDay(reservation.pickupDate)}</span>
-                      <span className="block">החזרה מתוכננת: {formatDay(reservation.returnDate)}</span>
-                    </p>
-                  </CardBody>
+                      <p className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--muted)]">
+                        <span>נשמר: {formatDateTime(reservation.createdAt)}</span>
+                        <span>החזרה: {formatDay(reservation.returnDate)}</span>
+                      </p>
+                    </CardBody>
+                  </div>
                 </Card>
               );
             })}
@@ -430,6 +450,7 @@ export function AdminDashboardView({
         {data.activeLoans.length === 0 ? (
           <Card>
             <CardBody className="py-8 text-center text-[var(--muted)]">
+              <ToolMark className="mx-auto mb-3 h-16 w-28" />
               אין השאלות פעילות כרגע
             </CardBody>
           </Card>
@@ -440,10 +461,12 @@ export function AdminDashboardView({
               const units = loanGroupUnits(group);
               const photos = group.filter((l) => l.checkoutPhotoUrl || l.returnPhotoUrl);
               return (
-                <Card key={loan.id}>
-                  <CardBody className="py-4">
+                <Card key={loan.id} className="overflow-hidden">
+                  <div className="flex min-h-[8.5rem]">
+                    <DateSlip label="החזרה" iso={loan.dueReturnDate} tone="olive" />
+                    <CardBody className="min-w-0 flex-1 py-4">
                     <div className="flex items-start justify-between gap-3">
-                      <div>
+                      <div className="min-w-0">
                         <p className="font-bold text-stone-900">
                           {loan.toolName}
                           <CountBadge count={units} />
@@ -454,15 +477,14 @@ export function AdminDashboardView({
                           )}
                         </p>
                         <p className="mt-1 text-sm text-stone-700">{loan.memberName}</p>
-                        <p className="text-xs text-[var(--muted)]">{loan.memberEmail}</p>
+                        <p className="truncate text-xs text-[var(--muted)]">{loan.memberEmail}</p>
                       </div>
-                      <span className="shrink-0 rounded-full bg-violet-100 px-2.5 py-1 text-xs font-bold text-violet-800 ring-1 ring-inset ring-violet-200">
+                      <span className="shrink-0 border border-olive/30 bg-olive-100 px-2 py-1 text-[11px] font-bold text-olive">
                         {loanStatusLabels[loan.status]}
                       </span>
                     </div>
-                    <p className="mt-3 space-y-1 text-xs text-[var(--muted)]">
-                      <span className="block">לקיחה בפועל: {formatDateTime(loan.checkedOutAt)}</span>
-                      <span className="block">החזרה מתוכננת: {formatDay(loan.dueReturnDate)}</span>
+                    <p className="mt-3 text-xs text-[var(--muted)]">
+                      לקיחה בפועל: {formatDateTime(loan.checkedOutAt)}
                     </p>
                     {photos.length > 0 && (
                       <div className="mt-3 flex flex-wrap gap-2">
@@ -478,7 +500,8 @@ export function AdminDashboardView({
                         ))}
                       </div>
                     )}
-                  </CardBody>
+                    </CardBody>
+                  </div>
                 </Card>
               );
             })}

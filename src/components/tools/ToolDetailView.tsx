@@ -45,18 +45,18 @@ export function ToolDetailView({ kind }: { kind: ToolKindWithAvailability }) {
       <BackLink href="/tools">חזרה לכלים</BackLink>
 
       <Card>
-        <div className="h-1 bg-kerem-600" />
         <CardBody className="py-6">
           <ToolImageGallery
             imageUrl={kind.imageUrl}
             imageUrls={kind.imageUrls}
             alt={kind.name}
+            category={kind.category}
           />
 
           <div className="mb-5 mt-6 flex items-start justify-between gap-4">
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <p className="text-xs font-bold uppercase tracking-widest text-[var(--muted)]">
+                <p className="text-xs font-bold text-[var(--muted)]">
                   {kind.category}
                 </p>
                 {popular && (

@@ -18,6 +18,8 @@
   --color-accent-50: #faf1ea;
   --color-accent-100: #f3d9c8;
   --color-accent-800: #8a3d1f;
+  --color-olive: #6e7a46;
+  --color-olive-100: #e6ead9;
   --font-sans: var(--font-heebo), system-ui, sans-serif;
 }
 
@@ -33,13 +35,9 @@
 }
 
 body {
-  background: var(--background);
+  background: #f4efe6;
   color: var(--foreground);
   font-family: var(--font-sans);
-  background-image:
-    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(30, 43, 66, 0.07), transparent),
-    radial-gradient(ellipse 60% 40% at 100% 100%, rgba(196, 106, 58, 0.07), transparent);
-  background-attachment: fixed;
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior-y: none;
 }

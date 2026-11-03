@@ -11,6 +11,7 @@ import { JoinMembershipBanner } from "@/components/membership/JoinMembershipBann
 import { isPaidMember } from "@/lib/membership";
 import { formatCredits } from "@/lib/pots";
 import type { CreditLedgerEntry, PeerDebtSummary } from "@/lib/types";
+import { BrandStripe, ToolMark } from "@/components/brand/Marks";
 
 type StatementEntry = CreditLedgerEntry & { toolName?: string };
 type DirectoryMember = { id: string; name: string };
@@ -195,10 +196,11 @@ export default function AccountContent() {
         description="כל התנועות ביתרה — טעינות קרדיט, תשלומים והלוואות בין חברים."
       />
 
-      <Card className="mb-6 border-emerald-200 bg-emerald-50 shadow-sm">
-        <CardBody className="py-6 text-center">
-          <p className="text-sm font-semibold text-emerald-800">היתרה שלך</p>
-          <p className="mt-1 text-4xl font-bold text-emerald-900">{formatCredits(balance)}</p>
+      <Card className="mb-6 overflow-hidden">
+        <BrandStripe />
+        <CardBody className="bg-[#f7f3ea] py-6 text-center">
+          <p className="text-sm font-semibold text-kerem-700">היתרה שלך</p>
+          <p className="mt-1 text-4xl font-bold text-kerem-900">{formatCredits(balance)}</p>
         </CardBody>
       </Card>
 
@@ -380,7 +382,7 @@ export default function AccountContent() {
           {entries.length === 0 ? (
             <Card className="border-dashed">
               <CardBody className="py-16 text-center">
-                <span className="mb-4 inline-block text-5xl">🧾</span>
+                <ToolMark className="mx-auto mb-4 h-16 w-28" />
                 <p className="text-lg font-semibold text-stone-800">אין תנועות עדיין</p>
                 <p className="mt-1 text-sm text-[var(--muted)]">
                   כאן יופיעו טעינות קרדיט, תשלומים והשאלות שביצעתם.

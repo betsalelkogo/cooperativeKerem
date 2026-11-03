@@ -14,6 +14,7 @@ import { useAuth } from "@/contexts/AuthProvider";
 import { authFetch } from "@/lib/api-client";
 import { compressImageFile } from "@/lib/compress-image";
 import type { Loan, Reservation, Tool } from "@/lib/types";
+import { DateSlip } from "@/components/brand/Marks";
 
 export interface LoanWithTool {
   loan: Loan;
@@ -48,13 +49,11 @@ export function ReservationCard({
   const checkoutGate = canStartCheckout(reservation, tool);
 
   return (
-    <Card>
-      <CardBody className="flex flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-4">
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-accent-50 text-sm font-bold text-accent-800">
-            שריון
-          </span>
-          <div>
+    <Card className="overflow-hidden">
+      <div className="flex">
+        <DateSlip label="איסוף" iso={reservation.pickupDate} />
+        <CardBody className="flex min-w-0 flex-1 flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
             <p className="font-bold text-stone-900">{tool?.name ?? reservation.toolId}</p>
             <p className="text-sm text-[var(--muted)]">
               {reservation.cancelReason === "no_show"
@@ -75,7 +74,6 @@ export function ReservationCard({
               </p>
             )}
           </div>
-        </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           {tool && <StatusBadge status={tool.status} />}
           {onCancel && (
@@ -105,7 +103,8 @@ export function ReservationCard({
             </span>
           )}
         </div>
-      </CardBody>
+        </CardBody>
+      </div>
     </Card>
   );
 }
@@ -177,13 +176,11 @@ export function LoanCard({ loan, tool, canExtend, extendFee, getToken, onPhotoAd
   }
 
   return (
-    <Card>
-      <CardBody className="flex flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-4">
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-kerem-100 text-sm font-bold text-kerem-800">
-            השאלה
-          </span>
-          <div>
+    <Card className="overflow-hidden">
+      <div className="flex">
+        <DateSlip label="החזרה" iso={loan.dueReturnDate} tone="olive" />
+        <CardBody className="flex min-w-0 flex-1 flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
             <p className="font-bold text-stone-900">{tool?.name ?? loan.toolId}</p>
             <p className="text-sm text-[var(--muted)]">{loanStatusLabels[loan.status]}</p>
             {loan.checkedOutAt && (
@@ -209,7 +206,6 @@ export function LoanCard({ loan, tool, canExtend, extendFee, getToken, onPhotoAd
               <p className="text-xs text-sky-700">{extraPhotos} צילומים נוספים בתיעוד</p>
             )}
           </div>
-        </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           {tool && <StatusBadge status={tool.status} />}
           {loan.status === "active" && getToken && (
@@ -257,7 +253,8 @@ export function LoanCard({ loan, tool, canExtend, extendFee, getToken, onPhotoAd
             </Link>
           )}
         </div>
-      </CardBody>
+        </CardBody>
+      </div>
     </Card>
   );
 }
@@ -343,18 +340,11 @@ export function LoanGroupCard({ items, getToken, onPhotoAdded }: LoanGroupCardPr
   }
 
   return (
-    <Card>
-      <CardBody className="flex flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-4">
-          <span className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-kerem-100 text-sm font-bold text-kerem-800">
-            השאלה
-            {count > 1 && (
-              <span className="absolute -left-2 -top-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-kerem-700 px-1.5 text-xs font-bold text-white">
-                ×{count}
-              </span>
-            )}
-          </span>
-          <div>
+    <Card className="overflow-hidden">
+      <div className="flex">
+        <DateSlip label="החזרה" iso={loan.dueReturnDate} tone="olive" />
+        <CardBody className="flex min-w-0 flex-1 flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
             <p className="font-bold text-stone-900">
               {tool?.name ?? loan.toolId}
               {count > 1 && (
@@ -383,7 +373,6 @@ export function LoanGroupCard({ items, getToken, onPhotoAdded }: LoanGroupCardPr
               <p className="text-xs text-sky-700">{extraPhotos} צילומים נוספים בתיעוד</p>
             )}
           </div>
-        </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           {tool && <StatusBadge status={tool.status} />}
           {loan.status === "active" && docCount === 1 && getToken && (
@@ -431,7 +420,8 @@ export function LoanGroupCard({ items, getToken, onPhotoAdded }: LoanGroupCardPr
             </Link>
           )}
         </div>
-      </CardBody>
+        </CardBody>
+      </div>
     </Card>
   );
 }

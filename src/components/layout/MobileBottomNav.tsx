@@ -7,19 +7,20 @@ import { isAdminMember, isBoardMember, isGemachAdmin, isPlatformAdmin } from "@/
 import { isPaidMember } from "@/lib/membership";
 import { cn } from "@/lib/cn";
 import type { Member } from "@/lib/types";
+import { NavGlyph } from "@/components/brand/Marks";
 
 const baseTabs = [
-  { href: "/tools", label: "כלים", icon: "🔧", match: (p: string) => p.startsWith("/tools") },
+  { href: "/tools", label: "כלים", glyph: "tools" as const, match: (p: string) => p.startsWith("/tools") },
   {
     href: "/my-reservations",
     label: "שריונים",
-    icon: "📅",
+    glyph: "calendar" as const,
     match: (p: string) => p.startsWith("/my-reservations"),
   },
   {
     href: "/my-loans",
     label: "השאלות",
-    icon: "📋",
+    glyph: "clipboard" as const,
     match: (p: string) => p.startsWith("/my-loans") || p.startsWith("/return"),
   },
 ];
@@ -27,21 +28,21 @@ const baseTabs = [
 const accessTab = {
   href: "/access",
   label: "גישה",
-  icon: "🔑",
+  glyph: "key" as const,
   match: (p: string) => p.startsWith("/access"),
 };
 
 const platformAdminTab = {
   href: "/admin",
   label: "ניהול",
-  icon: "⚙️",
+  glyph: "house" as const,
   match: (p: string) => p.startsWith("/admin") && !p.startsWith("/admin/gemach"),
 };
 
 const gemachAdminTab = {
   href: "/admin/gemach",
   label: "ניהול",
-  icon: "⚙️",
+  glyph: "house" as const,
   match: (p: string) => p.startsWith("/admin/gemach"),
 };
 
@@ -88,7 +89,7 @@ export function MobileBottomNav() {
               {active && (
                 <span className="absolute inset-x-3 top-0 h-0.5 rounded-full bg-kerem-600" />
               )}
-              <span className="text-[22px] leading-none">{tab.icon}</span>
+              <NavGlyph name={tab.glyph} />
               <span className={cn("text-[10px] font-bold leading-tight", active && "text-kerem-700")}>
                 {tab.label}
               </span>

@@ -6,6 +6,7 @@ import { Card, CardBody, CardFooter } from "@/components/ui/Card";
 import { ToolBorrowActions } from "@/components/tools/ToolBorrowActions";
 import { ExpandableText } from "@/components/ui/ExpandableText";
 import { cn } from "@/lib/cn";
+import { ToolMark } from "@/components/brand/Marks";
 
 export function ToolCard({ kind }: { kind: ToolKindWithAvailability }) {
   const priceLabel = kind.priceLabel ?? "—";
@@ -23,13 +24,15 @@ export function ToolCard({ kind }: { kind: ToolKindWithAvailability }) {
           />
         </div>
       ) : (
-        <div className="h-1 bg-kerem-600" />
+        <div className="flex h-36 items-end justify-center bg-[#f7f3ea]">
+          <ToolMark category={kind.category} className="h-28 w-44" />
+        </div>
       )}
       <CardBody className="pb-4">
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+              <p className="text-xs font-semibold text-[var(--muted)]">
                 {kind.category}
               </p>
               {kind.gemachName && (

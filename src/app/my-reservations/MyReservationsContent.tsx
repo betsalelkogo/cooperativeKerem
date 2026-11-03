@@ -14,6 +14,7 @@ import {
   type ReservationWithTool,
 } from "@/components/my-activity/ActivityCards";
 import { formatCredits } from "@/lib/pots";
+import { ToolMark } from "@/components/brand/Marks";
 
 export default function MyReservationsContent() {
   const { getIdToken, user, refreshMember } = useAuth();
@@ -110,7 +111,7 @@ export default function MyReservationsContent() {
       {reservations.length === 0 ? (
         <Card className="border-dashed">
           <CardBody className="py-16 text-center">
-            <span className="mb-4 inline-block text-5xl">📅</span>
+            <ToolMark className="mx-auto mb-4 h-16 w-28" />
             <p className="text-lg font-semibold text-stone-800">אין שריונים פעילות</p>
             <p className="mt-1 text-sm text-[var(--muted)]">
               שריינו כלי מהקטלוג — השריון יופיע כאן עד הלקיחה.
