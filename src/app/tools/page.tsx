@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { CatalogLoader } from "@/components/tools/CatalogLoader";
 import { AddGemachPromo } from "@/components/gemach/AddGemachPromo";
 import { CaravanCodeBanner } from "@/components/access/CaravanCodeBanner";
@@ -13,7 +14,7 @@ export default function ToolsPage() {
           <div>
             <h1 className="text-3xl font-bold text-stone-900">כלים זמינים</h1>
             <p className="mt-1 text-sm leading-relaxed text-[var(--muted)]">
-              בחרו כלי לשריון ואיסוף מהקרוואן הקהילתי.
+              חפשו כלי או בחרו קטגוריה, ואז שריינו לאיסוף מהקרוואן.
             </p>
           </div>
         </div>
@@ -22,7 +23,15 @@ export default function ToolsPage() {
 
       <AddGemachPromo />
       <CaravanCodeBanner />
-      <CatalogLoader />
+      <Suspense
+        fallback={
+          <div className="flex justify-center py-20">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-kerem-200 border-t-kerem-700" />
+          </div>
+        }
+      >
+        <CatalogLoader />
+      </Suspense>
     </div>
   );
 }
